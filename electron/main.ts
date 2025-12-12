@@ -451,7 +451,9 @@ ipcMain.handle('get-video-info', async (event: any, url: any) => {
         }
 
         if (isRadioMix) {
-            args.push('--no-playlist');
+            // Allow mixes to be parsed as playlists
+            args.push('--flat-playlist');
+            args.push('--playlist-items', '1:50');
         } else if (isRegularPlaylist) {
             args.push('--flat-playlist');
             args.push('--playlist-items', '1:50');
@@ -569,7 +571,7 @@ ipcMain.handle('download-video', async (event: any, { url, formatId, title, plat
 
         // Determine content type from URL patterns
         let detectedContentType = contentType || 'video';
-        if (formatId === 'audio') {
+        if (formatId && formatId.startsWith('audio_')) {
             detectedContentType = 'audio';
         } else if (url.includes('/reel/') || url.includes('/reels/')) {
             detectedContentType = 'reels';
@@ -586,6 +588,7 @@ ipcMain.handle('download-video', async (event: any, { url, formatId, title, plat
         // Get organized download path
         const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType);
         const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
+        const ext = (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4');
         const outputTemplate = path.join(downloadPath, `${safeTitle}.%(ext)s`);
 
         const args = [
@@ -618,8 +621,12 @@ ipcMain.handle('download-video', async (event: any, { url, formatId, title, plat
             args.push('--cookies', path.join(app.getPath('userData'), 'cookies.txt'));
         }
 
-        if (formatId === 'audio') {
-            args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0');
+        if (formatId && formatId.startsWith('audio_')) {
+            let quality = '5'; // Standard default
+            if (formatId === 'audio_best') quality = '0';
+            if (formatId === 'audio_low') quality = '9';
+
+            args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality);
 
             // Try to embed thumbnail if FFmpeg is available
             const hasFFmpeg = await ensureFFmpeg();
@@ -634,10 +641,15 @@ ipcMain.handle('download-video', async (event: any, { url, formatId, title, plat
                 console.log('FFmpeg not available, skipping thumbnail embedding');
             }
         } else {
+            // FORCE MP4 and H264 priority
+            // Use --merge-output-format mp4 to ensure WebM streams are converted/merged to MP4
+            args.push('--merge-output-format', 'mp4');
+
             if (formatId && formatId !== 'best') {
                 args.push('-f', `${formatId}+bestaudio/best`);
             } else {
-                args.push('-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / b[ext=mp4]');
+                // User suggested fix: Sort h264/aac mp4 formats ahead of others
+                args.push('-S', 'vcodec:h264,res,acodec:m4a');
             }
         }
 
@@ -706,9 +718,14 @@ ipcMain.handle('proxy-image', async (event: any, url: string) => {
     }
 });
 
+import { config } from 'dotenv';
+
+// Load env vars from root directory
+config({ path: path.join(__dirname, '../.env') });
+
 // ============ SPOTIFY API INTEGRATION ============
-const SPOTIFY_CLIENT_ID = '8bd6f4709ce348e7bfe9b564faf88ccb';
-const SPOTIFY_CLIENT_SECRET = '8b84e063943e45c39528c37dbfed037d';
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
 
 let spotifyAccessToken: string | null = null;
 let spotifyTokenExpiry: number = 0;

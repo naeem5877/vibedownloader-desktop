@@ -399,7 +399,9 @@ ipcMain.handle('get-video-info', async (event, url) => {
             console.log('Using legacy cookies.txt');
         }
         if (isRadioMix) {
-            args.push('--no-playlist');
+            // Allow mixes to be parsed as playlists
+            args.push('--flat-playlist');
+            args.push('--playlist-items', '1:50');
         }
         else if (isRegularPlaylist) {
             args.push('--flat-playlist');
@@ -526,7 +528,7 @@ ipcMain.handle('download-video', async (event, { url, formatId, title, platform,
             detectedPlatform = 'x';
         // Determine content type from URL patterns
         let detectedContentType = contentType || 'video';
-        if (formatId === 'audio') {
+        if (formatId && formatId.startsWith('audio_')) {
             detectedContentType = 'audio';
         }
         else if (url.includes('/reel/') || url.includes('/reels/')) {
@@ -547,6 +549,7 @@ ipcMain.handle('download-video', async (event, { url, formatId, title, platform,
         // Get organized download path
         const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType);
         const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
+        const ext = (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4');
         const outputTemplate = path_1.default.join(downloadPath, `${safeTitle}.%(ext)s`);
         const args = [
             url,
@@ -577,8 +580,13 @@ ipcMain.handle('download-video', async (event, { url, formatId, title, platform,
         else if (!cookiePath && fs_1.default.existsSync(path_1.default.join(app.getPath('userData'), 'cookies.txt'))) {
             args.push('--cookies', path_1.default.join(app.getPath('userData'), 'cookies.txt'));
         }
-        if (formatId === 'audio') {
-            args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0');
+        if (formatId && formatId.startsWith('audio_')) {
+            let quality = '5'; // Standard default
+            if (formatId === 'audio_best')
+                quality = '0';
+            if (formatId === 'audio_low')
+                quality = '9';
+            args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality);
             // Try to embed thumbnail if FFmpeg is available
             const hasFFmpeg = await ensureFFmpeg();
             if (hasFFmpeg) {
@@ -594,11 +602,15 @@ ipcMain.handle('download-video', async (event, { url, formatId, title, platform,
             }
         }
         else {
+            // FORCE MP4 and H264 priority
+            // Use --merge-output-format mp4 to ensure WebM streams are converted/merged to MP4
+            args.push('--merge-output-format', 'mp4');
             if (formatId && formatId !== 'best') {
                 args.push('-f', `${formatId}+bestaudio/best`);
             }
             else {
-                args.push('-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / b[ext=mp4]');
+                // User suggested fix: Sort h264/aac mp4 formats ahead of others
+                args.push('-S', 'vcodec:h264,res,acodec:m4a');
             }
         }
         console.log("Starting download with args:", args);

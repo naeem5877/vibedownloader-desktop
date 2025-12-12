@@ -434,23 +434,97 @@ export function Downloader() {
 
     const isPlaylist = (metadata?.contentType === 'playlist' || (metadata?.contentType === 'story' && (metadata?.entries?.length || 0) > 1)) && metadata?.entries && metadata.entries.length > 0;
 
+    // Bulk download (Playlist)
+    const handleBulkDownload = async (type: 'video' | 'audio_best' | 'audio_standard' | 'audio_low') => {
+        if (downloading || selectedItems.size === 0) return;
+
+        setDownloading(true);
+        setError(null);
+
+        const itemsToDownload = filteredEntries.filter(e => selectedItems.has(e.id));
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < itemsToDownload.length; i++) {
+            const item = itemsToDownload[i];
+            setDownloadingId(item.id);
+            // Update checking status
+            setProgress({ percent: 0, speed: `Processing ${i + 1}/${itemsToDownload.length}` });
+
+            try {
+                // Determine format
+                const formatId = type === 'video' ? 'best' : type;
+
+                // For Spotify, we need special handling if we want to support it in bulk, 
+                // but currently spotify is single track search mostly or playlist.
+                // Assuming standard video download for now as Spotify logic is separate.
+                if (isSpotify) {
+                    await window.electron.downloadSpotifyTrack({
+                        searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
+                        title: item.title,
+                        artist: item.artist || ''
+                    });
+                } else {
+                    await window.electron.downloadVideo({
+                        url: item.url,
+                        formatId: formatId,
+                        title: item.title,
+                        platform: currentPlatform.id
+                    });
+                }
+                successCount++;
+            } catch (e: any) {
+                console.error(`Failed to download ${item.title}`, e);
+                failCount++;
+            }
+        }
+
+        setDownloading(false);
+        setDownloadingId(null);
+        setProgress(null);
+
+        // Show summary notification
+        if (failCount === 0) {
+            // We rely on main process notifications for success, but maybe a summary alert?
+            // alert(`All ${successCount} items downloaded successfully!`);
+        } else {
+            alert(`Download complete. Success: ${successCount}, Failed: ${failCount}`);
+        }
+    };
+
     // Download buttons component for reuse
     const DownloadActions = ({ showLabels = true }: { showLabels?: boolean }) => (
-        <div className="flex gap-2">
-            <button
-                onClick={() => alert(`Downloading ${selectedItems.size} audio files... (Coming soon!)`)}
-                disabled={selectedItems.size === 0 || downloading}
-                className="flex-1 h-10 bg-green-500/20 border border-green-500/30 rounded-xl font-medium text-sm text-green-400 flex items-center justify-center gap-2 cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-                <Music className="w-4 h-4" /> {showLabels && `Audio (${selectedItems.size})`}
-            </button>
+        <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+                <button
+                    onClick={() => handleBulkDownload('audio_best')}
+                    disabled={selectedItems.size === 0 || downloading}
+                    className="flex-1 h-10 bg-green-500/20 border border-green-500/30 rounded-xl font-medium text-xs text-green-400 flex items-center justify-center gap-1.5 cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                    <Music className="w-3.5 h-3.5" /> Best
+                </button>
+                <button
+                    onClick={() => handleBulkDownload('audio_standard')}
+                    disabled={selectedItems.size === 0 || downloading}
+                    className="flex-1 h-10 bg-green-500/20 border border-green-500/30 rounded-xl font-medium text-xs text-green-400 flex items-center justify-center gap-1.5 cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                    <Music className="w-3.5 h-3.5" /> Std
+                </button>
+                <button
+                    onClick={() => handleBulkDownload('audio_low')}
+                    disabled={selectedItems.size === 0 || downloading}
+                    className="flex-1 h-10 bg-green-500/20 border border-green-500/30 rounded-xl font-medium text-xs text-green-400 flex items-center justify-center gap-1.5 cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                    <Music className="w-3.5 h-3.5" /> Low
+                </button>
+            </div>
             {!isSpotify && (
                 <button
-                    onClick={() => alert(`Downloading ${selectedItems.size} video files... (Coming soon!)`)}
+                    onClick={() => handleBulkDownload('video')}
                     disabled={selectedItems.size === 0 || downloading}
-                    className="flex-1 h-10 bg-blue-500/20 border border-blue-500/30 rounded-xl font-medium text-sm text-blue-400 flex items-center justify-center gap-2 cursor-pointer hover:bg-blue-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full h-10 bg-blue-500/20 border border-blue-500/30 rounded-xl font-medium text-sm text-blue-400 flex items-center justify-center gap-2 cursor-pointer hover:bg-blue-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                    <Film className="w-4 h-4" /> {showLabels && `Video (${selectedItems.size})`}
+                    <Film className="w-4 h-4" /> {showLabels && `Download Video (${selectedItems.size})`}
                 </button>
             )}
         </div>
@@ -458,7 +532,7 @@ export function Downloader() {
 
     return (
         <div className="w-full h-full bg-[#0a0a0a] text-white overflow-y-auto overflow-x-hidden relative">
-            <div className="max-w-2xl mx-auto px-6 py-10 relative">
+            <div className="max-w-2xl mx-auto px-6 pt-10 pb-24 relative">
                 {/* Settings Button - Top Right of Content Area */}
                 <button
                     onClick={() => setShowSettings(true)}
@@ -701,15 +775,30 @@ export function Downloader() {
                                         </button>
                                     )}
 
-                                    {/* Regular Audio */}
                                     {!isSpotify && (
-                                        <button onClick={() => handleDownload('audio')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-lg bg-green-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
-                                                <div className="text-left"><p className="font-medium text-sm">Audio Only</p><p className="text-xs text-white/40">MP3 • Best Quality</p></div>
-                                            </div>
-                                            <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                        </button>
+                                        <>
+                                            <button onClick={() => handleDownload('audio_best')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-9 h-9 rounded-lg bg-green-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
+                                                    <div className="text-left"><p className="font-medium text-sm">Audio (Best)</p><p className="text-xs text-white/40">~320kbps • High Quality</p></div>
+                                                </div>
+                                                <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                            </button>
+                                            <button onClick={() => handleDownload('audio_standard')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-green-400/80" /></div>
+                                                    <div className="text-left"><p className="font-medium text-sm">Audio (Standard)</p><p className="text-xs text-white/40">~128kbps • Balanced</p></div>
+                                                </div>
+                                                <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                            </button>
+                                            <button onClick={() => handleDownload('audio_low')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-yellow-400" /></div>
+                                                    <div className="text-left"><p className="font-medium text-sm">Audio (Low)</p><p className="text-xs text-white/40">~64kbps • Save Data</p></div>
+                                                </div>
+                                                <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                            </button>
+                                        </>
                                     )}
 
                                     {/* All video formats */}

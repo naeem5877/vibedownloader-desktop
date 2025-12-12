@@ -31,7 +31,7 @@
 
 ## 🚀 Overview
 
-**VibeDownloader** is a beautiful, modern desktop application that lets you download videos and audio from YouTube, Instagram, TikTok, Facebook, Spotify, and 1000+ other sites. Built with **Electron**, **React**, and **yt-dlp**, it offers a premium ad-free experience that respects your privacy.
+**VibeDownloader** is a beautiful, modern desktop application that lets you download videos and audio from YouTube, Instagram, TikTok, Facebook, Spotify, X (Twitter), Pinterest, SoundCloud. Built with **Electron**, **React**, and **yt-dlp**, it offers a premium ad-free experience that respects your privacy.
 
 Unlike other downloaders, VibeDownloader is 100% open source. You can trust the code running on your machine.
 

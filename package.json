@@ -1,6 +1,6 @@
 {
   "name": "vibe-downloader",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Premium YouTube Downloader",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
+    "dotenv": "^17.2.3",
     "electron-updater": "^6.6.2",
     "framer-motion": "^12.23.25",
     "lucide-react": "^0.556.0",
@@ -81,7 +82,8 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      ".env"
     ],
     "publish": {
       "provider": "github",
