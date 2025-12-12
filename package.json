@@ -1,0 +1,145 @@
+{
+  "name": "vibe-downloader",
+  "version": "1.0.0",
+  "description": "Premium YouTube Downloader",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "author": "VibeDownloader Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/naeem5877/vibedownloader-desktop.git"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:electron\"",
+    "dev:server": "vite",
+    "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && echo {\"type\":\"commonjs\"}>dist-electron/package.json && electron .",
+    "build": "tsc -b && vite build",
+    "build:electron": "tsc -p electron/tsconfig.json && echo {\"type\":\"commonjs\"}>dist-electron/package.json",
+    "pack": "npm run build && npm run build:electron && electron-builder",
+    "pack:win": "npm run build && npm run build:electron && electron-builder --win",
+    "pack:mac": "npm run build && npm run build:electron && electron-builder --mac",
+    "pack:linux": "npm run build && npm run build:electron && electron-builder --linux",
+    "pack:all": "npm run build && npm run build:electron && electron-builder --win --mac --linux",
+    "release": "npm run build && npm run build:electron && electron-builder --publish always",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "electron-updater": "^6.6.2",
+    "framer-motion": "^12.23.25",
+    "lucide-react": "^0.556.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-icons": "^5.5.0",
+    "yt-dlp-wrap": "^2.3.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tailwindcss/vite": "^4.1.17",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.4",
+    "globals": "^15.11.0",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.2.2",
+    "typescript-eslint": "^8.12.2",
+    "vite": "^5.0.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.vibedownloader.app",
+    "productName": "VibeDownloader",
+    "copyright": "Copyright © 2025 VibeDownloader Team",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "extraResources": [
+      {
+        "from": "build",
+        "to": "build",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "naeem5877",
+      "repo": "vibedownloader-desktop",
+      "releaseType": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "VibeDownloader"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "Utility"
+    }
+  }
+}
