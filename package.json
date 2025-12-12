@@ -4,7 +4,12 @@
   "description": "Premium YouTube Downloader",
   "main": "dist-electron/main.js",
   "type": "module",
-  "author": "VibeDownloader Team",
+  "homepage": "https://vibedownloader.me",
+  "author": {
+    "name": "Naeem",
+    "email": "contact@vibedownloader.me",
+    "url": "https://vibedownloader.me"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/naeem5877/vibedownloader-desktop.git"
@@ -58,7 +63,7 @@
   "build": {
     "appId": "com.vibedownloader.app",
     "productName": "VibeDownloader",
-    "copyright": "Copyright © 2025 VibeDownloader Team",
+    "copyright": "Copyright © 2026 Naeem",
     "asar": true,
     "directories": {
       "output": "release",
