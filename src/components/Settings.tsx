@@ -119,7 +119,7 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
                             <div className="flex items-start gap-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                                 <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                                 <p className="text-xs text-blue-300/80 leading-relaxed">
-                                    Files are organized in <b>VibeDownloader</b> folder with subfolders for each platform and content type (videos, reels, stories, playlists, thumbnails).
+                                    Files are organized in <b>VibeDownloader</b> folder with subfolders for each platform and content type (videos, reels, stories, playlists, thumbnails, and music).
                                 </p>
                             </div>
                         </div>
