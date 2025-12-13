@@ -1,120 +1,124 @@
 <div align="center">
+  <a href="https://github.com/naeem5877/vibedownloader-desktop">
+    <img src="public/logo.png" alt="VibeDownloader Logo" width="140" height="auto" />
+  </a>
+  <br />
 
-  <img src="public/logo.png" alt="VibeDownloader Logo" width="120" height="auto" />
   <h1>VibeDownloader</h1>
-
+  
   <p>
-    <strong>The Premium, Open-Source Video Downloader for Windows, macOS, and Linux.</strong>
+    <strong>The Ultimate Open-Source Video Downloader for Windows, macOS, and Linux.</strong>
+  </p>
+  
+  <p>
+    Download videos, audio, and playlists from YouTube, Instagram, TikTok, Spotify, and more in stunning 4K/8K quality. 
+    Experience a premium, ad-free interface designed for speed and privacy.
   </p>
 
   <p>
-    <a href="https://vibedownloader.me"><strong>🌐 Visit Official Website</strong></a>
+    <a href="https://github.com/naeem5877/vibedownloader-desktop">
+      <img src="https://img.shields.io/badge/Get_it_on-GitHub-181717?style=for-the-badge&logo=github" alt="Get it on GitHub" />
+    </a>
+    <a href="https://vibedownloader.me">
+      <img src="https://img.shields.io/badge/Visit-Website-blue?style=for-the-badge&logo=google-chrome" alt="Visit Website" />
+    </a>
   </p>
 
   <p>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/releases/latest">
-      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-desktop?color=blue&style=for-the-badge" alt="Latest Release" />
-    </a>
-    <a href="https://github.com/naeem5877/vibedownloader-desktop/blob/main/LICENSE">
-      <img src="https://img.shields.io/github/license/naeem5877/vibedownloader-desktop?style=for-the-badge" alt="License" />
+      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-desktop?color=2ea44f&style=for-the-badge" alt="Latest Release" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/actions">
       <img src="https://img.shields.io/github/actions/workflow/status/naeem5877/vibedownloader-desktop/build.yml?style=for-the-badge" alt="Build Status" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/releases">
-      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-desktop/total?style=for-the-badge&color=orange" alt="Downloads" />
+      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-desktop/total?style=for-the-badge&color=orange" alt="Total Downloads" />
     </a>
   </p>
 </div>
 
 <br />
 
-## 🚀 Overview
+## 🌟 Why VibeDownloader?
 
-**VibeDownloader** is a beautiful, modern desktop application that lets you download videos and audio from YouTube, Instagram, TikTok, Facebook, Spotify, X (Twitter), Pinterest, SoundCloud. Built with **Electron**, **React**, and **yt-dlp**, it offers a premium ad-free experience that respects your privacy.
+VibeDownloader is built for those who demand quality and privacy. Unlike web-based downloaders filled with ads and popups, VibeDownloader runs locally on your machine, powered by the industry-standard `yt-dlp` engine.
 
-Unlike other downloaders, VibeDownloader is 100% open source. You can trust the code running on your machine.
+### Key Features
 
----
-
-## ✨ Features
-
--   **📸 Instagram & Facebook Private Support**: Download Stories, Reels, and private posts by logging in securely.
--   **🎵 Spotify Integration**: Download tracks and albums directly with metadata.
--   **⚡ Ultra Fast**: Multi-threaded downloads powered by yt-dlp.
--   **🎥 8K/4K Support**: Download videos in the highest available quality.
--   **🎨 Premium UI**: A sleek, dark-themed interface with glassmorphism effects.
--   **🔄 Auto-Updates**: Get the latest features automatically without manual installs.
--   **🔒 Privacy Focused**: No tracking, no ads, no bloatware.
+*   **🎥 Multi-Platform Support**: Download from YouTube, Instagram (Reels, Stories, Posts), TikTok, Facebook, Twitter (X), Pinterest, and SoundCloud.
+*   **🎵 Spotify Integration**: Download tracks, albums, and playlists with automatic metadata and cover art.
+*   **⚡ High Performance**: Multi-threaded downloads ensure you get your files as fast as your connection allows.
+*   **💎 Visual Excellence**: A stunning, modern dark-mode UI with glassmorphism effects and smooth animations.
+*   **🔐 Private & Secure**: Built-in functionality to handle private videos via secure cookie management (Instagram, Facebook).
+*   **📦 Smart Organization**: Automatically organizes your downloads into folders by platform and type (Video, Audio, Shorts, etc.).
+*   **🛑 Ad-Free**: No ads, no trackers, no nonsense. Just pure downloading.
 
 ---
 
-## 📥/Download & Installation
+## 📥 Download & Installation
 
 ### Windows
-1.  Go to the [Releases Page](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
-2.  Download `VibeDownloader-Setup-x.x.x.exe`.
-3.  Run the installer.
+1.  Download the latest installer (`.exe`) from the [Releases Page](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
+2.  Run the installer. VibeDownloader will automatically launch.
 
-### macOS & Linux
-*Coming soon! Check releases for experimental builds.*
+### macOS
+1.  Download the `.dmg` file from the [Releases Page](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
+2.  Drag VibeDownloader to your Applications folder.
+
+### Linux
+1.  Download the `.AppImage` or `.deb` file from the [Releases Page](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
+2.  For AppImage: `chmod +x VibeDownloader-x.x.x.AppImage` and run it.
 
 ---
 
-## 🛠️ Development
+## 🛠️ For Developers
 
-Want to contribute or build it yourself?
+Interested in contributing? VibeDownloader is built with **Electron**, **React**, **Vite**, and **TypeScript**.
 
 ```bash
 # Clone the repository
 git clone https://github.com/naeem5877/vibedownloader-desktop.git
 
-# Navigate to directory
-cd vibedownloader-desktop
-
 # Install dependencies
 npm install
 
-# Run in development mode
+# Start development server
 npm run dev
+
+# Build for production
+npm run pack:win   # Windows
+npm run pack:mac   # macOS
+npm run pack:linux # Linux
 ```
-
-### Build Commands
-
-| Command | Description |
-| :--- | :--- |
-| `npm run dev` | Start development server |
-| `npm run pack:win` | Build for Windows |
-| `npm run pack:mac` | Build for macOS |
-| `npm run pack:linux` | Build for Linux |
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please check our [Contribution Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
+We love contributions! Whether it's fixing bugs, improving the UI, or adding new features, your help is welcome.
 
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
+1.  Fork the repository.
+2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3.  Commit your changes.
+4.  Push to the branch.
+5.  Open a Pull Request.
+
+Please review our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
 ---
 
-## 📄 License & Legal
+## 📄 License & Usage
 
-**The Code**: Distributed under the **GNU GPLv3 License**. You can view, modify, and distribute the code under the same open-source terms.
+**The Code (GPLv3)**: This project is open-source under the GNU General Public License v3.0. You are free to view, modify, and distribute the code under these terms.
 
-**The Brand**: ⛔ **The "VibeDownloader" name, logo, and design assets are TRADEMARKS of Naeem.**
--   You **CANNOT** use the VibeDownloader logo in your own fork or app.
--   You **CANNOT** publish a clone using the name "VibeDownloader".
--   If you fork this project, you **MUST** rename it and remove all branding.
+**The Brand**: The "VibeDownloader" name, logo, and brand assets are reserved. 
+- If you fork this project to publish your own version, please use your own name and logo.
+- This helps users distinguish between the official release and community forks.
 
-*This ensures user trust: If it has the VibeDownloader Logo, it's the official, safe version.*
+Thank you for respecting our brand! ❤️
 
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/naeem5877">Naeem</a></sub>
+  <sub>Built with passion by <a href="https://github.com/naeem5877">Naeem</a></sub>
 </div>
