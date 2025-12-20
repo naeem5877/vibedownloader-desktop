@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5] - 2025-12-21
+
+### ✨ Features & Improvements
+- **Enhanced Thumbnails**: Improved thumbnail extraction and embedding.
+- **Turbo Downloads**: Optimized download engine for faster speeds.
+- **Improved Progress Bar**: More accurate progress tracking and UI feedback.
+
 ## [1.0.4] - 2025-12-13
 
 ### 🚀 Major Refactor & Cleanup
