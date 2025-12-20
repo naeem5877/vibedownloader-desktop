@@ -29,11 +29,16 @@ jobs:
         run: npm install
 
       - name: Build & Release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPOTIFY_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
         run: |
-          echo "SPOTIFY_CLIENT_ID=${{ secrets.SPOTIFY_CLIENT_ID }}" > .env
-          echo "SPOTIFY_CLIENT_SECRET=${{ secrets.SPOTIFY_CLIENT_SECRET }}" >> .env
+          cat <<EOF > .env
+          SPOTIFY_CLIENT_ID=$SPOTIFY_ID
+          SPOTIFY_CLIENT_SECRET=$SPOTIFY_SECRET
+          EOF
           npm run build
           npm run build:electron
           npx electron-builder --publish always

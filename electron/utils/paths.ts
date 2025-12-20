@@ -20,6 +20,11 @@ export function loadSettings(): AppSettings {
     return { downloadBasePath: app.getPath('downloads') };
 }
 
+function getDownloadPath(): string {
+    const settings = loadSettings();
+    return settings.downloadBasePath;
+}
+
 export function saveSettings(settings: AppSettings) {
     try {
         fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2), 'utf-8');

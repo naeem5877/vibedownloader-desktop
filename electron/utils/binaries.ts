@@ -83,7 +83,7 @@ async function downloadFFmpeg(): Promise<boolean> {
 
             https.get(url, (response: any) => {
                 // Handle redirects
-                if (response.statusCode === 301 || response.statusCode === 302) {
+                if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
                     const redirectUrl = response.headers.location;
                     console.log('Redirecting to:', redirectUrl);
                     downloadWithRedirects(redirectUrl, redirectCount + 1);
@@ -159,13 +159,24 @@ export async function ensureFFmpeg(): Promise<boolean> {
         return true;
     }
 
-    // Check if FFmpeg already exists
+    // Check if FFmpeg already exists in custom location
     if (fs.existsSync(ffmpegBinaryPath)) {
         const stats = fs.statSync(ffmpegBinaryPath);
         if (stats.size > 10 * 1024 * 1024) { // FFmpeg should be at least 10MB
             ffmpegAvailable = true;
             return true;
         }
+    }
+
+    // Check system PATH
+    try {
+        const { execSync } = require('child_process');
+        execSync('ffmpeg -version', { stdio: 'ignore' });
+        ffmpegAvailable = true;
+        console.log('FFmpeg found in system PATH');
+        return true;
+    } catch (e) {
+        // Not in PATH
     }
 
     // Download FFmpeg
@@ -183,12 +194,23 @@ export async function ensureFFmpeg(): Promise<boolean> {
 }
 
 export function checkFFmpegOnStartup() {
-    // Check if FFmpeg already exists (don't download yet, just check)
+    // Check custom location
     if (fs.existsSync(ffmpegBinaryPath)) {
         const stats = fs.statSync(ffmpegBinaryPath);
         if (stats.size > 10 * 1024 * 1024) {
             ffmpegAvailable = true;
-            console.log('FFmpeg found:', ffmpegBinaryPath);
+            console.log('FFmpeg found in custom path:', ffmpegBinaryPath);
+            return;
         }
+    }
+
+    // Check system PATH
+    try {
+        const { execSync } = require('child_process');
+        execSync('ffmpeg -version', { stdio: 'ignore' });
+        ffmpegAvailable = true;
+        console.log('FFmpeg found in system PATH');
+    } catch (e) {
+        console.log('FFmpeg not found on startup');
     }
 }

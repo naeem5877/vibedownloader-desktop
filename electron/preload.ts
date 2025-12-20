@@ -57,4 +57,8 @@ contextBridge.exposeInMainWorld('electron', {
     minimize: () => ipcRenderer.invoke('minimize-window'),
     maximize: () => ipcRenderer.invoke('maximize-window'),
     close: () => ipcRenderer.invoke('close-window'),
+
+    // Utilities
+    openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+    copyToClipboard: (text: string) => ipcRenderer.invoke('copy-to-clipboard', text),
 });

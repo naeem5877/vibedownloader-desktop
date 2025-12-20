@@ -60,6 +60,11 @@ function createWindow() {
     });
 }
 
+// Set App User Model ID for Windows notifications
+if (process.platform === 'win32') {
+    app.setAppUserModelId('com.vibedownloader.app');
+}
+
 app.whenReady().then(async () => {
     try {
         await ensureYtDlp();

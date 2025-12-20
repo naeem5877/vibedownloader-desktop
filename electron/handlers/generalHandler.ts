@@ -114,6 +114,25 @@ export function registerGeneralHandlers() {
         }
     });
 
+    ipcMain.handle('open-external', async (event: any, url: string) => {
+        try {
+            await shell.openExternal(url);
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('copy-to-clipboard', async (event: any, text: string) => {
+        try {
+            const { clipboard } = require('electron');
+            clipboard.writeText(text);
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
     // Version & Updates (Application & yt-dlp)
     ipcMain.handle('get-versions', async () => {
         let ytdlpVersion = 'Unknown';

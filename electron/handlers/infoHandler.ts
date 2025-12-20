@@ -82,9 +82,61 @@ export function registerInfoHandlers() {
             }
 
             let thumbnail = raw.thumbnail;
-            if (!thumbnail && raw.thumbnails && raw.thumbnails.length > 0) {
-                const sorted = [...raw.thumbnails].sort((a: any, b: any) => (b.width || 0) - (a.width || 0));
-                thumbnail = sorted[0]?.url || raw.thumbnails[raw.thumbnails.length - 1]?.url;
+            if (raw.thumbnails && raw.thumbnails.length > 0) {
+                // Sort thumbnails by resolution total pixels (fallback reference)
+                const sortedByRes = [...raw.thumbnails].sort((a: any, b: any) =>
+                    ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0))
+                );
+
+                // 1. BEST OPTION: Look for square art from Google Content hosts (lh3.googleusercontent.com, etc.)
+                // These are high-quality, bar-free square covers
+                const googleArt = raw.thumbnails.find((t: any) =>
+                    t.url.includes('googleusercontent.com') || t.url.includes('ggpht.com')
+                );
+
+                if (googleArt && isYoutube) {
+                    // Upgrade resolution to 1200x1200px and FORCE JPEG (-rj)
+                    let highResUrl = googleArt.url;
+                    if (highResUrl.includes('=w')) {
+                        highResUrl = highResUrl.replace(/=w\d+-h\d+/, '=w1200-h1200');
+                        // Add -rj if not present to force JPEG
+                        if (!highResUrl.includes('-rj')) {
+                            highResUrl = highResUrl.split('=').slice(0, -1).join('=') + '=w1200-h1200-rj';
+                        }
+                    } else if (!highResUrl.includes('=')) {
+                        highResUrl += '=w1200-h1200-l90-rj';
+                    }
+                    thumbnail = highResUrl;
+                    console.log('Force JPEG Premium square art selected:', thumbnail);
+                } else {
+                    const isMusic = isYoutube && (url.includes('music.youtube.com') || raw.categories?.includes('Music') || raw.uploader?.endsWith('- Topic'));
+
+                    if (isMusic) {
+                        // 2. Music-specific square check
+                        const squareThumb = raw.thumbnails.find((t: any) => {
+                            if (!t.width || !t.height) return false;
+                            const ratio = t.width / t.height;
+                            return Math.abs(ratio - 1) < 0.05 && t.width >= 300;
+                        });
+
+                        if (squareThumb) {
+                            thumbnail = squareThumb.url.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+                        } else {
+                            // Avoid landscape with bars
+                            thumbnail = sortedByRes.find(t => !t.url.includes('maxresdefault'))?.url || sortedByRes[0].url;
+                            thumbnail = thumbnail?.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+                        }
+                    } else {
+                        // 3. Regular video logic
+                        const potentialSquare = raw.thumbnails.find((t: any) => {
+                            if (!t.width || !t.height) return false;
+                            return t.width === t.height && t.width >= 400;
+                        });
+
+                        thumbnail = potentialSquare?.url || sortedByRes[0].url;
+                        thumbnail = thumbnail?.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+                    }
+                }
             }
 
             if (!thumbnail && raw.entries && raw.entries.length > 0) {

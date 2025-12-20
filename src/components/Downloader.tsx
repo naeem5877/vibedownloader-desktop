@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard, Sparkles, Key, Settings as SettingsIcon, Image, Link2
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard, Sparkles, Key, Settings as SettingsIcon, Image, Link2, FolderOpen
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud } from 'react-icons/fa6';
 import { Settings } from './Settings';
@@ -104,12 +104,16 @@ export function Downloader() {
     const [url, setUrl] = useState('');
     const [currentPlatform, setCurrentPlatform] = useState<Platform>(platforms[0]);
     const [loading, setLoading] = useState(false);
+
+
+    // Initial load
     const [downloading, setDownloading] = useState(false);
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
-    const [progress, setProgress] = useState<{ percent: number; speed?: string; eta?: string } | null>(null);
+    const [progress, setProgress] = useState<{ percent: number; speed?: string; eta?: string; downloaded?: string } | null>(null);
     const [complete, setComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [downloadedFilePath, setDownloadedFilePath] = useState<string | null>(null);
 
     // Cookie features
     const [showCookieModal, setShowCookieModal] = useState(false);
@@ -148,8 +152,14 @@ export function Downloader() {
                 setDownloading(false);
                 setDownloadingId(null);
                 setProgress(null);
+                if (data.path) setDownloadedFilePath(data.path);
             } else if (data.percent !== undefined) {
-                setProgress({ percent: data.percent, speed: data.currentSpeed, eta: data.eta });
+                setProgress({
+                    percent: data.percent,
+                    speed: data.currentSpeed,
+                    eta: data.eta,
+                    downloaded: data.downloaded
+                });
             }
         };
         window.electron.onProgress(handler);
@@ -233,6 +243,7 @@ export function Downloader() {
         setError(null);
         setMetadata(null);
         setComplete(false);
+        setDownloadedFilePath(null);
         setProgress(null);
         setSelectedItems(new Set());
         setSearchQuery('');
@@ -286,7 +297,8 @@ export function Downloader() {
             await window.electron.downloadVideo({
                 url: targetUrl,
                 formatId,
-                title: targetTitle
+                title: targetTitle,
+                thumbnail: metadata?.thumbnail
             });
         } catch (err: any) {
             setError(err.message);
@@ -309,7 +321,8 @@ export function Downloader() {
             await window.electron.downloadSpotifyTrack({
                 searchQuery,
                 title,
-                artist
+                artist,
+                thumbnail: metadata?.thumbnail
             });
         } catch (err: any) {
             setError(err.message);
@@ -396,6 +409,7 @@ export function Downloader() {
         setMetadata(null);
         setError(null);
         setComplete(false);
+        setDownloadedFilePath(null);
         setProgress(null);
         setSelectedItems(new Set());
         setSearchQuery('');
@@ -420,6 +434,7 @@ export function Downloader() {
     const deselectAll = () => {
         setSelectedItems(new Set());
     };
+
 
     // Filter entries by search
     const filteredEntries = useMemo(() => {
@@ -462,7 +477,8 @@ export function Downloader() {
                     await window.electron.downloadSpotifyTrack({
                         searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
                         title: item.title,
-                        artist: item.artist || ''
+                        artist: item.artist || '',
+                        thumbnail: item.thumbnail
                     });
                 } else {
                     await window.electron.downloadVideo({
@@ -718,9 +734,17 @@ export function Downloader() {
                                 )}
 
                                 {downloading && !downloadingId && (
-                                    <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center">
+                                    <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
                                         <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} />
-                                        <p className="text-white/60 mt-4 text-sm">{progress?.speed || 'Starting...'} {progress?.eta && `• ${progress.eta}`}</p>
+                                        <div className="mt-4 space-y-1">
+                                            <p className="text-white font-bold text-base">
+                                                {progress?.speed && progress.speed !== '...' ? progress.speed : 'Starting...'}
+                                            </p>
+                                            <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
+                                                {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
+                                                {progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -775,50 +799,66 @@ export function Downloader() {
                                         </button>
                                     )}
 
+                                    {/* Audio Options */}
                                     {!isSpotify && (
-                                        <>
-                                            <button onClick={() => handleDownload('audio_best')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-9 h-9 rounded-lg bg-green-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
-                                                    <div className="text-left"><p className="font-medium text-sm">Audio (Best)</p><p className="text-xs text-white/40">~320kbps • High Quality</p></div>
-                                                </div>
-                                                <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                            </button>
-                                            <button onClick={() => handleDownload('audio_standard')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-green-400/80" /></div>
-                                                    <div className="text-left"><p className="font-medium text-sm">Audio (Standard)</p><p className="text-xs text-white/40">~128kbps • Balanced</p></div>
-                                                </div>
-                                                <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                            </button>
-                                            <button onClick={() => handleDownload('audio_low')} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-yellow-400" /></div>
-                                                    <div className="text-left"><p className="font-medium text-sm">Audio (Low)</p><p className="text-xs text-white/40">~64kbps • Save Data</p></div>
-                                                </div>
-                                                <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                            </button>
-                                        </>
+                                        <div className="mb-4">
+                                            <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
+                                                <Music className="w-4 h-4" /> Audio Only
+                                            </h3>
+                                            <div className="space-y-2">
+                                                <button onClick={() => handleDownload('audio_best')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-9 h-9 rounded-lg bg-green-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
+                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Best)</p><p className="text-xs text-white/40">~320kbps • High Quality</p></div>
+                                                    </div>
+                                                    <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                                </button>
+                                                <button onClick={() => handleDownload('audio_standard')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-green-400/80" /></div>
+                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Standard)</p><p className="text-xs text-white/40">~128kbps • Balanced</p></div>
+                                                    </div>
+                                                    <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                                </button>
+                                                <button onClick={() => handleDownload('audio_low')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-yellow-400" /></div>
+                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Low)</p><p className="text-xs text-white/40">~64kbps • Save Data</p></div>
+                                                    </div>
+                                                    <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                                </button>
+                                            </div>
+                                        </div>
                                     )}
 
-                                    {/* All video formats */}
-                                    {!isSpotify && formats.map((f, i) => (
-                                        <button key={i} onClick={() => handleDownload(f.format_id)} disabled={downloading} className="flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center"><Film className="w-4 h-4 text-blue-400" /></div>
-                                                <div className="text-left">
-                                                    <p className="font-medium text-sm flex items-center gap-2">
-                                                        {f.height}p
-                                                        {i === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">Best</span>}
-                                                        {f.height && f.height >= 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300">4K</span>}
-                                                        {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
-                                                    </p>
-                                                    <p className="text-xs text-white/40">{f.ext?.toUpperCase() || 'MP4'} {f.format_note && `• ${f.format_note}`}</p>
-                                                </div>
+
+                                    {/* Video Options */}
+                                    {!isSpotify && formats.length > 0 && (
+                                        <div>
+                                            <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
+                                                <Film className="w-4 h-4" /> Video Quality
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {formats.map((f, i) => (
+                                                    <button key={i} onClick={() => handleDownload(f.format_id)} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center"><Film className="w-4 h-4 text-blue-400" /></div>
+                                                            <div className="text-left">
+                                                                <p className="font-medium text-sm flex items-center gap-2">
+                                                                    {f.height}p
+                                                                    {i === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">Best</span>}
+                                                                    {f.height && f.height >= 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300">4K</span>}
+                                                                    {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
+                                                                </p>
+                                                                <p className="text-xs text-white/40">{f.ext?.toUpperCase() || 'MP4'} {f.format_note && `• ${f.format_note}`}</p>
+                                                            </div>
+                                                        </div>
+                                                        <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
+                                                    </button>
+                                                ))}
                                             </div>
-                                            <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                        </button>
-                                    ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </motion.div>
@@ -975,14 +1015,52 @@ export function Downloader() {
                     {/* Success */}
                     {complete && (
                         <motion.div key="success" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="text-center py-16">
-                            <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ backgroundColor: currentPlatform.color }}>
-                                <Check className={`w-10 h-10 ${currentPlatform.id === 'x' || currentPlatform.id === 'tiktok' ? 'text-black' : 'text-white'}`} />
+                            <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 relative">
+                                <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ backgroundColor: currentPlatform.color }} />
+                                <div className="relative w-full h-full rounded-full flex items-center justify-center" style={{ backgroundColor: currentPlatform.color }}>
+                                    <Check className={`w-12 h-12 ${['x', 'tiktok'].includes(currentPlatform.id) ? 'text-black' : 'text-white'}`} />
+                                </div>
                             </div>
-                            <h2 className="text-2xl font-bold mb-2">Download Complete!</h2>
-                            <p className="text-white/40 mb-8">Saved to Downloads folder</p>
-                            <button onClick={() => { setComplete(false); setMetadata(null); setUrl(''); }} className="h-12 px-8 bg-white text-black rounded-xl font-bold cursor-pointer hover:bg-white/90 transition">
-                                Download Another
-                            </button>
+                            <h2 className="text-3xl font-bold mb-2">Download Complete!</h2>
+                            <p className="text-white/40 mb-8 max-w-sm mx-auto">
+                                <span className="text-white">{metadata?.title}</span> has been saved to your {isSpotify ? 'Music' : 'Downloads'} folder.
+                            </p>
+
+                            <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
+                                <button
+                                    onClick={() => {
+                                        // Use the path from the progress event if available, or request it?
+                                        // The backend sends 'path' in the 'complete' event. 
+                                        // We need to store it in state.
+                                        // Use specific downloaded path if available
+                                        if (downloadedFilePath) {
+                                            window.electron.openInFolder(downloadedFilePath);
+                                        } else {
+                                            window.electron.chooseDownloadFolder().then(res => {
+                                                if (res.path) window.electron.openInFolder(res.path);
+                                                else if (metadata) window.electron.openInFolder(metadata.title);
+                                            });
+                                        }
+                                    }}
+                                    className="h-12 px-6 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
+                                >
+                                    <FolderOpen className="w-5 h-5 text-blue-400" />
+                                    Show in Folder
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        // Logic to open/play the file directly?
+                                        // For now, let's stick to "Download Another" as the primary "Reset" action,
+                                        // and maybe a "Open" button if we know the path.
+                                        setComplete(false); setMetadata(null); setUrl('');
+                                    }}
+                                    className="h-12 px-8 bg-white text-black rounded-xl font-bold cursor-pointer hover:bg-white/90 transition flex items-center justify-center gap-2"
+                                >
+                                    <Download className="w-5 h-5" />
+                                    Download Another
+                                </button>
+                            </div>
                         </motion.div>
                     )}
 
@@ -1302,6 +1380,7 @@ export function Downloader() {
                 isOpen={showSettings}
                 onClose={() => setShowSettings(false)}
             />
+
         </div >
     );
 }

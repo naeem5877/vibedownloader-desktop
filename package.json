@@ -35,6 +35,7 @@
     "electron-updater": "^6.6.2",
     "framer-motion": "^12.23.25",
     "lucide-react": "^0.556.0",
+    "node-id3": "^0.2.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-icons": "^5.5.0",
@@ -77,13 +78,16 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": ".env",
+        "to": ".env"
       }
     ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json",
-      ".env"
+      "package.json"
     ],
     "publish": {
       "provider": "github",

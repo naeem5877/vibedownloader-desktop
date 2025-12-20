@@ -4,8 +4,8 @@ interface Window {
     electron: {
         getVideoInfo: (url: string) => Promise<any>;
         getSpotifyInfo: (url: string) => Promise<any>;
-        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string }) => Promise<any>;
-        downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string }) => Promise<any>;
+        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string }) => Promise<any>;
+        downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string; thumbnail?: string }) => Promise<any>;
         getProxyImage: (url: string) => Promise<string | null>;
 
         saveCookies: (content: string, platform: string) => Promise<{ success: boolean; error?: string }>;
@@ -37,6 +37,8 @@ interface Window {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;
         close: () => Promise<void>;
+        openExternal: (url: string) => Promise<void>;
+        copyToClipboard: (text: string) => Promise<void>;
     }
 }
 
