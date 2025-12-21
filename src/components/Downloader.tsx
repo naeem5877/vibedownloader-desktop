@@ -285,7 +285,7 @@ export function Downloader() {
     };
 
     // Regular video download
-    const handleDownload = useCallback(async (formatId: string, videoUrl?: string, videoTitle?: string, itemId?: string) => {
+    const handleDownload = useCallback(async (formatId: string, videoUrl?: string, videoTitle?: string, itemId?: string, playlistTitle?: string) => {
         if (downloading) return;
         const targetUrl = videoUrl || metadata?.webpage_url || url;
         const targetTitle = videoTitle || metadata?.title || 'video';
@@ -300,7 +300,8 @@ export function Downloader() {
                 url: targetUrl,
                 formatId,
                 title: targetTitle,
-                thumbnail: metadata?.thumbnail
+                thumbnail: metadata?.thumbnail,
+                playlistTitle
             });
         } catch (err: any) {
             setError(err.message);
@@ -311,7 +312,7 @@ export function Downloader() {
     }, [metadata, downloading, url]);
 
     // Spotify track download (via YouTube)
-    const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string) => {
+    const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string, playlistTitle?: string) => {
         if (downloading) return;
 
         setDownloading(true);
@@ -324,7 +325,8 @@ export function Downloader() {
                 searchQuery,
                 title,
                 artist,
-                thumbnail: metadata?.thumbnail
+                thumbnail: metadata?.thumbnail,
+                playlistTitle
             });
         } catch (err: any) {
             setError(err.message);
@@ -332,7 +334,7 @@ export function Downloader() {
             setDownloadingId(null);
             setProgress(null);
         }
-    }, [downloading]);
+    }, [downloading, metadata]);
 
     // Get all available video formats sorted by resolution - prioritize MP4 over WEBM
     const formats = useMemo(() => {
@@ -449,7 +451,10 @@ export function Downloader() {
         );
     }, [metadata?.entries, searchQuery]);
 
-    const isPlaylist = (metadata?.contentType === 'playlist' || (metadata?.contentType === 'story' && (metadata?.entries?.length || 0) > 1)) && metadata?.entries && metadata.entries.length > 0;
+    const isPlaylist = metadata &&
+        (metadata.contentType === 'playlist' || (metadata.contentType === 'story' && (metadata.entries?.length || 0) > 1)) &&
+        metadata.entries &&
+        metadata.entries.length > 0;
 
     // Bulk download (Playlist)
     const handleBulkDownload = async (type: 'video' | 'audio_best' | 'audio_standard' | 'audio_low') => {
@@ -472,22 +477,24 @@ export function Downloader() {
                 // Determine format
                 const formatId = type === 'video' ? 'best' : type;
 
-                // For Spotify, we need special handling if we want to support it in bulk, 
-                // but currently spotify is single track search mostly or playlist.
-                // Assuming standard video download for now as Spotify logic is separate.
+                // Pass the playlist title to organize files into a subfolder
+                const playlistTitle = metadata?.title;
+
                 if (isSpotify) {
                     await window.electron.downloadSpotifyTrack({
                         searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
                         title: item.title,
                         artist: item.artist || '',
-                        thumbnail: item.thumbnail
+                        thumbnail: item.thumbnail,
+                        playlistTitle // This will create the /playlists/{title}/ folder
                     });
                 } else {
                     await window.electron.downloadVideo({
                         url: item.url,
                         formatId: formatId,
                         title: item.title,
-                        platform: currentPlatform.id
+                        platform: currentPlatform.id,
+                        playlistTitle // This will create the /playlists/{title}/ folder
                     });
                 }
                 successCount++;
@@ -902,13 +909,24 @@ export function Downloader() {
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <h2 className="font-bold text-base leading-tight mb-1 truncate">{metadata.title}</h2>
-                                    <p className="text-white/50 text-sm mb-1">{metadata.uploader}</p>
+                                    <h2 className="font-bold text-base leading-tight mb-1 truncate" title={metadata.title}>{metadata.title}</h2>
+                                    <p className="text-white/50 text-sm mb-1 truncate">{metadata.uploader}</p>
                                     <div className="flex items-center gap-3 text-xs text-white/40">
-                                        <span className="flex items-center gap-1"><Play className="w-3 h-3" /> {metadata.playlist_count} {isSpotify ? 'tracks' : 'videos'}</span>
+                                        <span className="flex items-center gap-1"><Play className="w-3 h-3" /> {metadata.playlist_count || 0} {isSpotify ? 'tracks' : 'videos'}</span>
                                         <span>{selectedItems.size} selected</span>
                                     </div>
                                 </div>
+                                <button
+                                    onClick={() => {
+                                        selectAll();
+                                        handleBulkDownload(isSpotify ? 'audio_best' : 'video');
+                                    }}
+                                    disabled={downloading}
+                                    className="px-4 py-2 bg-white text-black rounded-lg font-bold text-xs hover:bg-white/90 transition cursor-pointer flex items-center gap-2"
+                                >
+                                    <Download className="w-3.5 h-3.5" />
+                                    Download All
+                                </button>
                             </div>
 
                             {/* Download Actions (TOP) */}
@@ -978,7 +996,7 @@ export function Downloader() {
 
                                             {/* Info */}
                                             <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-sm truncate">{entry.title}</p>
+                                                <p className="font-medium text-sm truncate" title={entry.title}>{entry.title}</p>
                                                 <p className="text-xs text-white/40">
                                                     {entry.artist && <span>{entry.artist} • </span>}
                                                     {formatDuration(entry.duration)}
@@ -986,10 +1004,10 @@ export function Downloader() {
                                             </div>
 
                                             {/* Quick Actions */}
-                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
+                                            <div className="flex items-center gap-1 opacity-1 sm:opacity-0 group-hover:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
                                                 {isSpotify && entry.searchQuery ? (
                                                     <button
-                                                        onClick={() => handleSpotifyDownload(entry.searchQuery!, entry.title, entry.artist || metadata.uploader, entry.id)}
+                                                        onClick={() => handleSpotifyDownload(entry.searchQuery!, entry.title, entry.artist || (metadata?.uploader || 'Unknown'), entry.id, metadata?.title)}
                                                         disabled={downloading}
                                                         className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40"
                                                         title="Download MP3"
@@ -999,7 +1017,7 @@ export function Downloader() {
                                                 ) : (
                                                     <>
                                                         <button
-                                                            onClick={() => handleDownload('audio', entry.url, entry.title, entry.id)}
+                                                            onClick={() => handleDownload('audio_best', entry.url, entry.title, entry.id, metadata?.title)}
                                                             disabled={downloading}
                                                             className="w-7 h-7 rounded-lg bg-green-500/20 flex items-center justify-center cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40"
                                                             title="Download Audio"
@@ -1007,7 +1025,7 @@ export function Downloader() {
                                                             <Music className="w-3.5 h-3.5 text-green-400" />
                                                         </button>
                                                         <button
-                                                            onClick={() => handleDownload('best', entry.url, entry.title, entry.id)}
+                                                            onClick={() => handleDownload('best', entry.url, entry.title, entry.id, metadata?.title)}
                                                             disabled={downloading}
                                                             className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center cursor-pointer hover:bg-blue-500/30 transition disabled:opacity-40"
                                                             title="Download Video"

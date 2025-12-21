@@ -139,14 +139,20 @@ export function registerInfoHandlers() {
                 }
             }
 
-            if (!thumbnail && raw.entries && raw.entries.length > 0) {
-                const first = raw.entries[0];
-                thumbnail = first.thumbnail || (first.thumbnails ? first.thumbnails[0]?.url : '');
-            }
+            const entriesArr = Array.isArray(raw.entries) ? raw.entries : [];
+            const sanitizedEntries = entriesArr
+                .filter((e: any) => e && (e.id || e.title || e.url))
+                .map((e: any, i: number) => ({
+                    id: e.id || `track-${i}-${Date.now()}`,
+                    title: e.title || e.fulltitle || `Track ${i + 1}`,
+                    thumbnail: e.thumbnail || (e.thumbnails && e.thumbnails.length > 0 ? e.thumbnails[0].url : ''),
+                    duration: e.duration || 0,
+                    url: e.url || e.webpage_url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : url)
+                }));
 
             const metadata = {
-                id: raw.id,
-                title: raw.title || raw.fulltitle || 'Untitled',
+                id: raw.id || `pl-${Date.now()}`,
+                title: raw.title || raw.fulltitle || 'Untitled Playlist',
                 thumbnail: thumbnail || '',
                 thumbnails: raw.thumbnails || [],
                 uploader: raw.uploader || raw.channel || raw.creator || raw.uploader_id || 'Unknown',
@@ -159,14 +165,8 @@ export function registerInfoHandlers() {
                 formats: raw.formats || [],
                 webpage_url: raw.webpage_url || url,
                 contentType,
-                entries: raw.entries?.map((e: any, i: number) => ({
-                    id: e.id,
-                    title: e.title || `Track ${i + 1}`,
-                    thumbnail: e.thumbnail || e.thumbnails?.[0]?.url || '',
-                    duration: e.duration || 0,
-                    url: e.url || e.webpage_url || `https://www.youtube.com/watch?v=${e.id}`
-                })) || [],
-                playlist_count: raw.playlist_count || raw.entries?.length || 0
+                entries: sanitizedEntries,
+                playlist_count: raw.playlist_count || sanitizedEntries.length || 0
             };
 
             return { success: true, metadata };
@@ -210,8 +210,10 @@ export function registerInfoHandlers() {
         try {
             const parsed = extractSpotifyId(url);
             if (!parsed) {
+                console.error(`Invalid Spotify URL: ${url}`);
                 return { success: false, error: "Invalid Spotify URL" };
             }
+            console.log(`Extracted Spotify ID: ${parsed.id} (${parsed.type})`);
 
             let metadata: any = {
                 contentType: parsed.type,
@@ -232,7 +234,8 @@ export function registerInfoHandlers() {
                     album: track.album?.name,
                     release_date: track.album?.release_date,
                     // For YouTube search
-                    searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`
+                    searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
+                    entries: []
                 };
             } else if (parsed.type === 'album') {
                 const album = await spotifyApiRequest(`/albums/${parsed.id}`);

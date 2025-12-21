@@ -31,13 +31,17 @@ async function getSpotifyToken(): Promise<string> {
 
 export async function spotifyApiRequest(endpoint: string): Promise<any> {
     const token = await getSpotifyToken();
-    const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+    const url = `https://api.spotify.com/v1${endpoint}`;
+    console.log(`[Spotify API] Requesting: ${url}`);
+
+    const response = await fetch(url, {
         headers: {
             'Authorization': `Bearer ${token}`
         }
     });
 
     if (!response.ok) {
+        console.error(`[Spotify API] Error ${response.status}: ${response.statusText} for ${url}`);
         throw new Error(`Spotify API error: ${response.statusText}`);
     }
 
@@ -45,18 +49,14 @@ export async function spotifyApiRequest(endpoint: string): Promise<any> {
 }
 
 export function extractSpotifyId(url: string): { type: 'track' | 'album' | 'playlist'; id: string } | null {
-    const patterns = [
-        /spotify\.com\/track\/([a-zA-Z0-9]+)/,
-        /spotify\.com\/album\/([a-zA-Z0-9]+)/,
-        /spotify\.com\/playlist\/([a-zA-Z0-9]+)/
-    ];
-    const types: ('track' | 'album' | 'playlist')[] = ['track', 'album', 'playlist'];
+    // Shared pattern for all Spotify types, accounting for optional internationalization segments (e.g. /intl-pt/)
+    const match = url.match(/spotify\.com\/(?:[a-z]{2}-[a-z]{2}\/|intl-[a-z]{2}\/)?(track|album|playlist)\/([a-zA-Z0-9]+)/);
 
-    for (let i = 0; i < patterns.length; i++) {
-        const match = url.match(patterns[i]);
-        if (match) {
-            return { type: types[i], id: match[1] };
-        }
+    if (match) {
+        return {
+            type: match[1] as 'track' | 'album' | 'playlist',
+            id: match[2]
+        };
     }
     return null;
 }

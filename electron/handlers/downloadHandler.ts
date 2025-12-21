@@ -11,7 +11,7 @@ import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
 
 export function registerDownloadHandlers() {
-    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string }) => {
+    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string }) => {
         try {
             const mainWindow = getMainWindow();
             const ytDlpWrap = getYtDlpWrap();
@@ -54,7 +54,7 @@ export function registerDownloadHandlers() {
             }
 
             // Get organized download path
-            const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType);
+            const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType, playlistTitle);
             const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const ext = (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4');
             const outputTemplate = path.join(downloadPath, `${safeTitle}.%(ext)s`);
@@ -236,7 +236,7 @@ export function registerDownloadHandlers() {
         }
     });
 
-    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail }) => {
+    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle }) => {
         try {
             // Ensure FFmpeg is available for conversion
             await ensureFFmpeg();
@@ -246,7 +246,7 @@ export function registerDownloadHandlers() {
             const ytDlpWrap = getYtDlpWrap();
             const ytSearchUrl = `ytsearch1:${searchQuery}`;
 
-            const downloadPath = getOrganizedPath('spotify', 'track');
+            const downloadPath = getOrganizedPath('spotify', 'track', playlistTitle);
             const safeTitle = `${artist} - ${title}`.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const outputTemplate = path.join(downloadPath, `${safeTitle}.%(ext)s`);
 

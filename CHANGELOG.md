@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.7] - 2025-12-21
+
+### ✨ Features & Organization
+- **Structured Playlist Downloads**: Added automatic folder organization for playlists. All items from a playlist are now saved in a dedicated `/Playlists/{PlaylistTitle}/` directory.
+- **New "Download All" Button**: Added a one-click button in the playlist header to download the entire collection instantly.
+- **Improved Spotify Handling**: Support for localized Spotify URLs and deeper API logging.
+
+### 🐛 Fixes & Maintenance
+- **Fixed Blank Screen Bug**: Resolved an issue where certain YouTube playlists would cause the UI to go blank due to malformed metadata.
+- **Type Safety**: Fixed TypeScript errors related to new playlist properties in the renderer process.
+
 ## [1.0.6] - 2025-12-21
 
 ### ✨ UI & Refinements

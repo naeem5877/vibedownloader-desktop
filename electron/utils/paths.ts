@@ -34,7 +34,7 @@ export function saveSettings(settings: AppSettings) {
 }
 
 // Get organized download path based on platform and content type
-export function getOrganizedPath(platform: string, contentType: string): string {
+export function getOrganizedPath(platform: string, contentType: string, subFolder?: string): string {
     const settings = loadSettings();
     const basePath = settings.downloadBasePath || app.getPath('downloads');
 
@@ -70,7 +70,15 @@ export function getOrganizedPath(platform: string, contentType: string): string 
     const platformFolder = platformFolders[platform.toLowerCase()] || platform;
     const contentFolder = contentFolders[contentType.toLowerCase()] || 'Videos';
 
-    const fullPath = path.join(basePath, 'VibeDownloader', platformFolder, contentFolder);
+    let fullPath = path.join(basePath, 'VibeDownloader', platformFolder, contentFolder);
+
+    // Add subfolder (e.g. for playlist titles)
+    if (subFolder) {
+        const safeSubFolder = subFolder.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
+        if (safeSubFolder) {
+            fullPath = path.join(fullPath, safeSubFolder);
+        }
+    }
 
     // Create directories if they don't exist
     if (!fs.existsSync(fullPath)) {

@@ -55,7 +55,25 @@ VibeDownloader is built for those who demand quality and privacy. Unlike web-bas
 
 ---
 
-## 📥 Download & Installation
+## � Screenshots
+
+<div align="center">
+  <img src="Screenshots/Screenshot-1.png" alt="Main Interface" width="400" />
+  <img src="Screenshots/Screenshot-2.png" alt="Spotify Support" width="400" />
+  <br />
+  <img src="Screenshots/Screenshot-3.png" alt="Download Progress" width="400" />
+  <img src="Screenshots/Screenshot-4.png" alt="Settings & Quality" width="400" />
+  <br />
+  <img src="Screenshots/Screenshot-5.png" alt="Playlist Organization" width="400" />
+  <img src="Screenshots/Screenshot-6.png" alt="Instagram Reels" width="400" />
+  <br />
+  <img src="Screenshots/Screenshot-7.png" alt="TikTok Downloads" width="400" />
+  <img src="Screenshots/Screenshot-8.png" alt="Metadata & Covers" width="400" />
+</div>
+
+---
+
+## �📥 Download & Installation
 
 ### Windows
 1.  Download the latest installer (`.exe`) from the [Releases Page](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
