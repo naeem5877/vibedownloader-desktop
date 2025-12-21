@@ -1,6 +1,6 @@
 {
   "name": "vibe-downloader",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Premium YouTube Downloader",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -17,9 +17,9 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:electron\"",
     "dev:server": "vite",
-    "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && echo {\"type\":\"commonjs\"}>dist-electron/package.json && electron .",
+    "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && node -e \"require('fs').writeFileSync('dist-electron/package.json', JSON.stringify({type:'commonjs'}))\" && electron .",
     "build": "tsc -b && vite build",
-    "build:electron": "tsc -p electron/tsconfig.json && echo {\"type\":\"commonjs\"}>dist-electron/package.json",
+    "build:electron": "tsc -p electron/tsconfig.json && node -e \"require('fs').writeFileSync('dist-electron/package.json', JSON.stringify({type:'commonjs'}))\"",
     "pack": "npm run build && npm run build:electron && electron-builder",
     "pack:win": "npm run build && npm run build:electron && electron-builder --win",
     "pack:mac": "npm run build && npm run build:electron && electron-builder --mac",

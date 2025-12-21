@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.8] - 2025-12-21
+
+### 🐛 Fixes
+- **MacOS ESM Crash**: Fixed a critical issue on macOS where the application would fail to launch with a `ERR_INVALID_PACKAGE_CONFIG` error. Replaced brittle shell-based config generation with a robust cross-platform Node.js script.
+
 ## [1.0.7] - 2025-12-21
 
 ### ✨ Features & Organization
