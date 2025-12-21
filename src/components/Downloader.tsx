@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard, Sparkles, Key, Settings as SettingsIcon, Image, Link2, FolderOpen
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, Link2, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud } from 'react-icons/fa6';
 import { Settings } from './Settings';
@@ -153,6 +153,8 @@ export function Downloader() {
                 setDownloadingId(null);
                 setProgress(null);
                 if (data.path) setDownloadedFilePath(data.path);
+            } else if (data.status) {
+                setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status }));
             } else if (data.percent !== undefined) {
                 setProgress({
                     percent: data.percent,
@@ -560,7 +562,7 @@ export function Downloader() {
 
                 {/* Title */}
                 <div className="text-center mb-10">
-                    <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-2">
+                    <h1 className="text-4xl sm:text-6xl font-black tracking-tighter mb-2 font-['Montserrat']">
                         VibeDownloader
                     </h1>
                     <p className="text-white/40">
@@ -593,38 +595,42 @@ export function Downloader() {
                     })}
                 </div>
 
-                {/* Search - Premium Design */}
-                <form onSubmit={handleSubmit} className="mb-8">
-                    <div className="flex gap-3 relative z-20">
+                <form onSubmit={handleSubmit} className="mb-8 w-full max-w-xl mx-auto">
+                    <div className="flex flex-col sm:flex-row gap-2.5 relative z-20">
                         <div className="flex-1 relative group">
-                            {/* Input with enhanced styling */}
+                            {/* Minimalism Premium Glow */}
+                            <div className="absolute -inset-0.5 bg-gradient-to-r from-white/0 via-white/5 to-white/0 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all duration-500" />
+
                             <div className="relative">
-                                <div className="absolute -inset-0.5 bg-gradient-to-r from-white/5 via-white/10 to-white/5 rounded-2xl opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition duration-300 blur-sm" />
-                                <div className="relative">
-                                    <Link2 className="absolute left-4 sm:left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 group-focus-within:text-white/50 transition" />
+                                {/* The Glass Base */}
+                                <div className="absolute inset-0 bg-[#0a0a0b]/40 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 group-focus-within:border-white/20 transition-all duration-300" />
+
+                                <div className="relative flex items-center h-14 sm:h-15">
+                                    <div className="pl-5 pointer-events-none">
+                                        <Search className="w-4 h-4 text-white/20 group-focus-within:text-white/40 transition-all duration-300" />
+                                    </div>
+
                                     <input
                                         type="text"
                                         value={url}
                                         onChange={(e) => setUrl(e.target.value)}
-                                        placeholder={isSpotify ? 'Paste Spotify link here...' : `Paste ${currentPlatform.name} link here...`}
+                                        placeholder={isSpotify ? 'Drop link...' : `Paste link here...`}
                                         disabled={loading || downloading}
-                                        className="w-full h-14 sm:h-16 pl-12 sm:pl-14 pr-28 sm:pr-36 bg-[#111] border-2 border-white/10 rounded-2xl text-white placeholder-white/30 outline-none focus:border-white/25 focus:bg-[#141414] transition-all duration-200 cursor-text disabled:opacity-50 text-sm sm:text-base truncate shadow-lg shadow-black/20"
+                                        className="w-full h-full pl-3 pr-36 bg-transparent text-white placeholder-white/10 outline-none font-medium text-sm tracking-tight disabled:opacity-50 transition-all"
                                     />
 
-                                    {/* Fade Overlay */}
-                                    <div className="absolute right-0 top-[2px] bottom-[2px] w-28 sm:w-36 bg-gradient-to-l from-[#111] via-[#111] to-transparent pointer-events-none rounded-r-2xl" />
-
-                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
+                                    {/* Action Group Inside Input */}
+                                    <div className="absolute right-2 flex items-center gap-1.5">
                                         {['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id) && (
                                             <button
                                                 type="button"
                                                 onClick={() => setShowCookieModal(true)}
-                                                className={`h-9 w-9 flex items-center justify-center rounded-xl transition cursor-pointer ${hasCookies
-                                                    ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
-                                                    : 'bg-white/10 text-white/40 hover:text-white hover:bg-white/20 border border-white/10'}`}
-                                                title={hasCookies ? "Cookies Active" : "Login Required for some content"}
+                                                className={`h-9 w-9 flex items-center justify-center rounded-lg transition-all duration-300 cursor-pointer ${hasCookies
+                                                    ? 'bg-green-500/10 text-green-400 border border-green-500/15'
+                                                    : 'bg-white/[0.03] text-white/20 hover:text-white hover:bg-white/10 border border-white/5'}`}
+                                                title={hasCookies ? "Active session" : "Login required"}
                                             >
-                                                <Key className="w-4 h-4" />
+                                                <Key className={`w-3.5 h-3.5 ${hasCookies ? 'animate-pulse' : ''}`} />
                                             </button>
                                         )}
                                         <button
@@ -638,21 +644,38 @@ export function Downloader() {
                                                 }
                                             }}
                                             disabled={loading || downloading}
-                                            className="h-9 px-4 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-semibold text-white/60 hover:text-white transition cursor-pointer disabled:opacity-40 whitespace-nowrap flex items-center gap-1.5 border border-white/10"
+                                            className="h-9 px-4 bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 rounded-lg text-[9px] font-bold uppercase tracking-wider text-white/30 hover:text-white transition-all cursor-pointer disabled:opacity-30 active:scale-95"
                                         >
-                                            <Clipboard className="w-3.5 h-3.5" />
                                             Paste
                                         </button>
                                     </div>
                                 </div>
                             </div>
                         </div>
+
                         <button
                             type="submit"
                             disabled={!url || loading || downloading}
-                            className="h-14 sm:h-16 px-7 sm:px-10 bg-white text-black rounded-2xl font-bold flex items-center gap-2 cursor-pointer hover:bg-white/90 active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed text-sm sm:text-base shrink-0 shadow-lg shadow-white/10"
+                            className={`h-14 sm:h-15 px-8 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all duration-500 cursor-pointer active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed group/btn overflow-hidden relative
+                                ${loading
+                                    ? 'bg-white/5 text-white/30 border border-white/5'
+                                    : 'bg-white text-black hover:shadow-lg hover:shadow-white/5'}`}
                         >
-                            {loading ? <Loader className="w-5 h-5 animate-spin" /> : 'Go'}
+                            {/* Button Shine Effect */}
+                            {!loading && (
+                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/5 to-transparent -translate-x-full group-hover/btn:animate-[shine_1.5s_ease-in-out_infinite] pointer-events-none" />
+                            )}
+
+                            <span className="relative z-10 flex items-center gap-2">
+                                {loading ? (
+                                    <Loader className="w-4 h-4 animate-spin mx-auto" />
+                                ) : (
+                                    <>
+                                        FETCH
+                                        <ArrowRight className="w-3.5 h-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5" />
+                                    </>
+                                )}
+                            </span>
                         </button>
                     </div>
                 </form>
@@ -775,7 +798,7 @@ export function Downloader() {
                                         className="shrink-0 w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
                                         title="Save Thumbnail"
                                     >
-                                        <Image className="w-5 h-5 text-white/60" />
+                                        <ImageIcon className="w-5 h-5 text-white/60" />
                                     </button>
                                 )}
                             </div>
@@ -1119,7 +1142,7 @@ export function Downloader() {
                                     transition={{ delay: 0.2 }}
                                 >
                                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/10 flex items-center justify-center shrink-0">
-                                        <Clipboard className="w-5 h-5 text-purple-400" />
+                                        <ClipboardIcon className="w-5 h-5 text-purple-400" />
                                     </div>
                                     <div className="flex-1">
                                         <p className="font-medium text-sm text-white">Paste it above</p>
@@ -1271,76 +1294,133 @@ export function Downloader() {
                                     </div>
 
                                     <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-sm text-blue-300">
-                                        <p className="mb-2 font-semibold flex items-center gap-2">
-                                            <Eye className="w-4 h-4" /> Privacy Promise
+                                        <p className="mb-2 font-bold flex items-center gap-2">
+                                            <ShieldCheck className="w-4 h-4" /> Secure & Local
                                         </p>
-                                        <p className="opacity-80 leading-relaxed">
-                                            Look, you don't want to upload your cookie, that's okay, fine. But we don't leak any of your personal details. It's all your choice. Cookies are stored locally on your machine.
+                                        <p className="opacity-80 leading-relaxed text-xs font-medium">
+                                            Your privacy is our priority. Cookies are stored exclusively on your local machine and are used solely to authenticate downloads from restricted or private sources. We do not track, store, or transmit any sensitive data.
                                         </p>
                                     </div>
 
                                     {!hasCookies ? (
-                                        <div className="space-y-4">
-                                            <div className="text-sm text-white/60 space-y-2">
-                                                <p>1. Install this recommended extension:</p>
-                                                <a
-                                                    href="https://chromewebstore.google.com/detail/hlkenndednhfkekhgcdicdfddnkalmdm?utm_source=item-share-cb"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 underline"
-                                                >
-                                                    <Link2 className="w-3 h-3" /> Get Cookie Editor Extension
-                                                </a>
-                                                <p>2. Open {currentPlatform.name} in your browser.</p>
-                                                <p>3. Click the extension → Export → select "Netscape" format.</p>
-                                                <p>4. Paste the content below:</p>
-                                            </div>
-                                            <textarea
-                                                value={cookieContent}
-                                                onChange={(e) => setCookieContent(e.target.value)}
-                                                placeholder="# Netscape HTTP Cookie File..."
-                                                className="w-full h-32 bg-white/5 border border-white/10 rounded-xl p-3 text-xs text-white/70 font-mono outline-none focus:border-white/20 resize-none"
-                                            />
-                                        </div>
-                                    ) : (
-                                        <div className="text-center py-6">
-                                            <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                <Check className="w-8 h-8 text-green-400" />
-                                            </div>
-                                            <h3 className="text-lg font-bold text-green-400 mb-2">Cookies Active</h3>
-                                            <p className="text-white/40 text-sm max-w-xs mx-auto mb-6">
-                                                You can now download stories and private content. If downloads stop working, your cookies may have expired.
-                                            </p>
+                                        <div className="space-y-6">
+                                            <div className="grid grid-cols-1 gap-4">
+                                                {/* Step 1 */}
+                                                <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition-colors group">
+                                                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20 group-hover:scale-110 transition-transform">
+                                                        <Download className="w-5 h-5 text-blue-400" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-white mb-1">Step 1: Get Cookie Editor</h4>
+                                                        <p className="text-[11px] text-white/40 mb-3 leading-relaxed">Install the editor for your browser to export login data.</p>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button
+                                                                onClick={() => window.electron.openExternal("https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm")}
+                                                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                                                            >
+                                                                <Globe className="w-3 h-3" /> For Chrome
+                                                            </button>
+                                                            <button
+                                                                onClick={() => window.electron.openExternal("https://microsoftedge.microsoft.com/addons/detail/cookieeditor/neaplmfkghagebokkhpjpoebhdledlfi")}
+                                                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                                                            >
+                                                                <Monitor className="w-3 h-3" /> For Edge
+                                                            </button>
+                                                            <button
+                                                                onClick={() => window.electron.openExternal("https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/")}
+                                                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                                                            >
+                                                                <Globe className="w-3 h-3" /> For Firefox
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
 
-                                            <div className="bg-white/5 rounded-xl p-4 mb-4 text-left">
-                                                <p className="text-xs font-bold text-white/60 mb-2 uppercase tracking-wider">Update Cookies</p>
-                                                <p className="text-xs text-white/40 mb-3">If cookies expired, upload a new one here:</p>
+                                                {/* Step 2 */}
+                                                <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                                                    <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center shrink-0 border border-purple-500/20">
+                                                        <Globe className="w-5 h-5 text-purple-400" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-white mb-1">Step 2: Sign In</h4>
+                                                        <p className="text-[11px] text-white/40 leading-relaxed">Open <span className="text-white font-bold">{currentPlatform.name}</span> in your browser and ensure you are logged in.</p>
+                                                    </div>
+                                                </div>
+
+                                                {/* Step 3 */}
+                                                <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                                                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0 border border-amber-500/20">
+                                                        <FileText className="w-5 h-5 text-amber-400" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-white mb-1">Step 3: Export as <span className="text-amber-400 uppercase tracking-wider">Netscape</span></h4>
+                                                        <p className="text-[11px] text-white/40 leading-relaxed">Click extension &rsaquo; Export &rsaquo; Select <span className="text-white font-bold text-[12px]">Netscape</span> format.</p>
+                                                    </div>
+                                                    <div className="ml-auto animate-pulse">
+                                                        <ChevronRight className="w-4 h-4 text-white/20" />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Paste Content Below</label>
                                                 <textarea
                                                     value={cookieContent}
                                                     onChange={(e) => setCookieContent(e.target.value)}
-                                                    placeholder="Paste new Netscape cookie content..."
-                                                    className="w-full h-20 bg-black/20 border border-white/10 rounded-lg p-3 text-xs text-white/70 font-mono outline-none focus:border-white/20 resize-none"
+                                                    placeholder="# Netscape HTTP Cookie File..."
+                                                    className="w-full h-32 bg-white/[0.03] border border-white/10 rounded-2xl p-4 text-[11px] text-white/70 font-mono outline-none focus:border-blue-500/30 focus:bg-white/[0.05] transition-all resize-none shadow-inner"
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-6">
+                                            <div className="relative w-20 h-20 mx-auto mb-6">
+                                                <div className="absolute inset-0 bg-green-500/20 blur-2xl rounded-full animate-pulse" />
+                                                <div className="relative w-20 h-20 bg-green-500/10 border border-green-500/20 rounded-3xl flex items-center justify-center mx-auto transition-transform hover:scale-110 duration-500">
+                                                    <ShieldCheck className="w-10 h-10 text-green-400" />
+                                                </div>
+                                            </div>
+                                            <h3 className="text-2xl font-black text-white mb-2 tracking-tight">Vault Secured</h3>
+                                            <p className="text-white/40 text-sm max-w-xs mx-auto mb-8 font-medium">
+                                                Your cookies are active. Stories and private content are now unlocked for <span className="text-white font-bold">{currentPlatform.name}</span>.
+                                            </p>
+
+                                            <div className="bg-white/[0.03] rounded-2xl p-5 border border-white/5 text-left group">
+                                                <div className="flex items-center justify-between mb-4">
+                                                    <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Update Vault</p>
+                                                    <div className="h-1 flex-1 mx-4 bg-white/5 rounded-full" />
+                                                </div>
+                                                <p className="text-[11px] text-white/40 mb-3 font-medium">If downloads fail, your session may have expired. Paste a new <span className="font-bold text-white/60">Netscape</span> file below:</p>
+                                                <textarea
+                                                    value={cookieContent}
+                                                    onChange={(e) => setCookieContent(e.target.value)}
+                                                    placeholder="Paste new Netscape content..."
+                                                    className="w-full h-24 bg-black/40 border border-white/10 rounded-xl p-3 text-[11px] text-white/70 font-mono outline-none focus:border-white/20 resize-none transition-all group-focus-within:bg-black/60 shadow-inner"
                                                 />
                                             </div>
                                         </div>
                                     )}
                                 </div>
 
-                                <div className="flex gap-3">
+                                <div className="flex gap-4 sticky bottom-0 bg-[#111] pt-4 border-t border-white/5">
                                     {hasCookies && (
                                         <button
                                             onClick={handleDeleteCookies}
-                                            className="px-5 h-11 border border-red-500/30 text-red-400 rounded-xl font-medium hover:bg-red-500/10 transition cursor-pointer"
+                                            className="px-6 h-12 border border-red-500/30 text-red-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-500/10 transition-all cursor-pointer active:scale-95"
                                         >
-                                            Delete
+                                            Purge
                                         </button>
                                     )}
                                     <button
                                         onClick={handleSaveCookies}
                                         disabled={!cookieContent.trim()}
-                                        className="flex-1 h-11 bg-white text-black rounded-xl font-bold hover:bg-white/90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className={`flex-1 h-12 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all cursor-pointer active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed
+                                            ${hasCookies
+                                                ? 'bg-white/10 text-white hover:bg-white/20 border border-white/10'
+                                                : 'bg-white text-black shadow-xl shadow-white/5 hover:bg-white/90'
+                                            }`}
                                     >
-                                        {hasCookies ? 'Update Cookie' : 'Save Cookie'}
+                                        {hasCookies ? 'Update Session' : 'Activate Vault'}
                                     </button>
                                 </div>
                             </motion.div>

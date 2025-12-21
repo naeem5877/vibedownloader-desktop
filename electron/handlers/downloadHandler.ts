@@ -101,6 +101,9 @@ export function registerDownloadHandlers() {
                 // We will handle thumbnail embedding manually using node-id3
                 console.log('Using node-id3 for thumbnail embedding');
             } else {
+                // Ensure FFmpeg is available for merging video/audio
+                await ensureFFmpeg();
+
                 // FORCE MP4 and H264 priority
                 args.push('--merge-output-format', 'mp4');
 

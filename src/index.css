@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Montserrat', 'Inter', system-ui, -apple-system, sans-serif;
     line-height: 1.5;
     font-weight: 400;
     color-scheme: dark;
@@ -68,6 +68,16 @@ body {
 
     50% {
         opacity: 0.5;
+    }
+}
+
+@keyframes shine {
+    0% {
+        transform: translateX(-100%) skewX(-15deg);
+    }
+
+    100% {
+        transform: translateX(200%) skewX(-15deg);
     }
 }
 

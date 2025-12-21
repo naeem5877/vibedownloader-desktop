@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.6] - 2025-12-21
+
+### ✨ UI & Refinements
+- **Refined Search UI**: Scaled down search input and fetch button for a more compact and professional look.
+- **Improved Window Management**: Enabled launch in maximized state and added support for Windows Aero Snap (multitasking snap) and native title bar double-click.
+
+### 🐛 Fixes & Maintenance
+- **Resolved Icon Conflicts**: Fixed JSX/global type conflicts by renaming lucide-react icons.
+- **Improved Launch Logic**: Smoother application startup and window show/maximize sequence.
+
 ## [1.0.5] - 2025-12-21
 
 ### ✨ Features & Improvements

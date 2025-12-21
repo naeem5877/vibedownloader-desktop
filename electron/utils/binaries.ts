@@ -183,12 +183,12 @@ export async function ensureFFmpeg(): Promise<boolean> {
     console.log('FFmpeg not found, downloading...');
     const mainWindow = getMainWindow();
     mainWindow?.webContents.send('download-progress', {
-        status: 'Downloading FFmpeg for audio processing... (one-time setup)'
+        status: 'Downloading FFmpeg for high-quality processing... (one-time setup)'
     });
 
     const success = await downloadFFmpeg();
     if (success) {
-        showNotification('FFmpeg Ready', 'Audio files will now include cover art!');
+        showNotification('FFmpeg Ready', 'High-quality videos and audio files are now fully supported!');
     }
     return success;
 }

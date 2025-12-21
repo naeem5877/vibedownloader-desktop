@@ -25,14 +25,20 @@ function createWindow() {
         width: 1200,
         height: 800,
         frame: false,
-        transparent: true,
+        transparent: false, // Transparency breaks Snapping (Aero Snap) on Windows
         icon: iconPath,
+        show: false, // Prepare window before showing
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
             contextIsolation: true,
         },
-        backgroundColor: '#00000000'
+        backgroundColor: '#0a0a0b' // Solid background for premium feel
+    });
+
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
+        mainWindow?.maximize(); // Launch in full screen as requested
     });
 
     // Store reference in window manager
