@@ -55,7 +55,7 @@ VibeDownloader is built for those who demand quality and privacy. Unlike web-bas
 
 ---
 
-## � Screenshots
+## 🖼️ Screenshots
 
 <div align="center">
   <img src="Screenshots/Screenshot-1.png" alt="Main Interface" width="400" />
@@ -73,7 +73,7 @@ VibeDownloader is built for those who demand quality and privacy. Unlike web-bas
 
 ---
 
-## �📥 Download & Installation
+## 📥 Download & Installation
 
 ### Windows
 1.  Download the latest installer (`.exe`) from the [Releases Page](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
