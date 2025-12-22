@@ -120,7 +120,7 @@ No ads, no popups, no tracking
 
 </div>
 
-### 🪟 Windows
+### 💻 Windows
 
 1. Download the `.exe` installer from the [**Releases page**](https://github.com/naeem5877/vibedownloader-desktop/releases/latest)
 2. Run the installer and follow the setup wizard
@@ -304,6 +304,6 @@ If you create a fork or modified version:
 
 **If you find this project useful, consider giving it a ⭐**
 
-<sub>© 2024 VibeDownloader. Released under GPL v3.0 License.</sub>
+<sub>© 2025 VibeDownloader. Released under GPL v3.0 License.</sub>
 
 </div>
