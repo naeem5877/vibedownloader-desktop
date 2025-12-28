@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, Link2, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, Link2, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud } from 'react-icons/fa6';
 import { Settings } from './Settings';
@@ -129,6 +129,23 @@ export function Downloader() {
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
 
+    // Batch download features
+    const [batchMode, setBatchMode] = useState(false);
+    const [batchUrls, setBatchUrls] = useState('');
+    const [downloadQueue, setDownloadQueue] = useState<Array<{
+        id: string;
+        url: string;
+        title: string;
+        status: 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
+        progress: number;
+        error?: string;
+        formatId?: string;
+        platform?: string;
+    }>>([]);
+    const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
+    const [batchDownloading, setBatchDownloading] = useState(false);
+    const batchCompletionRef = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null);
+
     // Check cookies when platform changes
     useEffect(() => {
         setHasCookies(false);
@@ -143,30 +160,59 @@ export function Downloader() {
         const handler = (data: any) => {
             console.log('Progress:', data);
             if (data.error) {
-                setError(data.error);
-                setDownloading(false);
-                setDownloadingId(null);
-                setProgress(null);
+                if (batchDownloading && downloadQueue.length > 0 && batchCompletionRef.current) {
+                    // Update current batch item
+                    setDownloadQueue(prev => prev.map((q, idx) => 
+                        idx === currentBatchIndex ? { ...q, status: 'failed', error: data.error } : q
+                    ));
+                    // Resolve/reject the batch promise
+                    batchCompletionRef.current.reject(new Error(data.error));
+                    batchCompletionRef.current = null;
+                } else {
+                    setError(data.error);
+                    setDownloading(false);
+                    setDownloadingId(null);
+                    setProgress(null);
+                }
             } else if (data.complete) {
-                setComplete(true);
-                setDownloading(false);
-                setDownloadingId(null);
-                setProgress(null);
-                if (data.path) setDownloadedFilePath(data.path);
+                if (batchDownloading && downloadQueue.length > 0 && batchCompletionRef.current) {
+                    // Mark current batch item as completed
+                    setDownloadQueue(prev => prev.map((q, idx) => 
+                        idx === currentBatchIndex ? { ...q, status: 'completed', progress: 100 } : q
+                    ));
+                    // Resolve the batch promise
+                    batchCompletionRef.current.resolve();
+                    batchCompletionRef.current = null;
+                } else {
+                    setComplete(true);
+                    setDownloading(false);
+                    setDownloadingId(null);
+                    setProgress(null);
+                    if (data.path) setDownloadedFilePath(data.path);
+                }
             } else if (data.status) {
-                setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status }));
+                if (!batchDownloading) {
+                    setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status }));
+                }
             } else if (data.percent !== undefined) {
-                setProgress({
-                    percent: data.percent,
-                    speed: data.currentSpeed,
-                    eta: data.eta,
-                    downloaded: data.downloaded
-                });
+                if (batchDownloading && downloadQueue.length > 0) {
+                    // Update current batch item progress
+                    setDownloadQueue(prev => prev.map((q, idx) => 
+                        idx === currentBatchIndex ? { ...q, progress: data.percent } : q
+                    ));
+                } else {
+                    setProgress({
+                        percent: data.percent,
+                        speed: data.currentSpeed,
+                        eta: data.eta,
+                        downloaded: data.downloaded
+                    });
+                }
             }
         };
         window.electron.onProgress(handler);
         return () => window.electron.offProgress?.();
-    }, []);
+    }, [batchDownloading, downloadQueue, currentBatchIndex]);
 
     // Escape key to close modals
     useEffect(() => {
@@ -417,6 +463,182 @@ export function Downloader() {
         setProgress(null);
         setSelectedItems(new Set());
         setSearchQuery('');
+        setBatchUrls('');
+        setDownloadQueue([]);
+    };
+
+    // Batch download functions
+    const parseBatchUrls = (text: string): string[] => {
+        return text
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0 && (line.startsWith('http://') || line.startsWith('https://')));
+    };
+
+    const handleBatchSubmit = async () => {
+        const urls = parseBatchUrls(batchUrls);
+        if (urls.length === 0) {
+            setError('Please enter at least one valid URL');
+            return;
+        }
+
+        // Create queue items
+        const queue = urls.map((url, index) => ({
+            id: `batch-${Date.now()}-${index}`,
+            url,
+            title: `Item ${index + 1}`,
+            status: 'pending' as const,
+            progress: 0
+        }));
+
+        setDownloadQueue(queue);
+        setCurrentBatchIndex(0);
+        setBatchDownloading(true);
+        setError(null);
+
+        // Start processing queue
+        await processBatchQueue(queue, 0);
+    };
+
+    const processBatchQueue = async (queue: typeof downloadQueue, startIndex: number) => {
+        for (let i = startIndex; i < queue.length; i++) {
+            if (!batchDownloading) {
+                // Paused - update current index for resume
+                setCurrentBatchIndex(i);
+                break;
+            }
+
+            const item = queue[i];
+            setCurrentBatchIndex(i);
+
+            // Update status to processing
+            setDownloadQueue(prev => prev.map(q => 
+                q.id === item.id ? { ...q, status: 'processing' } : q
+            ));
+
+            try {
+                // Fetch metadata first
+                const isSpotify = item.url.includes('spotify.com');
+                const res = isSpotify
+                    ? await window.electron.getSpotifyInfo(item.url)
+                    : await window.electron.getVideoInfo(item.url);
+
+                if (res.success && res.metadata) {
+                    const metadata = res.metadata;
+                    const title = metadata.title || `Item ${i + 1}`;
+
+                    // Update queue item with title
+                    setDownloadQueue(prev => prev.map(q => 
+                        q.id === item.id ? { ...q, title, status: 'downloading', progress: 0 } : q
+                    ));
+
+                    // Determine format (default to best audio for batch)
+                    const formatId = isSpotify ? 'audio_best' : 'audio_best';
+
+                    // Create a promise that resolves when download completes
+                    const downloadPromise = new Promise<void>((resolve, reject) => {
+                        batchCompletionRef.current = { resolve, reject };
+                        
+                        // Timeout after 10 minutes per download
+                        const timeout = setTimeout(() => {
+                            if (batchCompletionRef.current) {
+                                batchCompletionRef.current.reject(new Error('Download timeout'));
+                                batchCompletionRef.current = null;
+                            }
+                        }, 600000);
+
+                        // Clear timeout when resolved
+                        const originalResolve = resolve;
+                        const originalReject = reject;
+                        batchCompletionRef.current.resolve = () => {
+                            clearTimeout(timeout);
+                            originalResolve();
+                        };
+                        batchCompletionRef.current.reject = (err: Error) => {
+                            clearTimeout(timeout);
+                            originalReject(err);
+                        };
+
+                        // Start download
+                        (async () => {
+                            try {
+                                if (isSpotify && metadata.searchQuery) {
+                                    await window.electron.downloadSpotifyTrack({
+                                        searchQuery: metadata.searchQuery,
+                                        title: metadata.title,
+                                        artist: metadata.uploader || 'Unknown',
+                                        thumbnail: metadata.thumbnail
+                                    });
+                                } else {
+                                    await window.electron.downloadVideo({
+                                        url: item.url,
+                                        formatId,
+                                        title,
+                                        platform: currentPlatform.id,
+                                        thumbnail: metadata.thumbnail
+                                    });
+                                }
+                            } catch (err: any) {
+                                if (batchCompletionRef.current) {
+                                    batchCompletionRef.current.reject(err);
+                                    batchCompletionRef.current = null;
+                                }
+                            }
+                        })();
+                    });
+
+                    // Wait for download to complete
+                    await downloadPromise;
+
+                    // Mark as completed
+                    setDownloadQueue(prev => prev.map(q => 
+                        q.id === item.id ? { ...q, status: 'completed', progress: 100 } : q
+                    ));
+
+                    // Wait a bit before next download
+                    await new Promise(r => setTimeout(r, 500));
+                } else {
+                    throw new Error(res.error || 'Failed to fetch info');
+                }
+            } catch (err: any) {
+                console.error(`Batch download error for ${item.url}:`, err);
+                setDownloadQueue(prev => prev.map(q => 
+                    q.id === item.id ? { 
+                        ...q, 
+                        status: 'failed', 
+                        error: err.message || 'Download failed',
+                        progress: 0
+                    } : q
+                ));
+                // Continue with next item even if this one failed
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
+
+        if (batchDownloading) {
+            setBatchDownloading(false);
+        }
+    };
+
+    const pauseBatchDownload = () => {
+        setBatchDownloading(false);
+    };
+
+    const resumeBatchDownload = async () => {
+        if (currentBatchIndex < downloadQueue.length) {
+            setBatchDownloading(true);
+            await processBatchQueue(downloadQueue, currentBatchIndex);
+        }
+    };
+
+    const cancelBatchDownload = () => {
+        setBatchDownloading(false);
+        setDownloadQueue([]);
+        setCurrentBatchIndex(0);
+    };
+
+    const removeFromQueue = (id: string) => {
+        setDownloadQueue(prev => prev.filter(q => q.id !== id));
     };
 
     // Playlist helpers
@@ -579,7 +801,7 @@ export function Downloader() {
                 </div>
 
                 {/* Platform Selector */}
-                <div className="flex flex-wrap justify-center gap-3 mb-10">
+                <div className="flex flex-wrap justify-center gap-3 mb-6">
                     {platforms.map((p) => {
                         const isActive = currentPlatform.id === p.id;
                         return (
@@ -602,90 +824,264 @@ export function Downloader() {
                     })}
                 </div>
 
-                <form onSubmit={handleSubmit} className="mb-8 w-full max-w-xl mx-auto">
-                    <div className="flex flex-col sm:flex-row gap-2.5 relative z-20">
-                        <div className="flex-1 relative group">
-                            {/* Minimalism Premium Glow */}
-                            <div className="absolute -inset-0.5 bg-gradient-to-r from-white/0 via-white/5 to-white/0 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all duration-500" />
+                {/* Batch Mode Toggle */}
+                <div className="flex justify-center mb-6">
+                    <button
+                        onClick={() => {
+                            setBatchMode(!batchMode);
+                            if (batchMode) {
+                                setBatchUrls('');
+                                setDownloadQueue([]);
+                            }
+                        }}
+                        className={`px-4 py-2 rounded-xl font-medium text-sm transition-all cursor-pointer flex items-center gap-2 ${
+                            batchMode
+                                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
+                        }`}
+                    >
+                        <Layers className="w-4 h-4" />
+                        {batchMode ? 'Batch Mode' : 'Single Mode'}
+                    </button>
+                </div>
 
-                            <div className="relative">
-                                {/* The Glass Base */}
-                                <div className="absolute inset-0 bg-[#0a0a0b]/40 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 group-focus-within:border-white/20 transition-all duration-300" />
+                {!batchMode ? (
+                    <form onSubmit={handleSubmit} className="mb-8 w-full max-w-xl mx-auto">
+                        <div className="flex flex-col sm:flex-row gap-2.5 relative z-20">
+                            <div className="flex-1 relative group">
+                                {/* Minimalism Premium Glow */}
+                                <div className="absolute -inset-0.5 bg-gradient-to-r from-white/0 via-white/5 to-white/0 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all duration-500" />
 
-                                <div className="relative flex items-center h-14 sm:h-15">
-                                    <div className="pl-5 pointer-events-none">
-                                        <Search className="w-4 h-4 text-white/20 group-focus-within:text-white/40 transition-all duration-300" />
-                                    </div>
+                                <div className="relative">
+                                    {/* The Glass Base */}
+                                    <div className="absolute inset-0 bg-[#0a0a0b]/40 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 group-focus-within:border-white/20 transition-all duration-300" />
 
-                                    <input
-                                        type="text"
-                                        value={url}
-                                        onChange={(e) => setUrl(e.target.value)}
-                                        placeholder={isSpotify ? 'Drop link...' : `Paste link here...`}
-                                        disabled={loading || downloading}
-                                        className="w-full h-full pl-3 pr-36 bg-transparent text-white placeholder-white/10 outline-none font-medium text-sm tracking-tight disabled:opacity-50 transition-all"
-                                    />
+                                    <div className="relative flex items-center h-14 sm:h-15">
+                                        <div className="pl-5 pointer-events-none">
+                                            <Search className="w-4 h-4 text-white/20 group-focus-within:text-white/40 transition-all duration-300" />
+                                        </div>
 
-                                    {/* Action Group Inside Input */}
-                                    <div className="absolute right-2 flex items-center gap-1.5">
-                                        {['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id) && (
+                                        <input
+                                            type="text"
+                                            value={url}
+                                            onChange={(e) => setUrl(e.target.value)}
+                                            placeholder={isSpotify ? 'Drop link...' : `Paste link here...`}
+                                            disabled={loading || downloading}
+                                            className="w-full h-full pl-3 pr-36 bg-transparent text-white placeholder-white/10 outline-none font-medium text-sm tracking-tight disabled:opacity-50 transition-all"
+                                        />
+
+                                        {/* Action Group Inside Input */}
+                                        <div className="absolute right-2 flex items-center gap-1.5">
+                                            {['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id) && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowCookieModal(true)}
+                                                    className={`h-9 w-9 flex items-center justify-center rounded-lg transition-all duration-300 cursor-pointer ${hasCookies
+                                                        ? 'bg-green-500/10 text-green-400 border border-green-500/15'
+                                                        : 'bg-white/[0.03] text-white/20 hover:text-white hover:bg-white/10 border border-white/5'}`}
+                                                    title={hasCookies ? "Active session" : "Login required"}
+                                                >
+                                                    <Key className={`w-3.5 h-3.5 ${hasCookies ? 'animate-pulse' : ''}`} />
+                                                </button>
+                                            )}
                                             <button
                                                 type="button"
-                                                onClick={() => setShowCookieModal(true)}
-                                                className={`h-9 w-9 flex items-center justify-center rounded-lg transition-all duration-300 cursor-pointer ${hasCookies
-                                                    ? 'bg-green-500/10 text-green-400 border border-green-500/15'
-                                                    : 'bg-white/[0.03] text-white/20 hover:text-white hover:bg-white/10 border border-white/5'}`}
-                                                title={hasCookies ? "Active session" : "Login required"}
+                                                onClick={async () => {
+                                                    try {
+                                                        const text = await navigator.clipboard.readText();
+                                                        setUrl(text);
+                                                    } catch (e) {
+                                                        console.log('Clipboard access denied');
+                                                    }
+                                                }}
+                                                disabled={loading || downloading}
+                                                className="h-9 px-4 bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 rounded-lg text-[9px] font-bold uppercase tracking-wider text-white/30 hover:text-white transition-all cursor-pointer disabled:opacity-30 active:scale-95"
                                             >
-                                                <Key className={`w-3.5 h-3.5 ${hasCookies ? 'animate-pulse' : ''}`} />
+                                                Paste
                                             </button>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                try {
-                                                    const text = await navigator.clipboard.readText();
-                                                    setUrl(text);
-                                                } catch (e) {
-                                                    console.log('Clipboard access denied');
-                                                }
-                                            }}
-                                            disabled={loading || downloading}
-                                            className="h-9 px-4 bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 rounded-lg text-[9px] font-bold uppercase tracking-wider text-white/30 hover:text-white transition-all cursor-pointer disabled:opacity-30 active:scale-95"
-                                        >
-                                            Paste
-                                        </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+
+                            <button
+                                type="submit"
+                                disabled={!url || loading || downloading}
+                                className={`h-14 sm:h-15 px-8 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all duration-500 cursor-pointer active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed group/btn overflow-hidden relative
+                                    ${loading
+                                        ? 'bg-white/5 text-white/30 border border-white/5'
+                                        : 'bg-white text-black hover:shadow-lg hover:shadow-white/5'}`}
+                            >
+                                {/* Button Shine Effect */}
+                                {!loading && (
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/5 to-transparent -translate-x-full group-hover/btn:animate-[shine_1.5s_ease-in-out_infinite] pointer-events-none" />
+                                )}
+
+                                <span className="relative z-10 flex items-center gap-2">
+                                    {loading ? (
+                                        <Loader className="w-4 h-4 animate-spin mx-auto" />
+                                    ) : (
+                                        <>
+                                            FETCH
+                                            <ArrowRight className="w-3.5 h-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5" />
+                                        </>
+                                    )}
+                                </span>
+                            </button>
+                        </div>
+                    </form>
+                ) : (
+                    <div className="mb-8 w-full max-w-2xl mx-auto">
+                        {/* Batch URL Input */}
+                        <div className="mb-4">
+                            <div className="relative group">
+                                <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/0 via-blue-500/5 to-blue-500/0 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all duration-500" />
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-[#0a0a0b]/40 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 group-focus-within:border-white/20 transition-all duration-300" />
+                                    <textarea
+                                        value={batchUrls}
+                                        onChange={(e) => setBatchUrls(e.target.value)}
+                                        placeholder="Paste multiple URLs here (one per line)&#10;Example:&#10;https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=..."
+                                        disabled={batchDownloading}
+                                        className="w-full h-32 p-4 bg-transparent text-white placeholder-white/20 outline-none font-medium text-sm tracking-tight disabled:opacity-50 transition-all resize-none relative z-10"
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-xs text-white/30 mt-2 ml-1">
+                                {parseBatchUrls(batchUrls).length} valid URL{parseBatchUrls(batchUrls).length !== 1 ? 's' : ''} detected
+                            </p>
                         </div>
 
-                        <button
-                            type="submit"
-                            disabled={!url || loading || downloading}
-                            className={`h-14 sm:h-15 px-8 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all duration-500 cursor-pointer active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed group/btn overflow-hidden relative
-                                ${loading
-                                    ? 'bg-white/5 text-white/30 border border-white/5'
-                                    : 'bg-white text-black hover:shadow-lg hover:shadow-white/5'}`}
-                        >
-                            {/* Button Shine Effect */}
-                            {!loading && (
-                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/5 to-transparent -translate-x-full group-hover/btn:animate-[shine_1.5s_ease-in-out_infinite] pointer-events-none" />
-                            )}
-
-                            <span className="relative z-10 flex items-center gap-2">
-                                {loading ? (
-                                    <Loader className="w-4 h-4 animate-spin mx-auto" />
+                        {/* Batch Actions */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleBatchSubmit}
+                                disabled={parseBatchUrls(batchUrls).length === 0 || batchDownloading}
+                                className="flex-1 h-12 px-6 rounded-xl font-bold text-sm bg-blue-500 text-white hover:bg-blue-600 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                {batchDownloading ? (
+                                    <>
+                                        <Loader className="w-4 h-4 animate-spin" />
+                                        Processing...
+                                    </>
                                 ) : (
                                     <>
-                                        FETCH
-                                        <ArrowRight className="w-3.5 h-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5" />
+                                        <Download className="w-4 h-4" />
+                                        Start Batch Download ({parseBatchUrls(batchUrls).length})
                                     </>
                                 )}
-                            </span>
-                        </button>
+                            </button>
+                            {batchDownloading ? (
+                                <>
+                                    <button
+                                        onClick={pauseBatchDownload}
+                                        className="h-12 px-4 rounded-xl font-medium text-sm bg-white/10 text-white hover:bg-white/20 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <Pause className="w-4 h-4" />
+                                        Pause
+                                    </button>
+                                    <button
+                                        onClick={cancelBatchDownload}
+                                        className="h-12 px-4 rounded-xl font-medium text-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <X className="w-4 h-4" />
+                                        Cancel
+                                    </button>
+                                </>
+                            ) : downloadQueue.length > 0 && downloadQueue.some(q => q.status !== 'completed' && q.status !== 'failed') && (
+                                <button
+                                    onClick={resumeBatchDownload}
+                                    className="h-12 px-4 rounded-xl font-medium text-sm bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30 transition-all cursor-pointer flex items-center gap-2"
+                                >
+                                    <PlayCircle className="w-4 h-4" />
+                                    Resume
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Download Queue */}
+                        {downloadQueue.length > 0 && (
+                            <div className="mt-6 space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-bold text-white/60">Download Queue</h3>
+                                    <span className="text-xs text-white/40">
+                                        {downloadQueue.filter(q => q.status === 'completed').length} / {downloadQueue.length} completed
+                                    </span>
+                                </div>
+                                {downloadQueue.map((item, index) => (
+                                    <div
+                                        key={item.id}
+                                        className={`p-3 rounded-xl border transition-all ${
+                                            item.status === 'completed'
+                                                ? 'bg-green-500/10 border-green-500/20'
+                                                : item.status === 'failed'
+                                                ? 'bg-red-500/10 border-red-500/20'
+                                                : item.status === 'downloading' || item.status === 'processing'
+                                                ? 'bg-blue-500/10 border-blue-500/20'
+                                                : 'bg-white/5 border-white/10'
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-3">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    {item.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />}
+                                                    {item.status === 'failed' && <X className="w-4 h-4 text-red-400 shrink-0" />}
+                                                    {(item.status === 'downloading' || item.status === 'processing') && <Loader className="w-4 h-4 text-blue-400 animate-spin shrink-0" />}
+                                                    {item.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-white/20 shrink-0" />}
+                                                    <p className="font-medium text-sm text-white truncate">{item.title}</p>
+                                                </div>
+                                                <p className="text-xs text-white/40 truncate mb-2">{item.url}</p>
+                                                {(item.status === 'downloading' || item.status === 'processing') && (
+                                                    <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                                                        <div
+                                                            className="h-full bg-blue-500 transition-all duration-300"
+                                                            style={{ width: `${item.progress}%` }}
+                                                        />
+                                                    </div>
+                                                )}
+                                                {item.error && (
+                                                    <p className="text-xs text-red-400 mt-1">{item.error}</p>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                {item.status === 'failed' && (
+                                                    <button
+                                                        onClick={async () => {
+                                                            // Retry failed download
+                                                            const itemIndex = downloadQueue.findIndex(q => q.id === item.id);
+                                                            if (itemIndex >= 0) {
+                                                                setDownloadQueue(prev => prev.map(q => 
+                                                                    q.id === item.id ? { ...q, status: 'pending', error: undefined } : q
+                                                                ));
+                                                                if (!batchDownloading) {
+                                                                    setBatchDownloading(true);
+                                                                    await processBatchQueue(downloadQueue, itemIndex);
+                                                                }
+                                                            }
+                                                        }}
+                                                        className="p-1.5 rounded-lg hover:bg-green-500/20 transition-colors cursor-pointer"
+                                                        title="Retry"
+                                                    >
+                                                        <PlayCircle className="w-4 h-4 text-green-400" />
+                                                    </button>
+                                                )}
+                                                {item.status !== 'downloading' && item.status !== 'processing' && (
+                                                    <button
+                                                        onClick={() => removeFromQueue(item.id)}
+                                                        className="p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                                                        title="Remove"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-white/40" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
-                </form>
+                )}
 
                 {/* Error */}
                 <AnimatePresence>
