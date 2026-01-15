@@ -42,4 +42,4 @@ jobs:
           npm run generate-release-notes
           npm run build
           npm run build:electron
-          npx electron-builder --publish always
+          npx electron-builder --publish always --release-notes release-notes.md
