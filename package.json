@@ -66,6 +66,9 @@
   "build": {
     "appId": "com.vibedownloader.app",
     "productName": "VibeDownloader",
+    "releaseInfo": {
+      "releaseNotesFile": "release-notes.md"
+    },
     "copyright": "Copyright © 2026 Naeem",
     "asar": true,
     "directories": {
