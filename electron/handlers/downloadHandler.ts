@@ -61,6 +61,7 @@ export function registerDownloadHandlers() {
 
             const args = [
                 url,
+                '--js-runtimes', 'node',
                 '-o', outputTemplate,
                 '--no-playlist'
             ];
@@ -252,6 +253,7 @@ export function registerDownloadHandlers() {
 
             const args = [
                 ytSearchUrl,
+                '--js-runtimes', 'node',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '-o', outputTemplate,
                 '--no-playlist',

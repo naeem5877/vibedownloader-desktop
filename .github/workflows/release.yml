@@ -39,6 +39,7 @@ jobs:
           SPOTIFY_CLIENT_ID=$SPOTIFY_ID
           SPOTIFY_CLIENT_SECRET=$SPOTIFY_SECRET
           EOF
+          npm run generate-release-notes
           npm run build
           npm run build:electron
           npx electron-builder --publish always

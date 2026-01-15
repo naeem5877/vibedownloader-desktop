@@ -1,6 +1,6 @@
 {
   "name": "vibe-downloader",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Premium YouTube Downloader",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -27,6 +27,7 @@
     "pack:all": "npm run build && npm run build:electron && electron-builder --win --mac --linux",
     "release": "npm run build && npm run build:electron && electron-builder --publish always",
     "lint": "eslint .",
+    "generate-release-notes": "node scripts/extract-release-notes.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -65,6 +66,7 @@
   "build": {
     "appId": "com.vibedownloader.app",
     "productName": "VibeDownloader",
+    "releaseNotesFile": "release-notes.md",
     "copyright": "Copyright © 2026 Naeem",
     "asar": true,
     "directories": {

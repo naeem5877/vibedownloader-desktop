@@ -138,6 +138,7 @@ export function Downloader() {
         title: string;
         status: 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
         progress: number;
+        mode: 'video' | 'audio';
         error?: string;
         formatId?: string;
         platform?: string;
@@ -145,6 +146,205 @@ export function Downloader() {
     const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
     const [batchDownloading, setBatchDownloading] = useState(false);
     const batchCompletionRef = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null);
+
+    // Ref to access the latest queue state inside async operations
+    const queueRef = useRef(downloadQueue);
+    useEffect(() => { queueRef.current = downloadQueue; }, [downloadQueue]);
+
+    const isBatchComplete = downloadQueue.length > 0 && downloadQueue.every(q => q.status === 'completed');
+
+    // ... (keep cookie useEffects and refs)
+
+    const handleBatchSubmit = async () => {
+        const urls = parseBatchUrls(batchUrls);
+        if (urls.length === 0) {
+            setError('Please enter at least one valid URL');
+            return;
+        }
+
+        const queue = urls.map((url, index) => ({
+            id: `batch-${Date.now()}-${index}`,
+            url,
+            title: `Item ${index + 1}`,
+            status: 'pending' as const,
+            progress: 0,
+            mode: 'video' as const
+        }));
+
+        setDownloadQueue(queue);
+        setCurrentBatchIndex(0);
+        setBatchDownloading(true);
+        batchStateRef.current = { downloading: true, index: 0 };
+        setError(null);
+
+        // Allow state to settle
+        setTimeout(() => processBatchQueue(0), 0);
+    };
+
+    const toggleItemMode = (id: string, mode: 'video' | 'audio') => {
+        setDownloadQueue(prev => prev.map(item =>
+            item.id === id && item.status === 'pending'
+                ? { ...item, mode }
+                : item
+        ));
+    };
+
+    const processBatchQueue = async (startIndex: number) => {
+        // We use queueRef to get the total count, but we must be careful about concurrency
+        // We will iterate based on index
+        const totalItems = queueRef.current.length;
+
+        for (let i = startIndex; i < totalItems; i++) {
+            if (!batchStateRef.current.downloading) {
+                setCurrentBatchIndex(i);
+                break;
+            }
+
+            // Get the latest item state from ref
+            const currentItem = queueRef.current[i];
+            if (!currentItem) break;
+
+            setCurrentBatchIndex(i);
+
+            // Update status to processing
+            setDownloadQueue(prev => prev.map(q =>
+                q.id === currentItem.id ? { ...q, status: 'processing' } : q
+            ));
+
+            try {
+                // Fetch metadata first
+                const isSpotify = currentItem.url.includes('spotify.com');
+                const res = isSpotify
+                    ? await window.electron.getSpotifyInfo(currentItem.url)
+                    : await window.electron.getVideoInfo(currentItem.url);
+
+                if (res.success && res.metadata) {
+                    const metadata = res.metadata;
+                    const title = metadata.title || `Item ${i + 1}`;
+
+                    // Update queue item with title
+                    setDownloadQueue(prev => prev.map(q =>
+                        q.id === currentItem.id ? { ...q, title, status: 'downloading', progress: 0 } : q
+                    ));
+
+                    // Determine format based on the item's mode
+                    // We must read the mode again from the ref in case it changed
+                    const latestItem = queueRef.current[i];
+                    const mode = latestItem.mode;
+                    const formatId = isSpotify ? 'audio_best' : (mode === 'audio' ? 'audio_best' : 'best');
+
+                    // Create a promise that resolves when download completes
+                    const downloadPromise = new Promise<void>((resolve, reject) => {
+                        // Update ref index for the listener
+                        batchStateRef.current.index = i;
+                        batchCompletionRef.current = { resolve, reject };
+
+                        // Timeout after 10 minutes per download
+                        const timeout = setTimeout(() => {
+                            if (batchCompletionRef.current) {
+                                batchCompletionRef.current.reject(new Error('Download timeout'));
+                                batchCompletionRef.current = null;
+                            }
+                        }, 600000);
+
+                        // Clear timeout when resolved
+                        const originalResolve = resolve;
+                        const originalReject = reject;
+                        batchCompletionRef.current.resolve = () => {
+                            clearTimeout(timeout);
+                            originalResolve();
+                        };
+                        batchCompletionRef.current.reject = (err: Error) => {
+                            clearTimeout(timeout);
+                            originalReject(err);
+                        };
+
+                        // Start download
+                        (async () => {
+                            try {
+                                if (isSpotify && metadata.searchQuery) {
+                                    await window.electron.downloadSpotifyTrack({
+                                        searchQuery: metadata.searchQuery,
+                                        title: metadata.title,
+                                        artist: metadata.uploader || 'Unknown',
+                                        thumbnail: metadata.thumbnail
+                                    });
+                                } else {
+                                    await window.electron.downloadVideo({
+                                        url: currentItem.url,
+                                        formatId,
+                                        title,
+                                        platform: currentPlatform.id,
+                                        thumbnail: metadata.thumbnail
+                                    });
+                                }
+                            } catch (err: any) {
+                                if (batchCompletionRef.current) {
+                                    batchCompletionRef.current.reject(err);
+                                    batchCompletionRef.current = null;
+                                }
+                            }
+                        })();
+                    });
+
+                    // Wait for download to complete
+                    await downloadPromise;
+
+                    // Mark as completed
+                    setDownloadQueue(prev => prev.map(q =>
+                        q.id === currentItem.id ? { ...q, status: 'completed', progress: 100 } : q
+                    ));
+
+                    // Wait a bit before next download
+                    await new Promise(r => setTimeout(r, 500));
+                } else {
+                    throw new Error(res.error || 'Failed to fetch info');
+                }
+            } catch (err: any) {
+                console.error(`Batch download error for ${currentItem.url}:`, err);
+                setDownloadQueue(prev => prev.map(q =>
+                    q.id === currentItem.id ? {
+                        ...q,
+                        status: 'failed',
+                        error: err.message || 'Download failed',
+                        progress: 0
+                    } : q
+                ));
+                // Continue with next item even if this one failed
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
+
+        if (batchStateRef.current.downloading) {
+            setBatchDownloading(false);
+            batchStateRef.current.downloading = false;
+        }
+    };
+
+    const pauseBatchDownload = () => {
+        setBatchDownloading(false);
+        batchStateRef.current.downloading = false;
+    };
+
+    const resumeBatchDownload = async () => {
+        // Use queueRef length
+        if (currentBatchIndex < queueRef.current.length) {
+            setBatchDownloading(true);
+            batchStateRef.current = { downloading: true, index: currentBatchIndex };
+            await processBatchQueue(currentBatchIndex);
+        }
+    };
+
+    const cancelBatchDownload = () => {
+        setBatchDownloading(false);
+        batchStateRef.current.downloading = false;
+        setDownloadQueue([]);
+        setCurrentBatchIndex(0);
+    };
+
+    const removeFromQueue = (id: string) => {
+        setDownloadQueue(prev => prev.filter(q => q.id !== id));
+    };
 
     // Check cookies when platform changes
     useEffect(() => {
@@ -156,18 +356,32 @@ export function Downloader() {
         }
     }, [currentPlatform.id]);
 
+    // Refs for accessing state inside event listeners without re-binding
+    const batchStateRef = useRef({ downloading: false, index: 0 });
+
+    useEffect(() => {
+        batchStateRef.current = { downloading: batchDownloading, index: currentBatchIndex };
+    }, [batchDownloading, currentBatchIndex]);
+
     useEffect(() => {
         const handler = (data: any) => {
-            console.log('Progress:', data);
+            const { downloading, index } = batchStateRef.current;
+            // Check if we have an active batch item promise waiting for this event
+            const isBatchActive = !!batchCompletionRef.current;
+
+            console.log('Progress:', data, 'BatchActive:', isBatchActive, 'BatchMode:', downloading);
+
             if (data.error) {
-                if (batchDownloading && downloadQueue.length > 0 && batchCompletionRef.current) {
+                if (isBatchActive) {
                     // Update current batch item
-                    setDownloadQueue(prev => prev.map((q, idx) => 
-                        idx === currentBatchIndex ? { ...q, status: 'failed', error: data.error } : q
+                    setDownloadQueue(prev => prev.map((q, idx) =>
+                        idx === index ? { ...q, status: 'failed', error: data.error } : q
                     ));
-                    // Resolve/reject the batch promise
-                    batchCompletionRef.current.reject(new Error(data.error));
-                    batchCompletionRef.current = null;
+                    // Check if we have a promise to reject
+                    if (batchCompletionRef.current) {
+                        batchCompletionRef.current.reject(new Error(data.error));
+                        batchCompletionRef.current = null;
+                    }
                 } else {
                     setError(data.error);
                     setDownloading(false);
@@ -175,14 +389,16 @@ export function Downloader() {
                     setProgress(null);
                 }
             } else if (data.complete) {
-                if (batchDownloading && downloadQueue.length > 0 && batchCompletionRef.current) {
+                if (isBatchActive) {
                     // Mark current batch item as completed
-                    setDownloadQueue(prev => prev.map((q, idx) => 
-                        idx === currentBatchIndex ? { ...q, status: 'completed', progress: 100 } : q
+                    setDownloadQueue(prev => prev.map((q, idx) =>
+                        idx === index ? { ...q, status: 'completed', progress: 100 } : q
                     ));
                     // Resolve the batch promise
-                    batchCompletionRef.current.resolve();
-                    batchCompletionRef.current = null;
+                    if (batchCompletionRef.current) {
+                        batchCompletionRef.current.resolve();
+                        batchCompletionRef.current = null;
+                    }
                 } else {
                     setComplete(true);
                     setDownloading(false);
@@ -191,14 +407,15 @@ export function Downloader() {
                     if (data.path) setDownloadedFilePath(data.path);
                 }
             } else if (data.status) {
-                if (!batchDownloading) {
+                // Only show speed for single downloads or if specifically desired
+                if (!isBatchActive && !downloading) {
                     setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status }));
                 }
             } else if (data.percent !== undefined) {
-                if (batchDownloading && downloadQueue.length > 0) {
+                if (isBatchActive) {
                     // Update current batch item progress
-                    setDownloadQueue(prev => prev.map((q, idx) => 
-                        idx === currentBatchIndex ? { ...q, progress: data.percent } : q
+                    setDownloadQueue(prev => prev.map((q, idx) =>
+                        idx === index ? { ...q, progress: data.percent } : q
                     ));
                 } else {
                     setProgress({
@@ -212,7 +429,7 @@ export function Downloader() {
         };
         window.electron.onProgress(handler);
         return () => window.electron.offProgress?.();
-    }, [batchDownloading, downloadQueue, currentBatchIndex]);
+    }, []); // Empty dependency array to prevent listener re-binding
 
     // Escape key to close modals
     useEffect(() => {
@@ -470,176 +687,12 @@ export function Downloader() {
     // Batch download functions
     const parseBatchUrls = (text: string): string[] => {
         return text
-            .split('\n')
+            .split(/\r?\n/)
             .map(line => line.trim())
             .filter(line => line.length > 0 && (line.startsWith('http://') || line.startsWith('https://')));
     };
 
-    const handleBatchSubmit = async () => {
-        const urls = parseBatchUrls(batchUrls);
-        if (urls.length === 0) {
-            setError('Please enter at least one valid URL');
-            return;
-        }
 
-        // Create queue items
-        const queue = urls.map((url, index) => ({
-            id: `batch-${Date.now()}-${index}`,
-            url,
-            title: `Item ${index + 1}`,
-            status: 'pending' as const,
-            progress: 0
-        }));
-
-        setDownloadQueue(queue);
-        setCurrentBatchIndex(0);
-        setBatchDownloading(true);
-        setError(null);
-
-        // Start processing queue
-        await processBatchQueue(queue, 0);
-    };
-
-    const processBatchQueue = async (queue: typeof downloadQueue, startIndex: number) => {
-        for (let i = startIndex; i < queue.length; i++) {
-            if (!batchDownloading) {
-                // Paused - update current index for resume
-                setCurrentBatchIndex(i);
-                break;
-            }
-
-            const item = queue[i];
-            setCurrentBatchIndex(i);
-
-            // Update status to processing
-            setDownloadQueue(prev => prev.map(q => 
-                q.id === item.id ? { ...q, status: 'processing' } : q
-            ));
-
-            try {
-                // Fetch metadata first
-                const isSpotify = item.url.includes('spotify.com');
-                const res = isSpotify
-                    ? await window.electron.getSpotifyInfo(item.url)
-                    : await window.electron.getVideoInfo(item.url);
-
-                if (res.success && res.metadata) {
-                    const metadata = res.metadata;
-                    const title = metadata.title || `Item ${i + 1}`;
-
-                    // Update queue item with title
-                    setDownloadQueue(prev => prev.map(q => 
-                        q.id === item.id ? { ...q, title, status: 'downloading', progress: 0 } : q
-                    ));
-
-                    // Determine format (default to best audio for batch)
-                    const formatId = isSpotify ? 'audio_best' : 'audio_best';
-
-                    // Create a promise that resolves when download completes
-                    const downloadPromise = new Promise<void>((resolve, reject) => {
-                        batchCompletionRef.current = { resolve, reject };
-                        
-                        // Timeout after 10 minutes per download
-                        const timeout = setTimeout(() => {
-                            if (batchCompletionRef.current) {
-                                batchCompletionRef.current.reject(new Error('Download timeout'));
-                                batchCompletionRef.current = null;
-                            }
-                        }, 600000);
-
-                        // Clear timeout when resolved
-                        const originalResolve = resolve;
-                        const originalReject = reject;
-                        batchCompletionRef.current.resolve = () => {
-                            clearTimeout(timeout);
-                            originalResolve();
-                        };
-                        batchCompletionRef.current.reject = (err: Error) => {
-                            clearTimeout(timeout);
-                            originalReject(err);
-                        };
-
-                        // Start download
-                        (async () => {
-                            try {
-                                if (isSpotify && metadata.searchQuery) {
-                                    await window.electron.downloadSpotifyTrack({
-                                        searchQuery: metadata.searchQuery,
-                                        title: metadata.title,
-                                        artist: metadata.uploader || 'Unknown',
-                                        thumbnail: metadata.thumbnail
-                                    });
-                                } else {
-                                    await window.electron.downloadVideo({
-                                        url: item.url,
-                                        formatId,
-                                        title,
-                                        platform: currentPlatform.id,
-                                        thumbnail: metadata.thumbnail
-                                    });
-                                }
-                            } catch (err: any) {
-                                if (batchCompletionRef.current) {
-                                    batchCompletionRef.current.reject(err);
-                                    batchCompletionRef.current = null;
-                                }
-                            }
-                        })();
-                    });
-
-                    // Wait for download to complete
-                    await downloadPromise;
-
-                    // Mark as completed
-                    setDownloadQueue(prev => prev.map(q => 
-                        q.id === item.id ? { ...q, status: 'completed', progress: 100 } : q
-                    ));
-
-                    // Wait a bit before next download
-                    await new Promise(r => setTimeout(r, 500));
-                } else {
-                    throw new Error(res.error || 'Failed to fetch info');
-                }
-            } catch (err: any) {
-                console.error(`Batch download error for ${item.url}:`, err);
-                setDownloadQueue(prev => prev.map(q => 
-                    q.id === item.id ? { 
-                        ...q, 
-                        status: 'failed', 
-                        error: err.message || 'Download failed',
-                        progress: 0
-                    } : q
-                ));
-                // Continue with next item even if this one failed
-                await new Promise(r => setTimeout(r, 500));
-            }
-        }
-
-        if (batchDownloading) {
-            setBatchDownloading(false);
-        }
-    };
-
-    const pauseBatchDownload = () => {
-        setBatchDownloading(false);
-    };
-
-    const resumeBatchDownload = async () => {
-        if (currentBatchIndex < downloadQueue.length) {
-            setBatchDownloading(true);
-            await processBatchQueue(downloadQueue, currentBatchIndex);
-        }
-    };
-
-    const cancelBatchDownload = () => {
-        setBatchDownloading(false);
-        setDownloadQueue([]);
-        setCurrentBatchIndex(0);
-    };
-
-    const removeFromQueue = (id: string) => {
-        setDownloadQueue(prev => prev.filter(q => q.id !== id));
-    };
 
     // Playlist helpers
     const toggleItem = (id: string) => {
@@ -834,11 +887,10 @@ export function Downloader() {
                                 setDownloadQueue([]);
                             }
                         }}
-                        className={`px-4 py-2 rounded-xl font-medium text-sm transition-all cursor-pointer flex items-center gap-2 ${
-                            batchMode
-                                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
-                        }`}
+                        className={`px-4 py-2 rounded-xl font-medium text-sm transition-all cursor-pointer flex items-center gap-2 ${batchMode
+                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                            : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
+                            }`}
                     >
                         <Layers className="w-4 h-4" />
                         {batchMode ? 'Batch Mode' : 'Single Mode'}
@@ -932,154 +984,229 @@ export function Downloader() {
                     </form>
                 ) : (
                     <div className="mb-8 w-full max-w-2xl mx-auto">
-                        {/* Batch URL Input */}
-                        <div className="mb-4">
-                            <div className="relative group">
-                                <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/0 via-blue-500/5 to-blue-500/0 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all duration-500" />
-                                <div className="relative">
-                                    <div className="absolute inset-0 bg-[#0a0a0b]/40 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 group-focus-within:border-white/20 transition-all duration-300" />
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all duration-500" />
+                            <div className="relative">
+                                <div className="absolute inset-0 bg-[#0a0a0b]/60 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 transition-all duration-300" />
+                                <div className="relative p-1">
                                     <textarea
                                         value={batchUrls}
                                         onChange={(e) => setBatchUrls(e.target.value)}
-                                        placeholder="Paste multiple URLs here (one per line)&#10;Example:&#10;https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=..."
-                                        disabled={batchDownloading}
-                                        className="w-full h-32 p-4 bg-transparent text-white placeholder-white/20 outline-none font-medium text-sm tracking-tight disabled:opacity-50 transition-all resize-none relative z-10"
+                                        placeholder={`Paste links here (one per line)...\nExample:\nhttps://youtube.com/watch?v=...\nhttps://instagram.com/p/...`}
+                                        className="w-full h-32 bg-transparent text-white placeholder-white/20 p-4 outline-none font-mono text-xs resize-none rounded-lg custom-scrollbar"
+                                        disabled={batchDownloading || downloadQueue.length > 0}
                                     />
                                 </div>
                             </div>
-                            <p className="text-xs text-white/30 mt-2 ml-1">
-                                {parseBatchUrls(batchUrls).length} valid URL{parseBatchUrls(batchUrls).length !== 1 ? 's' : ''} detected
-                            </p>
                         </div>
 
-                        {/* Batch Actions */}
-                        <div className="flex gap-2">
+                        {/* Batch Controls */}
+                        {!batchDownloading && downloadQueue.length === 0 && (
                             <button
                                 onClick={handleBatchSubmit}
-                                disabled={parseBatchUrls(batchUrls).length === 0 || batchDownloading}
-                                className="flex-1 h-12 px-6 rounded-xl font-bold text-sm bg-blue-500 text-white hover:bg-blue-600 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                disabled={!batchUrls.trim()}
+                                className="mt-4 w-full h-12 bg-white text-black font-bold rounded-xl uppercase tracking-widest text-xs hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)] hover:shadow-[0_0_25px_-5px_rgba(255,255,255,0.5)] transform active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
                             >
-                                {batchDownloading ? (
-                                    <>
-                                        <Loader className="w-4 h-4 animate-spin" />
-                                        Processing...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Download className="w-4 h-4" />
-                                        Start Batch Download ({parseBatchUrls(batchUrls).length})
-                                    </>
-                                )}
+                                <PlayCircle className="w-4 h-4" />
+                                Start Batch Download
                             </button>
-                            {batchDownloading ? (
-                                <>
+                        )}
+
+                        {/* Batch Progress Controls */}
+                        {downloadQueue.length > 0 && !isBatchComplete && (
+                            <div className="mt-4 flex gap-3">
+                                {!batchDownloading ? (
+                                    <button
+                                        onClick={resumeBatchDownload}
+                                        className="flex-1 h-12 bg-green-500 text-black font-bold rounded-xl uppercase tracking-widest text-xs hover:bg-green-400 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                                    >
+                                        <Play className="w-4 h-4" /> Resume
+                                    </button>
+                                ) : (
                                     <button
                                         onClick={pauseBatchDownload}
-                                        className="h-12 px-4 rounded-xl font-medium text-sm bg-white/10 text-white hover:bg-white/20 transition-all cursor-pointer flex items-center gap-2"
+                                        className="flex-1 h-12 bg-yellow-500 text-black font-bold rounded-xl uppercase tracking-widest text-xs hover:bg-yellow-400 transition-all flex items-center justify-center gap-2 cursor-pointer"
                                     >
-                                        <Pause className="w-4 h-4" />
-                                        Pause
+                                        <Pause className="w-4 h-4" /> Pause
                                     </button>
-                                    <button
-                                        onClick={cancelBatchDownload}
-                                        className="h-12 px-4 rounded-xl font-medium text-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all cursor-pointer flex items-center gap-2"
-                                    >
-                                        <X className="w-4 h-4" />
-                                        Cancel
-                                    </button>
-                                </>
-                            ) : downloadQueue.length > 0 && downloadQueue.some(q => q.status !== 'completed' && q.status !== 'failed') && (
+                                )}
                                 <button
-                                    onClick={resumeBatchDownload}
-                                    className="h-12 px-4 rounded-xl font-medium text-sm bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30 transition-all cursor-pointer flex items-center gap-2"
+                                    onClick={cancelBatchDownload}
+                                    className="px-6 h-12 bg-white/5 text-white/60 font-bold rounded-xl uppercase tracking-widest text-xs hover:bg-red-500/20 hover:text-red-400 border border-white/5 hover:border-red-500/20 transition-all cursor-pointer"
                                 >
-                                    <PlayCircle className="w-4 h-4" />
-                                    Resume
+                                    Cancel
                                 </button>
-                            )}
-                        </div>
-
-                        {/* Download Queue */}
-                        {downloadQueue.length > 0 && (
-                            <div className="mt-6 space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-                                <div className="flex items-center justify-between mb-3">
-                                    <h3 className="text-sm font-bold text-white/60">Download Queue</h3>
-                                    <span className="text-xs text-white/40">
-                                        {downloadQueue.filter(q => q.status === 'completed').length} / {downloadQueue.length} completed
-                                    </span>
-                                </div>
-                                {downloadQueue.map((item, index) => (
-                                    <div
-                                        key={item.id}
-                                        className={`p-3 rounded-xl border transition-all ${
-                                            item.status === 'completed'
-                                                ? 'bg-green-500/10 border-green-500/20'
-                                                : item.status === 'failed'
-                                                ? 'bg-red-500/10 border-red-500/20'
-                                                : item.status === 'downloading' || item.status === 'processing'
-                                                ? 'bg-blue-500/10 border-blue-500/20'
-                                                : 'bg-white/5 border-white/10'
-                                        }`}
-                                    >
-                                        <div className="flex items-start gap-3">
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    {item.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />}
-                                                    {item.status === 'failed' && <X className="w-4 h-4 text-red-400 shrink-0" />}
-                                                    {(item.status === 'downloading' || item.status === 'processing') && <Loader className="w-4 h-4 text-blue-400 animate-spin shrink-0" />}
-                                                    {item.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-white/20 shrink-0" />}
-                                                    <p className="font-medium text-sm text-white truncate">{item.title}</p>
-                                                </div>
-                                                <p className="text-xs text-white/40 truncate mb-2">{item.url}</p>
-                                                {(item.status === 'downloading' || item.status === 'processing') && (
-                                                    <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                                                        <div
-                                                            className="h-full bg-blue-500 transition-all duration-300"
-                                                            style={{ width: `${item.progress}%` }}
-                                                        />
-                                                    </div>
-                                                )}
-                                                {item.error && (
-                                                    <p className="text-xs text-red-400 mt-1">{item.error}</p>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                {item.status === 'failed' && (
-                                                    <button
-                                                        onClick={async () => {
-                                                            // Retry failed download
-                                                            const itemIndex = downloadQueue.findIndex(q => q.id === item.id);
-                                                            if (itemIndex >= 0) {
-                                                                setDownloadQueue(prev => prev.map(q => 
-                                                                    q.id === item.id ? { ...q, status: 'pending', error: undefined } : q
-                                                                ));
-                                                                if (!batchDownloading) {
-                                                                    setBatchDownloading(true);
-                                                                    await processBatchQueue(downloadQueue, itemIndex);
-                                                                }
-                                                            }
-                                                        }}
-                                                        className="p-1.5 rounded-lg hover:bg-green-500/20 transition-colors cursor-pointer"
-                                                        title="Retry"
-                                                    >
-                                                        <PlayCircle className="w-4 h-4 text-green-400" />
-                                                    </button>
-                                                )}
-                                                {item.status !== 'downloading' && item.status !== 'processing' && (
-                                                    <button
-                                                        onClick={() => removeFromQueue(item.id)}
-                                                        className="p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-                                                        title="Remove"
-                                                    >
-                                                        <Trash2 className="w-4 h-4 text-white/40" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
                         )}
+
+                        {/* Download Queue with Premium UI */}
+                        {downloadQueue.length > 0 && (
+                            <div className="mt-8 space-y-4">
+                                <div className="flex items-center justify-between mb-4 px-1">
+                                    <h3 className="text-sm font-bold text-white/60 uppercase tracking-widest">Download Queue</h3>
+                                    <span className="text-xs font-medium text-white/40 bg-white/5 px-2 py-1 rounded-lg border border-white/5">
+                                        {downloadQueue.filter(q => q.status === 'completed').length} / {downloadQueue.length} Done
+                                    </span>
+                                </div>
+
+                                <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-1">
+                                    <AnimatePresence>
+                                        {downloadQueue.map((item, index) => (
+                                            <motion.div
+                                                key={item.id}
+                                                layout
+                                                initial={{ opacity: 0, y: 10 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, scale: 0.95 }}
+                                                className={`relative overflow-hidden group rounded-xl border transition-all duration-300 ${item.status === 'completed'
+                                                    ? 'bg-green-500/5 border-green-500/20'
+                                                    : item.status === 'failed'
+                                                        ? 'bg-red-500/5 border-red-500/20'
+                                                        : item.status === 'downloading' || item.status === 'processing'
+                                                            ? 'bg-blue-500/5 border-blue-500/20 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]'
+                                                            : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.05]'
+                                                    }`}
+                                            >
+                                                {/* Progress Bar Background */}
+                                                {(item.status === 'downloading' || item.status === 'processing') && (
+                                                    <div className="absolute inset-0 bg-blue-500/5 transition-all duration-500" style={{ width: `${item.progress}%` }} />
+                                                )}
+
+                                                <div className="relative p-4 flex items-center gap-4">
+                                                    {/* Status Icon */}
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-300 ${item.status === 'completed' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                                                        item.status === 'failed' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                                                            item.status === 'downloading' || item.status === 'processing' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                                                                'bg-white/5 border-white/10 text-white/30'
+                                                        }`}>
+                                                        {item.status === 'completed' ? <CheckCircle2 className="w-5 h-5" /> :
+                                                            item.status === 'failed' ? <X className="w-5 h-5" /> :
+                                                                item.status === 'downloading' || item.status === 'processing' ? <Loader className="w-5 h-5 animate-spin" /> :
+                                                                    <span className="font-bold text-xs">{index + 1}</span>}
+                                                    </div>
+
+                                                    {/* Content Info */}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <p className="font-bold text-sm text-white truncate">{item.title}</p>
+                                                            {item.status === 'processing' && <span className="text-[10px] text-blue-400 animate-pulse">Fetching info...</span>}
+                                                        </div>
+                                                        <div className="flex items-center gap-3 text-xs">
+                                                            <p className="text-white/40 truncate max-w-[200px]">{item.url}</p>
+                                                            {item.error && <span className="text-red-400 truncate max-w-[150px]">• {item.error}</span>}
+                                                        </div>
+
+                                                        {/* Progress Bar (Slim) */}
+                                                        {(item.status === 'downloading' || item.status === 'processing') && (
+                                                            <div className="mt-3 w-full bg-white/10 rounded-full h-1 overflow-hidden">
+                                                                <div
+                                                                    className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                                                                    style={{ width: `${item.progress}%` }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Actions & Toggles */}
+                                                    <div className="flex items-center gap-2">
+                                                        {/* A/V Toggle - Only active if pending */}
+                                                        <div className={`flex bg-black/20 rounded-lg p-0.5 border border-white/5 ${item.status !== 'pending' ? 'opacity-50 pointer-events-none' : ''}`}>
+                                                            <button
+                                                                onClick={() => toggleItemMode(item.id, 'video')}
+                                                                className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'video' ? 'bg-blue-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
+                                                                    }`}
+                                                            >
+                                                                Video
+                                                            </button>
+                                                            <button
+                                                                onClick={() => toggleItemMode(item.id, 'audio')}
+                                                                className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'audio' ? 'bg-green-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
+                                                                    }`}
+                                                            >
+                                                                Audio
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Action Buttons */}
+                                                        {item.status === 'failed' && (
+                                                            <button
+                                                                onClick={async () => {
+                                                                    const itemIndex = downloadQueue.findIndex(q => q.id === item.id);
+                                                                    if (itemIndex >= 0) {
+                                                                        setDownloadQueue(prev => prev.map(q =>
+                                                                            q.id === item.id ? { ...q, status: 'pending', error: undefined } : q
+                                                                        ));
+                                                                        if (!batchDownloading) {
+                                                                            setBatchDownloading(true);
+                                                                            // Small delay to ensure state updates before processing
+                                                                            setTimeout(() => processBatchQueue(itemIndex), 50);
+                                                                        }
+                                                                    }
+                                                                }}
+                                                                className="p-2 rounded-lg bg-white/5 hover:bg-green-500/20 text-white/40 hover:text-green-400 transition ml-2 border border-transparent hover:border-green-500/20 cursor-pointer"
+                                                                title="Retry"
+                                                            >
+                                                                <PlayCircle className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+
+                                                        {item.status !== 'downloading' && item.status !== 'processing' && (
+                                                            <button
+                                                                onClick={() => removeFromQueue(item.id)}
+                                                                className="p-2 rounded-lg bg-white/5 hover:bg-red-500/20 text-white/40 hover:text-red-400 transition ml-1 border border-transparent hover:border-red-500/20 cursor-pointer"
+                                                                title="Remove"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </motion.div>
+                                        ))}
+                                    </AnimatePresence>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Batch Success Message */}
+                        <AnimatePresence>
+                            {isBatchComplete && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0 }}
+                                    className="mt-6 p-6 rounded-2xl bg-gradient-to-br from-green-500/20 to-emerald-600/10 border border-green-500/20 text-center relative overflow-hidden"
+                                >
+                                    <div className="absolute inset-0 bg-green-500/5 animate-pulse" />
+                                    <div className="relative z-10">
+                                        <div className="w-12 h-12 bg-green-500 text-white rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_0_20px_rgba(34,197,94,0.4)]">
+                                            <Check className="w-6 h-6" />
+                                        </div>
+                                        <h3 className="text-xl font-bold text-white mb-1">Batch Completed!</h3>
+                                        <p className="text-white/60 text-sm mb-6">All {downloadQueue.length} files have been downloaded successfully.</p>
+
+                                        <div className="flex gap-3 justify-center">
+                                            <button
+                                                onClick={() => {
+                                                    setDownloadQueue([]);
+                                                    setBatchUrls('');
+                                                    setBatchDownloading(false);
+                                                }}
+                                                className="px-6 py-2.5 bg-white text-black font-bold rounded-xl text-xs uppercase tracking-wider hover:bg-white/90 transition shadow-lg shadow-white/10 cursor-pointer"
+                                            >
+                                                Start New Batch
+                                            </button>
+                                            <button
+                                                onClick={() => setBatchMode(false)}
+                                                className="px-6 py-2.5 bg-white/10 text-white font-bold rounded-xl text-xs uppercase tracking-wider hover:bg-white/20 transition border border-white/5 cursor-pointer"
+                                            >
+                                                Exit
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                 )}
 

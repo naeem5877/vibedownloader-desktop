@@ -67,6 +67,9 @@ Download from YouTube, Instagram (Reels, Stories, Posts), TikTok, Facebook, X (T
 ### 🎵 Spotify Downloads
 Get tracks, albums, and playlists complete with metadata and cover art
 
+### 📦 Batch Downloading
+Queue multiple videos or audio tracks at once with individual format controls and seamless processing
+
 ### ⚡ Fast & Efficient
 Multi-threaded downloads for maximum speed
 
