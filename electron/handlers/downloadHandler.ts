@@ -57,7 +57,38 @@ export function registerDownloadHandlers() {
             const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType, playlistTitle);
             const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const ext = (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4');
-            const outputTemplate = path.join(downloadPath, `${safeTitle}.%(ext)s`);
+
+            // Extract unique ID from URL to prevent file overwrites when downloading multiple videos from same creator
+            let uniqueId = '';
+            if (isInstagram) {
+                // Instagram URLs: /reel/ABC123/, /p/ABC123/, /stories/user/123456/
+                const reelMatch = url.match(/\/reel\/([A-Za-z0-9_-]+)/);
+                const postMatch = url.match(/\/p\/([A-Za-z0-9_-]+)/);
+                const storyMatch = url.match(/\/stories\/[^/]+\/(\d+)/);
+                uniqueId = reelMatch?.[1] || postMatch?.[1] || storyMatch?.[1] || '';
+            } else if (isTiktok) {
+                // TikTok URLs: /video/1234567890
+                const tiktokMatch = url.match(/\/video\/(\d+)/);
+                uniqueId = tiktokMatch?.[1] || '';
+            } else if (isX) {
+                // X/Twitter URLs: /status/1234567890
+                const xMatch = url.match(/\/status\/(\d+)/);
+                uniqueId = xMatch?.[1] || '';
+            } else if (isFacebook) {
+                // Facebook URLs: /videos/1234567890 or /watch?v=1234567890
+                const fbVideoMatch = url.match(/\/videos\/(\d+)/);
+                const fbWatchMatch = url.match(/[?&]v=(\d+)/);
+                uniqueId = fbVideoMatch?.[1] || fbWatchMatch?.[1] || '';
+            }
+
+            // If no unique ID found from URL, generate a short timestamp-based ID
+            if (!uniqueId) {
+                uniqueId = Date.now().toString(36);
+            }
+
+            // Create filename with unique ID to prevent overwrites
+            const uniqueFilename = `${safeTitle}_${uniqueId}`;
+            const outputTemplate = path.join(downloadPath, `${uniqueFilename}.%(ext)s`);
 
             const args = [
                 url,
@@ -160,7 +191,7 @@ export function registerDownloadHandlers() {
             // Speed up downloads with parallel fragments
             args.push('--concurrent-fragments', '16');
 
-            const finalFilePath = path.join(downloadPath, `${safeTitle}.${ext}`);
+            const finalFilePath = path.join(downloadPath, `${uniqueFilename}.${ext}`);
 
             console.log("Starting download with args:", args);
             console.log("Saving to:", downloadPath);

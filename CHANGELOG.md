@@ -1,4 +1,10 @@
-# Changelog
+
+## [1.0.10] - 2026-01-25
+
+### 🐛 Critical Fixes
+- **Smart File Naming (Instagram/Social)**: Fixed a major issue where multiple videos from the same creator (Instagram/Facebook/TikTok) would overwrite each other. Files are now saved with a unique identifier (e.g., `Username_VideoID.mp4`) while keeping the clean username display in notifications.
+- **CI/CD Pipeline Repair**: Resolved a Spotify environment variable injection failure in GitHub Actions by switching to a robust, cross-platform Node.js script for `.env` generation.
+
 
 ## [1.0.9] - 2026-01-15
 

@@ -32,13 +32,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SPOTIFY_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
-          SPOTIFY_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ vars.SPOTIFY_CLIENT_SECRET }}
         run: |
-          cat <<EOF > .env
-          SPOTIFY_CLIENT_ID=$SPOTIFY_ID
-          SPOTIFY_CLIENT_SECRET=$SPOTIFY_SECRET
-          EOF
+          node -e "const fs = require('fs'); fs.writeFileSync('.env', \`SPOTIFY_CLIENT_ID=\${process.env.SPOTIFY_CLIENT_ID}\nSPOTIFY_CLIENT_SECRET=\${process.env.SPOTIFY_CLIENT_SECRET}\`);"
           npm run generate-release-notes
           npm run build
           npm run build:electron
