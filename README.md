@@ -29,7 +29,7 @@
       <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-desktop?style=for-the-badge" alt="Latest Release" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/actions">
-      <img src="https://img.shields.io/badge/build-check_actions-blue?style=for-the-badge" alt="Build Status" />
+      <img src="https://img.shields.io/badge/build-check_actions-green?style=for-the-badge" alt="Build Status" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/releases">
       <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-desktop/total?style=for-the-badge&color=orange" alt="Total Downloads" />
