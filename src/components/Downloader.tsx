@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, Link2, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
 } from 'lucide-react';
-import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud } from 'react-icons/fa6';
+import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaSnapchat } from 'react-icons/fa6';
 import { Settings } from './Settings';
 
 // Types
@@ -43,7 +43,7 @@ interface VideoMetadata {
     album?: string;
 }
 
-type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud';
+type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud' | 'snapchat';
 
 interface Platform {
     id: PlatformId;
@@ -60,6 +60,7 @@ const platforms: Platform[] = [
     { id: 'facebook', name: 'Facebook', icon: <FaFacebook size={22} />, color: '#1877F2', bgClass: 'bg-blue-600' },
     { id: 'spotify', name: 'Spotify', icon: <FaSpotify size={22} />, color: '#1DB954', bgClass: 'bg-green-500' },
     { id: 'x', name: 'X', icon: <FaXTwitter size={22} />, color: '#FFFFFF', bgClass: 'bg-white' },
+    { id: 'snapchat', name: 'Snapchat', icon: <FaSnapchat size={22} />, color: '#FFFC00', bgClass: 'bg-yellow-400' },
     { id: 'pinterest', name: 'Pinterest', icon: <FaPinterest size={22} />, color: '#E60023', bgClass: 'bg-red-700' },
     { id: 'soundcloud', name: 'SoundCloud', icon: <FaSoundcloud size={22} />, color: '#FF5500', bgClass: 'bg-orange-600' }
 ];
@@ -474,6 +475,19 @@ export function Downloader() {
         }
     };
 
+    const handleCookieFileUpload = async () => {
+        try {
+            const res = await window.electron.chooseCookieFile();
+            if (res.success && res.content) {
+                setCookieContent(res.content);
+            } else if (res.error) {
+                alert("Failed to read file: " + res.error);
+            }
+        } catch (e: any) {
+            alert("Error selecting file: " + e.message);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!url || loading) return;
@@ -488,7 +502,8 @@ export function Downloader() {
             'spotify': ['spotify.com'],
             'x': ['twitter.com', 'x.com'],
             'pinterest': ['pinterest.com', 'pin.it'],
-            'soundcloud': ['soundcloud.com']
+            'soundcloud': ['soundcloud.com'],
+            'snapchat': ['snapchat.com']
         };
 
         const validDomains = domains[currentPlatform.id];
@@ -620,7 +635,7 @@ export function Downloader() {
         };
 
         const videoFormats = metadata.formats
-            .filter(f => f.video_ext !== 'none' && f.height && f.height >= 360)
+            .filter(f => f.video_ext !== 'none' && (f.height || f.format_note?.includes('video') || f.format_id.includes('video')))
             .reduce((acc: Format[], cur) => {
                 const existing = acc.find(x => x.height === cur.height);
                 if (!existing) {
@@ -1904,7 +1919,16 @@ export function Downloader() {
                                             </div>
 
                                             <div className="space-y-3">
-                                                <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Paste Content Below</label>
+                                                <div className="flex items-center justify-between ml-1">
+                                                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Paste Content Below</label>
+                                                    <button
+                                                        onClick={handleCookieFileUpload}
+                                                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer"
+                                                    >
+                                                        <FolderOpen className="w-3 h-3" />
+                                                        Upload .txt File
+                                                    </button>
+                                                </div>
                                                 <textarea
                                                     value={cookieContent}
                                                     onChange={(e) => setCookieContent(e.target.value)}
@@ -1929,7 +1953,13 @@ export function Downloader() {
                                             <div className="bg-white/[0.03] rounded-2xl p-5 border border-white/5 text-left group">
                                                 <div className="flex items-center justify-between mb-4">
                                                     <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Update Vault</p>
-                                                    <div className="h-1 flex-1 mx-4 bg-white/5 rounded-full" />
+                                                    <button
+                                                        onClick={handleCookieFileUpload}
+                                                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer"
+                                                    >
+                                                        <FolderOpen className="w-3 h-3" />
+                                                        Upload .txt File
+                                                    </button>
                                                 </div>
                                                 <p className="text-[11px] text-white/40 mb-3 font-medium">If downloads fail, your session may have expired. Paste a new <span className="font-bold text-white/60">Netscape</span> file below:</p>
                                                 <textarea

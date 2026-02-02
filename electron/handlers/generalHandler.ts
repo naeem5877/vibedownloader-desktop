@@ -48,6 +48,20 @@ export function registerGeneralHandlers() {
     });
     ipcMain.handle('close-window', () => getMainWindow()?.close());
 
+    // Settings Management
+    ipcMain.handle('get-settings', async () => {
+        return loadSettings();
+    });
+
+    ipcMain.handle('save-settings', async (event: any, settings: any) => {
+        try {
+            saveSettings(settings);
+            return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
     // Download Path Management
     ipcMain.handle('get-download-path', async () => {
         const settings = loadSettings();
@@ -68,6 +82,25 @@ export function registerGeneralHandlers() {
             return { path: result.filePaths[0] };
         }
         return { path: null };
+    });
+
+    ipcMain.handle('choose-cookie-file', async () => {
+        const win = getMainWindow();
+        const result = await dialog.showOpenDialog(win!, {
+            properties: ['openFile'],
+            filters: [{ name: 'Text Files', extensions: ['txt'] }],
+            title: 'Select Cookie File'
+        });
+
+        if (!result.canceled && result.filePaths.length > 0) {
+            try {
+                const content = fs.readFileSync(result.filePaths[0], 'utf-8');
+                return { success: true, content };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        }
+        return { success: false };
     });
 
     // Proxy Image
@@ -151,41 +184,61 @@ export function registerGeneralHandlers() {
 
     ipcMain.handle('update-ytdlp', async () => {
         try {
-            console.log('Checking for yt-dlp updates...');
-            const ytDlpWrap = getYtDlpWrap();
+            console.log('Checking for yt-dlp updates from settings...');
             const ytDlpBinaryPath = getYtDlpBinaryPath();
 
-            // Get current version
-            let currentVersion = '';
+            // 1. Get current version
+            let currentVersion = 'Unknown';
             try {
-                currentVersion = (await ytDlpWrap.execPromise(['--version'])).trim();
+                const ytDlp = new YtDlpWrap(ytDlpBinaryPath);
+                currentVersion = (await ytDlp.getVersion()).trim();
             } catch (e) {
                 console.log('Could not get current version');
             }
 
-            // Delete and redownload
+            // 2. Get latest version from Github
+            const latestGithubRelease = await YtDlpWrap.getGithubReleases(1, 1);
+            if (!latestGithubRelease || latestGithubRelease.length === 0) {
+                return { updated: false, message: 'Could not connect to GitHub', version: currentVersion };
+            }
+
+            const latestVersion = latestGithubRelease[0].tag_name;
+
+            if (currentVersion === latestVersion) {
+                return { updated: false, message: 'yt-dlp engine is already up to date!', version: currentVersion };
+            }
+
+            // 3. Download update
+            console.log(`Updating yt-dlp: ${currentVersion} -> ${latestVersion}`);
+
+            // Delete old binary first to avoid permission issues on some systems
             if (fs.existsSync(ytDlpBinaryPath)) {
-                fs.unlinkSync(ytDlpBinaryPath);
+                try {
+                    fs.unlinkSync(ytDlpBinaryPath);
+                } catch (e) {
+                    console.error('Failed to delete old binary:', e);
+                }
             }
 
             await YtDlpWrap.downloadFromGithub(ytDlpBinaryPath);
 
-            // Get new version
+            // 4. Verify new version
             let newVersion = '';
             try {
-                newVersion = (await ytDlpWrap.execPromise(['--version'])).trim();
+                const ytDlp = new YtDlpWrap(ytDlpBinaryPath);
+                newVersion = (await ytDlp.getVersion()).trim();
             } catch (e) {
-                console.log('Could not get new version');
+                console.log('Could not verify new version');
             }
 
-            if (newVersion && newVersion !== currentVersion) {
+            if (newVersion && newVersion === latestVersion) {
                 return { updated: true, version: newVersion };
             } else {
-                return { updated: false, message: 'Already up to date', version: newVersion };
+                return { updated: true, version: newVersion || latestVersion, message: 'Update completed but version verification failed' };
             }
         } catch (e: any) {
             console.error('Update failed:', e);
-            return { updated: false, error: e.message };
+            return { updated: false, error: e.message || 'Failed to download update' };
         }
     });
 

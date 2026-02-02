@@ -1,8 +1,9 @@
 
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, Tray, Menu } from 'electron';
 import path from 'path';
-import { initPaths, ensureYtDlp, checkFFmpegOnStartup } from './utils/binaries';
+import { initPaths, ensureYtDlp, checkFFmpegOnStartup, checkForYtDlpUpdate } from './utils/binaries';
 import { setMainWindow } from './utils/windowManager';
+import { loadSettings } from './utils/paths';
 import { registerDownloadHandlers } from './handlers/downloadHandler';
 import { registerInfoHandlers } from './handlers/infoHandler';
 import { registerCookieHandlers } from './handlers/cookieHandler';
@@ -14,6 +15,8 @@ import './utils/env'; // Load env vars
 initPaths();
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
 
 function createWindow() {
     // Get the icon path based on environment
@@ -32,6 +35,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
             contextIsolation: true,
+            backgroundThrottling: true, // Throttles timers and animations when window is hidden
         },
         backgroundColor: '#0a0a0b' // Solid background for premium feel
     });
@@ -54,6 +58,26 @@ function createWindow() {
 
     mainWindow.setMenu(null);
 
+    // Minimize to Tray logic
+    mainWindow.on('close', (event) => {
+        const settings = loadSettings();
+        if (!isQuitting && settings.minimizeToTray) {
+            event.preventDefault();
+            mainWindow?.hide();
+            return false;
+        }
+    });
+
+    // Resource Optimization: Suspend heavy tasks when hidden
+    mainWindow.on('hide', () => {
+        mainWindow?.webContents.setAudioMuted(true);
+        // Chromium automatically throttles JS execution when hidden with backgroundThrottling: true
+    });
+
+    mainWindow.on('show', () => {
+        mainWindow?.webContents.setAudioMuted(false);
+    });
+
     // Open external links in browser
     mainWindow.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
         shell.openExternal(url);
@@ -63,6 +87,39 @@ function createWindow() {
     mainWindow.on('closed', () => {
         mainWindow = null;
         setMainWindow(null);
+    });
+}
+
+function createTray() {
+    const iconPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'build', 'icon.png')
+        : path.join(__dirname, '..', 'build', 'icon.png');
+
+    tray = new Tray(iconPath);
+    const contextMenu = Menu.buildFromTemplate([
+        {
+            label: 'Open VibeDownloader',
+            click: () => {
+                mainWindow?.show();
+                mainWindow?.focus();
+            }
+        },
+        { type: 'separator' },
+        {
+            label: 'Quit',
+            click: () => {
+                isQuitting = true;
+                app.quit();
+            }
+        }
+    ]);
+
+    tray.setToolTip('VibeDownloader');
+    tray.setContextMenu(contextMenu);
+
+    tray.on('double-click', () => {
+        mainWindow?.show();
+        mainWindow?.focus();
     });
 }
 
@@ -81,6 +138,10 @@ app.whenReady().then(async () => {
     checkFFmpegOnStartup();
 
     createWindow();
+    createTray();
+
+    // Check for yt-dlp updates in the background (non-blocking)
+    checkForYtDlpUpdate();
 
     // Register all IPC handlers
     registerDownloadHandlers();
@@ -101,4 +162,5 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
     if (mainWindow === null) createWindow();
+    else mainWindow.show();
 });

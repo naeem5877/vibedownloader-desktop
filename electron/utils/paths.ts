@@ -7,17 +7,25 @@ export const settingsPath = () => path.join(app.getPath('userData'), 'settings.j
 
 export interface AppSettings {
     downloadBasePath: string;
+    minimizeToTray: boolean;
 }
 
 export function loadSettings(): AppSettings {
     try {
         if (fs.existsSync(settingsPath())) {
-            return JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'));
+            const settings = JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'));
+            return {
+                downloadBasePath: settings.downloadBasePath || app.getPath('downloads'),
+                minimizeToTray: settings.minimizeToTray ?? true // Default to true for better UX
+            };
         }
     } catch (e) {
         console.error('Failed to load settings:', e);
     }
-    return { downloadBasePath: app.getPath('downloads') };
+    return {
+        downloadBasePath: app.getPath('downloads'),
+        minimizeToTray: true
+    };
 }
 
 function getDownloadPath(): string {
@@ -64,7 +72,8 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
         'spotify': 'Spotify',
         'x': 'X (Twitter)',
         'pinterest': 'Pinterest',
-        'soundcloud': 'SoundCloud'
+        'soundcloud': 'SoundCloud',
+        'snapchat': 'Snapchat'
     };
 
     const platformFolder = platformFolders[platform.toLowerCase()] || platform;

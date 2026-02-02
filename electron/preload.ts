@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electron', {
     saveCookies: (content: string, platform: string) => ipcRenderer.invoke('save-cookies', content, platform),
     getCookiesStatus: (platform: string) => ipcRenderer.invoke('get-cookies-status', platform),
     deleteCookies: (platform: string) => ipcRenderer.invoke('delete-cookies', platform),
+    chooseCookieFile: () => ipcRenderer.invoke('choose-cookie-file'),
 
     // Download Path
     getDownloadPath: () => ipcRenderer.invoke('get-download-path'),
@@ -61,4 +62,8 @@ contextBridge.exposeInMainWorld('electron', {
     // Utilities
     openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
     copyToClipboard: (text: string) => ipcRenderer.invoke('copy-to-clipboard', text),
+
+    // Settings
+    getSettings: () => ipcRenderer.invoke('get-settings'),
+    saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
 });

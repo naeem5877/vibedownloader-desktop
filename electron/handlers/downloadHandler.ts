@@ -25,6 +25,7 @@ export function registerDownloadHandlers() {
             const isPinterest = url.includes('pinterest.com') || url.includes('pin.it');
             const isSoundcloud = url.includes('soundcloud.com');
             const isX = url.includes('twitter.com') || url.includes('x.com');
+            const isSnapchat = url.includes('snapchat.com');
 
             // Determine platform
             let detectedPlatform = platform || 'youtube';
@@ -36,6 +37,7 @@ export function registerDownloadHandlers() {
             else if (isPinterest) detectedPlatform = 'pinterest';
             else if (isSoundcloud) detectedPlatform = 'soundcloud';
             else if (isX) detectedPlatform = 'x';
+            else if (isSnapchat) detectedPlatform = 'snapchat';
 
             // Determine content type from URL patterns
             let detectedContentType = contentType || 'video';
@@ -79,6 +81,10 @@ export function registerDownloadHandlers() {
                 const fbVideoMatch = url.match(/\/videos\/(\d+)/);
                 const fbWatchMatch = url.match(/[?&]v=(\d+)/);
                 uniqueId = fbVideoMatch?.[1] || fbWatchMatch?.[1] || '';
+            } else if (isSnapchat) {
+                // Snapchat URLs: /add/user/snap/ABC123
+                const snapMatch = url.match(/\/snap\/([A-Za-z0-9_-]+)/);
+                uniqueId = snapMatch?.[1] || '';
             }
 
             // If no unique ID found from URL, generate a short timestamp-based ID
@@ -93,6 +99,8 @@ export function registerDownloadHandlers() {
             const args = [
                 url,
                 '--js-runtimes', 'node',
+                '--extractor-args', 'youtube:player_client=web_embedded,android_vr',
+                '--no-check-certificates',
                 '-o', outputTemplate,
                 '--no-playlist'
             ];
@@ -108,6 +116,8 @@ export function registerDownloadHandlers() {
                 cookiePath = getCookiePath('youtube');
             } else if (isTiktok) {
                 cookiePath = getCookiePath('tiktok');
+            } else if (isSnapchat) {
+                cookiePath = getCookiePath('snapchat');
             }
 
             // Add User-Agent to help with Facebook/Instagram
@@ -115,7 +125,7 @@ export function registerDownloadHandlers() {
 
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
-                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : 'TikTok';
+                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : isSnapchat ? 'Snapchat' : 'Platform';
                 console.log(`Using custom cookies for ${platformName}`);
             } else if (!cookiePath && fs.existsSync(path.join(app.getPath('userData'), 'cookies.txt'))) {
                 args.push('--cookies', path.join(app.getPath('userData'), 'cookies.txt'));
@@ -285,6 +295,8 @@ export function registerDownloadHandlers() {
             const args = [
                 ytSearchUrl,
                 '--js-runtimes', 'node',
+                '--extractor-args', 'youtube:player_client=web_embedded,android_vr',
+                '--no-check-certificates',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '-o', outputTemplate,
                 '--no-playlist',

@@ -12,7 +12,7 @@
   </p>
   
   <p>
-    Download videos, audio, and playlists from YouTube, Instagram, TikTok, Spotify, and more — locally, ad-free, and privacy-first.
+    Download videos, audio, and playlists from YouTube, Instagram, Snapchat, TikTok, Spotify, and more — locally, ad-free, and privacy-first.
   </p>
 
   <p>
@@ -62,7 +62,7 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 <td width="50%">
 
 ### 🎥 Multi-Platform Support
-Download from YouTube, Instagram (Reels, Stories, Posts), TikTok, Facebook, X (Twitter), Pinterest, and SoundCloud
+Download from YouTube, Instagram (Reels, Stories, Posts), Snapchat, TikTok, Facebook, X (Twitter), Pinterest, and SoundCloud
 
 ### 🎵 Spotify Downloads
 Get tracks, albums, and playlists complete with metadata and cover art
@@ -87,6 +87,9 @@ Auto-sorted folders by platform and content type
 
 ### 🛑 Ad-Free Experience
 No ads, no popups, no tracking
+
+### 📥 System Tray Support
+Keep the app running in the background for instant access without cluttering your taskbar
 
 </td>
 </tr>

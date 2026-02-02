@@ -11,6 +11,7 @@ interface Window {
         saveCookies: (content: string, platform: string) => Promise<{ success: boolean; error?: string }>;
         getCookiesStatus: (platform: string) => Promise<{ exists: boolean; path?: string }>;
         deleteCookies: (platform: string) => Promise<{ success: boolean; error?: string }>;
+        chooseCookieFile: () => Promise<{ success: boolean; content?: string; error?: string }>;
 
         // Download Path
         getDownloadPath: () => Promise<{ path: string }>;
@@ -39,6 +40,9 @@ interface Window {
         close: () => Promise<void>;
         openExternal: (url: string) => Promise<void>;
         copyToClipboard: (text: string) => Promise<void>;
+
+        getSettings: () => Promise<any>;
+        saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
     }
 }
 

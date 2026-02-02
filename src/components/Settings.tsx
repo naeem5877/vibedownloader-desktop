@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Settings as SettingsIcon, X, RefreshCw, Loader, FolderOpen, Check, HardDrive, Info
+    Settings as SettingsIcon, X, RefreshCw, Loader, FolderOpen, Check, HardDrive, Info, Monitor
 } from 'lucide-react';
 
 interface SettingsProps {
@@ -15,6 +15,7 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
     const [isUpdating, setIsUpdating] = useState(false);
     const [updateStatus, setUpdateStatus] = useState<string | null>(null);
     const [downloadPath, setDownloadPath] = useState<string>('');
+    const [minimizeToTray, setMinimizeToTray] = useState(true);
 
     useEffect(() => {
         if (isOpen) {
@@ -23,12 +24,22 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
                 setYtdlpVersion(res?.ytdlp || 'Unknown');
                 setAppVersion(res?.app || '1.0.0');
             });
-            // Get current download path
-            window.electron.getDownloadPath?.().then((res: any) => {
-                setDownloadPath(res?.path || '');
+            // Get settings
+            window.electron.getSettings?.().then((settings: any) => {
+                setDownloadPath(settings?.downloadBasePath || '');
+                setMinimizeToTray(settings?.minimizeToTray ?? true);
             });
         }
     }, [isOpen]);
+
+    const handleToggleTray = async () => {
+        const newValue = !minimizeToTray;
+        setMinimizeToTray(newValue);
+        await window.electron.saveSettings?.({
+            downloadBasePath: downloadPath,
+            minimizeToTray: newValue
+        });
+    };
 
     const handleUpdateYtdlp = async () => {
         setIsUpdating(true);
@@ -121,6 +132,30 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
                                 <p className="text-xs text-blue-300/80 leading-relaxed">
                                     Files are organized in <b>VibeDownloader</b> folder with subfolders for each platform and content type (videos, reels, stories, playlists, thumbnails, and music).
                                 </p>
+                            </div>
+                        </div>
+
+                        {/* System Tray */}
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-white/50 uppercase tracking-wider flex items-center gap-2">
+                                <Monitor className="w-3.5 h-3.5" /> System Tray
+                            </label>
+
+                            <div className="p-4 bg-white/[0.03] rounded-xl border border-white/5 flex items-center justify-between">
+                                <div className="flex flex-col">
+                                    <p className="text-sm font-medium text-white">Minimize to Tray</p>
+                                    <p className="text-xs text-white/40">Keep app running for instant access</p>
+                                </div>
+                                <div
+                                    onClick={handleToggleTray}
+                                    className={`relative w-12 h-6 rounded-full cursor-pointer p-1 transition-colors duration-300 ${minimizeToTray ? 'bg-blue-500' : 'bg-white/10'}`}
+                                >
+                                    <motion.div
+                                        animate={{ x: minimizeToTray ? 24 : 0 }}
+                                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                        className="w-4 h-4 bg-white rounded-full shadow-lg"
+                                    />
+                                </div>
                             </div>
                         </div>
 

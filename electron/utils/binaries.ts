@@ -58,6 +58,37 @@ export async function ensureYtDlp() {
     }
 }
 
+export async function checkForYtDlpUpdate() {
+    // Wait 5 seconds after startup to not interfere with initial UI loading
+    setTimeout(async () => {
+        try {
+            console.log("Checking for yt-dlp updates in background...");
+            const latestGithubRelease = await YtDlpWrap.getGithubReleases(1, 1);
+            if (latestGithubRelease && latestGithubRelease.length > 0) {
+                const latestVersion = latestGithubRelease[0].tag_name;
+                const ytDlp = new YtDlpWrap(ytDlpBinaryPath);
+                const versionInfo = await ytDlp.getVersion();
+
+                console.log(`Current yt-dlp version: ${versionInfo}, Latest available: ${latestVersion}`);
+
+                if (versionInfo !== latestVersion) {
+                    console.log(`yt-dlp update available: ${latestVersion}`);
+                    showNotification(
+                        'Engine Update Found! 🚀',
+                        `A new update for the downloader engine is available. Go to settings and update yt-dlp to fix bugs.`,
+                        undefined,
+                        'settings'
+                    );
+                } else {
+                    console.log("yt-dlp engine is up to date.");
+                }
+            }
+        } catch (e) {
+            console.error("Error checking for yt-dlp update:", e);
+        }
+    }, 5000);
+}
+
 async function downloadFFmpeg(): Promise<boolean> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const AdmZip = require('adm-zip');

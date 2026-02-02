@@ -20,7 +20,10 @@ export function registerInfoHandlers() {
                 url,
                 '--dump-single-json',
                 '--no-warnings',
-                '--socket-timeout', '15'
+                '--socket-timeout', '30',
+                '--js-runtimes', 'node',
+                '--extractor-args', 'youtube:player_client=web_embedded,android_vr',
+                '--no-check-certificates'
             ];
 
             // Add cookies if available for the specific platform
@@ -29,6 +32,7 @@ export function registerInfoHandlers() {
             const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com');
             const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
             const isTiktok = url.includes('tiktok.com');
+            const isSnapchat = url.includes('snapchat.com');
 
             if (isInstagram) {
                 cookiePath = getCookiePath('instagram');
@@ -38,6 +42,8 @@ export function registerInfoHandlers() {
                 cookiePath = getCookiePath('youtube');
             } else if (isTiktok) {
                 cookiePath = getCookiePath('tiktok');
+            } else if (isSnapchat) {
+                cookiePath = getCookiePath('snapchat');
             }
 
             // Add User-Agent to help with Facebook/Instagram
@@ -46,7 +52,7 @@ export function registerInfoHandlers() {
             // STRICT SEPARATION: Only use cookies for the specific platform
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
-                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : 'TikTok';
+                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : isSnapchat ? 'Snapchat' : 'Platform';
                 console.log(`Using custom cookies for ${platformName} (Path: ${cookiePath})`);
             } else if (!cookiePath && fs.existsSync(path.join(app.getPath('userData'), 'cookies.txt'))) {
                 // Only fall back to legacy cookies.txt if strict platform cookies are NOT expected
@@ -68,7 +74,7 @@ export function registerInfoHandlers() {
 
             const ytDlpPromise = ytDlpWrap.execPromise(args);
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Request timed out')), 45000);
+                setTimeout(() => reject(new Error('Request timed out')), 60000);
             });
 
             const metadataString = await Promise.race([ytDlpPromise, timeoutPromise]) as string;

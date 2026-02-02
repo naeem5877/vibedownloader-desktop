@@ -1,3 +1,12 @@
-### 🐛 Critical Fixes
-- **Smart File Naming (Instagram/Social)**: Fixed a major issue where multiple videos from the same creator (Instagram/Facebook/TikTok) would overwrite each other. Files are now saved with a unique identifier (e.g., `Username_VideoID.mp4`) while keeping the clean username display in notifications.
-- **CI/CD Pipeline Repair**: Resolved a Spotify environment variable injection failure in GitHub Actions by switching to a robust, cross-platform Node.js script for `.env` generation.
+### ✨ New Features
+- **Snapchat Support**: Direct video downloading from Snapchat (Spotlight and Public Stories).
+- **Cookie File Upload**: Added "Upload .txt File" functionality to the login/vault modal, allowing users to import Netscape cookie files directly instead of manual pasting.
+- **System Tray Integration**: Added "Minimize to Tray" functionality with a premium animated toggle in settings, keeping the app ready for instant use.
+
+### 🚀 Performance & Optimizations
+- **Ultra-Fast Startup**: Re-engineered the engine initialization process to bypass non-essential checks, making the app launch almost twice as fast.
+- **Smart Background Throttling**: The app now automatically reduces CPU usage and mutes internal audio when hidden in the tray to ensure zero impact on system resources.
+
+### 🔧 Engine Improvements
+- **Intelligent Background Updates**: The downloader engine (yt-dlp) now checks for updates silently in the background after startup and notifies the user with a sleek UI popup when a new version is ready.
+- **Enhanced Engine Refresh**: Improved the manual engine update process in settings with better verification and cleaner file replacement.
