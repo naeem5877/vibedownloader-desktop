@@ -350,7 +350,7 @@ export function Downloader() {
     // Check cookies when platform changes
     useEffect(() => {
         setHasCookies(false);
-        if (['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id)) {
+        if (['instagram', 'facebook', 'youtube', 'tiktok', 'snapchat'].includes(currentPlatform.id)) {
             window.electron.getCookiesStatus?.(currentPlatform.id).then((res: any) => {
                 setHasCookies(!!res?.exists);
             });
@@ -939,7 +939,7 @@ export function Downloader() {
 
                                         {/* Action Group Inside Input */}
                                         <div className="absolute right-2 flex items-center gap-1.5">
-                                            {['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id) && (
+                                            {['instagram', 'facebook', 'youtube', 'tiktok', 'snapchat'].includes(currentPlatform.id) && (
                                                 <button
                                                     type="button"
                                                     onClick={() => setShowCookieModal(true)}

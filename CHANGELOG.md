@@ -2,7 +2,7 @@
 ## [1.0.11] - 2026-02-03
 
 ### ✨ New Features
-- **Snapchat Support**: Direct video downloading from Snapchat (Spotlight and Public Stories).
+- **Snapchat Support**: Direct video downloading from Snapchat (Spotlight and Public Stories) with official **Cookie support** for age-restricted or private snaps.
 - **Cookie File Upload**: Added "Upload .txt File" functionality to the login/vault modal, allowing users to import Netscape cookie files directly instead of manual pasting.
 - **System Tray Integration**: Added "Minimize to Tray" functionality with a premium animated toggle in settings, keeping the app ready for instant use.
 

@@ -14,9 +14,14 @@ import './utils/env'; // Load env vars
 // Initialize paths and binaries state
 initPaths();
 
+// Resource Optimization: Disable GPU to save significant RAM (GPU process often uses 50-100MB)
+// This also merges processes, reducing the total count from 4-5 down to 2-3.
+app.disableHardwareAcceleration();
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let lastAppUrl = '';
 
 function createWindow() {
     // Get the icon path based on environment
@@ -49,9 +54,10 @@ function createWindow() {
     setMainWindow(mainWindow);
 
     const isDev = !app.isPackaged;
+    lastAppUrl = isDev ? 'http://localhost:5173' : `file://${path.join(__dirname, '../dist/index.html')}`;
 
     if (isDev) {
-        mainWindow.loadURL('http://localhost:5173');
+        mainWindow.loadURL(lastAppUrl);
     } else {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
     }
@@ -68,14 +74,26 @@ function createWindow() {
         }
     });
 
-    // Resource Optimization: Suspend heavy tasks when hidden
+    // Resource Optimization: Deep Purge when hidden
     mainWindow.on('hide', () => {
         mainWindow?.webContents.setAudioMuted(true);
-        // Chromium automatically throttles JS execution when hidden with backgroundThrottling: true
+        // Force GC and unload heavy UI by navigating to a blank page
+        // This is the only way to get Electron close to "service-like" memory levels
+        if (mainWindow?.webContents) {
+            mainWindow.webContents.loadURL('about:blank');
+        }
     });
 
     mainWindow.on('show', () => {
         mainWindow?.webContents.setAudioMuted(false);
+        // Restore app state
+        if (mainWindow?.webContents && (mainWindow.webContents.getURL() === 'about:blank' || mainWindow.webContents.getURL() === '')) {
+            if (lastAppUrl.startsWith('http')) {
+                mainWindow.webContents.loadURL(lastAppUrl);
+            } else {
+                mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+            }
+        }
     });
 
     // Open external links in browser
@@ -140,8 +158,7 @@ app.whenReady().then(async () => {
     createWindow();
     createTray();
 
-    // Check for yt-dlp updates in the background (non-blocking)
-    checkForYtDlpUpdate();
+    // Removed: checkForYtDlpUpdate() - Disabled to avoid unnecessary notifications
 
     // Register all IPC handlers
     registerDownloadHandlers();

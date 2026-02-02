@@ -8,5 +8,4 @@
 - **Smart Background Throttling**: The app now automatically reduces CPU usage and mutes internal audio when hidden in the tray to ensure zero impact on system resources.
 
 ### 🔧 Engine Improvements
-- **Intelligent Background Updates**: The downloader engine (yt-dlp) now checks for updates silently in the background after startup and notifies the user with a sleek UI popup when a new version is ready.
 - **Enhanced Engine Refresh**: Improved the manual engine update process in settings with better verification and cleaner file replacement.
