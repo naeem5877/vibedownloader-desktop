@@ -352,6 +352,6 @@ If you create a fork or modified version:
 
 **If you find this project useful, consider giving it a ⭐**
 
-<sub>© 2025 VibeDownloader. Released under GPL v3.0 License.</sub>
+<sub>© 2026 VibeDownloader. Released under GPL v3.0 License.</sub>
 
 </div>
