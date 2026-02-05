@@ -8,7 +8,7 @@
   <h1>VibeDownloader</h1>
   
   <p>
-    <strong>An open-source desktop video downloader for Windows, macOS, and Linux.</strong>
+    <strong>An open-source video downloader for Windows, macOS, Linux, and Android.</strong>
   </p>
   
   <p>
@@ -17,7 +17,10 @@
 
   <p>
     <a href="https://github.com/naeem5877/vibedownloader-desktop">
-      <img src="https://img.shields.io/badge/Get_it_on-GitHub-181717?style=for-the-badge&logo=github" alt="Get it on GitHub" />
+      <img src="https://img.shields.io/badge/Desktop-GitHub-181717?style=for-the-badge&logo=github" alt="Desktop on GitHub" />
+    </a>
+    <a href="https://github.com/naeem5877/vibedownloader-android">
+      <img src="https://img.shields.io/badge/Android-GitHub-3DDC84?style=for-the-badge&logo=android" alt="Android on GitHub" />
     </a>
     <a href="https://vibedownloader.me">
       <img src="https://img.shields.io/badge/Visit-Website-blue?style=for-the-badge&logo=google-chrome" alt="Visit Website" />
@@ -26,13 +29,16 @@
 
   <p>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/releases/latest">
-      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-desktop?style=for-the-badge" alt="Latest Release" />
+      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-desktop?style=for-the-badge&label=Desktop" alt="Latest Desktop Release" />
+    </a>
+    <a href="https://github.com/naeem5877/vibedownloader-android/releases/latest">
+      <img src="https://img.shields.io/github/v/release/naeem5877/vibedownloader-android?style=for-the-badge&label=Android" alt="Latest Android Release" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/actions">
       <img src="https://img.shields.io/badge/build-check_actions-green?style=for-the-badge" alt="Build Status" />
     </a>
     <a href="https://github.com/naeem5877/vibedownloader-desktop/releases">
-      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-desktop/total?style=for-the-badge&color=orange" alt="Total Downloads" />
+      <img src="https://img.shields.io/github/downloads/naeem5877/vibedownloader-desktop/total?style=for-the-badge&color=orange&label=Desktop%20Downloads" alt="Total Desktop Downloads" />
     </a>
   </p>
 </div>
@@ -45,7 +51,7 @@
 
 VibeDownloader is designed for users who value **control, speed, and privacy**.
 
-Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader runs **entirely on your machine**, powered by the industry-standard `yt-dlp` engine.
+Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader runs **entirely on your device**, powered by the industry-standard `yt-dlp` engine.
 
 <div align="center">
 
@@ -88,8 +94,11 @@ Auto-sorted folders by platform and content type
 ### 🛑 Ad-Free Experience
 No ads, no popups, no tracking
 
-### 📥 System Tray Support
+### 📥 System Tray Support (Desktop)
 Keep the app running in the background for instant access without cluttering your taskbar
+
+### 📱 Cross-Platform
+Available on Windows, macOS, Linux, and Android
 
 </td>
 </tr>
@@ -181,11 +190,37 @@ sudo dpkg -i VibeDownloader-x.x.x.deb
 
 ---
 
+### 📱 Android
+
+<div align="center">
+  <a href="https://github.com/naeem5877/vibedownloader-android/releases/latest">
+    <img src="https://img.shields.io/badge/Download-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Download Android APK" />
+  </a>
+</div>
+
+1. Download the `.apk` file from the [**Android Releases page**](https://github.com/naeem5877/vibedownloader-android/releases/latest)
+2. Enable "Install from Unknown Sources" in your device settings
+3. Open the downloaded APK file and install
+4. Launch VibeDownloader from your app drawer
+
+**Features on Android:**
+- 📱 Native Android interface optimized for mobile
+- 🎯 Share videos directly from other apps
+- 💾 Download to internal or SD card storage
+- 🔋 Battery-optimized downloads
+- 🌙 Dark mode support
+
+> **Note:** The Android version is available exclusively through GitHub releases. We don't distribute through the Google Play Store to avoid restrictions and maintain full feature compatibility.
+
+[**View Android Repository →**](https://github.com/naeem5877/vibedownloader-android)
+
+---
+
 ## 🛠️ For Developers
 
-Built with modern web technologies: **Electron**, **React**, **Vite**, and **TypeScript**.
+Built with modern web technologies: **Electron**, **React**, **Vite**, and **TypeScript** (Desktop) | **React Native** (Android).
 
-### Setup Development Environment
+### Desktop Development
 
 ```bash
 # Clone the repository
@@ -201,7 +236,7 @@ npm install
 npm run dev
 ```
 
-### Build Commands
+#### Build Commands
 
 ```bash
 # Build for Windows
@@ -214,7 +249,7 @@ npm run pack:mac
 npm run pack:linux
 ```
 
-### Project Structure
+#### Project Structure
 
 ```
 vibedownloader-desktop/
@@ -225,13 +260,17 @@ vibedownloader-desktop/
 └── dist/            # Build output
 ```
 
+### Android Development
+
+For Android development instructions, visit the [**Android Repository**](https://github.com/naeem5877/vibedownloader-android).
+
 ---
 
 ## 🤝 Contributing
 
 Contributions are welcome and appreciated! Here's how you can help:
 
-1. **Fork** the repository
+1. **Fork** the repository (Desktop or Android)
 2. Create a **feature branch** (`git checkout -b feature/amazing-feature`)
 3. **Commit** your changes (`git commit -m 'Add some amazing feature'`)
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
@@ -246,6 +285,7 @@ Please follow our [Code of Conduct](CODE_OF_CONDUCT.md) and coding standards.
 - 📝 Documentation improvements
 - ✨ New feature development
 - 🎨 UI/UX enhancements
+- 📱 Android-specific optimizations
 
 ---
 
@@ -284,22 +324,24 @@ If you create a fork or modified version:
 
 <div align="center">
 
-[![GitHub Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-desktop?style=for-the-badge)](https://github.com/naeem5877/vibedownloader-desktop/issues)
+[![Desktop Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-desktop?style=for-the-badge&label=Desktop%20Issues)](https://github.com/naeem5877/vibedownloader-desktop/issues)
+[![Android Issues](https://img.shields.io/github/issues/naeem5877/vibedownloader-android?style=for-the-badge&label=Android%20Issues)](https://github.com/naeem5877/vibedownloader-android/issues)
 [![GitHub Stars](https://img.shields.io/github/stars/naeem5877/vibedownloader-desktop?style=for-the-badge)](https://github.com/naeem5877/vibedownloader-desktop/stargazers)
 [![License](https://img.shields.io/badge/license-GPL%20v3.0-blue?style=for-the-badge)](LICENSE)
 
 </div>
 
-- 🐛 **Found a bug?** [Open an issue](https://github.com/naeem5877/vibedownloader-desktop/issues)
+- 🐛 **Found a bug?** [Desktop Issues](https://github.com/naeem5877/vibedownloader-desktop/issues) | [Android Issues](https://github.com/naeem5877/vibedownloader-android/issues)
 - 💡 **Have an idea?** [Start a discussion](https://github.com/naeem5877/vibedownloader-desktop/discussions)
-- ⭐ **Like the project?** Give it a star!
+- ⭐ **Like the project?** Give it a star on both repositories!
 
 ---
 
 ## 🙏 Acknowledgments
 
 - Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful video downloader
-- Powered by [Electron](https://www.electronjs.org/) - Cross-platform desktop framework
+- Desktop powered by [Electron](https://www.electronjs.org/) - Cross-platform desktop framework
+- Android powered by [React Native](https://reactnative.dev/) - Mobile framework
 - UI built with [React](https://reactjs.org/) and [Vite](https://vitejs.dev/)
 
 ---
