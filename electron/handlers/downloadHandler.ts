@@ -11,7 +11,7 @@ import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
 
 export function registerDownloadHandlers() {
-    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string }) => {
+    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean }) => {
         try {
             const mainWindow = getMainWindow();
             const ytDlpWrap = getYtDlpWrap();
@@ -262,12 +262,14 @@ export function registerDownloadHandlers() {
                     path: finalFilePath
                 });
 
-                showNotification(
-                    'Download Complete! ✅',
-                    `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
-                    thumbPath,
-                    finalFilePath
-                );
+                if (!suppressNotifications) {
+                    showNotification(
+                        'Download Complete! ✅',
+                        `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
+                        thumbPath,
+                        finalFilePath
+                    );
+                }
             });
 
             return { success: true };
@@ -278,7 +280,7 @@ export function registerDownloadHandlers() {
         }
     });
 
-    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle }) => {
+    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications }) => {
         try {
             // Ensure FFmpeg is available for conversion
             await ensureFFmpeg();
@@ -371,7 +373,9 @@ export function registerDownloadHandlers() {
                     title: safeTitle,
                     path: finalFilePath
                 });
-                showNotification('Download Complete! ✅', `${safeTitle} saved to Spotify/Tracks`, notificationThumbPath, finalFilePath);
+                if (!suppressNotifications) {
+                    showNotification('Download Complete! ✅', `${safeTitle} saved to Spotify/Tracks`, notificationThumbPath, finalFilePath);
+                }
             });
 
             return { success: true };

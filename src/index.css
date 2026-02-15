@@ -14,6 +14,9 @@
 
 * {
     box-sizing: border-box;
+    /* border-width: 0; */
+    /* border-style: solid; */
+    /* border-color: #e5e7eb; */
 }
 
 body {
@@ -83,4 +86,43 @@ body {
 
 .animate-pulse {
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@property --border-angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+}
+
+@keyframes border-rotate {
+    0% {
+        --border-angle: 0deg;
+    }
+
+    100% {
+        --border-angle: 360deg;
+    }
+}
+
+.discord-border-animation {
+    position: relative;
+    isolation: isolate;
+}
+
+.discord-border-animation::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1.5px;
+    /* Thin border width */
+    background: conic-gradient(from var(--border-angle), #5865F2, #C0C0C0 50%, #5865F2);
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: border-rotate 3s linear infinite;
+    pointer-events: none;
+    z-index: 10;
 }

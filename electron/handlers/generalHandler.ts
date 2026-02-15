@@ -3,6 +3,7 @@ import fs from 'fs';
 import { getMainWindow } from '../utils/windowManager';
 import { getHistoryPath, loadSettings, saveSettings } from '../utils/paths';
 import { getYtDlpWrap, getYtDlpBinaryPath, initPaths } from '../utils/binaries';
+import { showNotification } from '../utils/notifications';
 import YtDlpWrap from 'yt-dlp-wrap';
 
 interface HistoryItem {
@@ -248,5 +249,10 @@ export function registerGeneralHandlers() {
             name: app.getName(),
             isPackaged: app.isPackaged
         };
+    });
+
+    ipcMain.handle('show-notification', async (event: any, { title, body }: { title: string, body: string }) => {
+        showNotification(title, body);
+        return { success: true };
     });
 }

@@ -4,9 +4,10 @@ interface Window {
     electron: {
         getVideoInfo: (url: string) => Promise<any>;
         getSpotifyInfo: (url: string) => Promise<any>;
-        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string }) => Promise<any>;
-        downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string; thumbnail?: string; playlistTitle?: string }) => Promise<any>;
+        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean }) => Promise<any>;
+        downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean }) => Promise<any>;
         getProxyImage: (url: string) => Promise<string | null>;
+        showNotification: (title: string, body: string) => Promise<{ success: boolean; error?: string }>;
 
         saveCookies: (content: string, platform: string) => Promise<{ success: boolean; error?: string }>;
         getCookiesStatus: (platform: string) => Promise<{ exists: boolean; path?: string }>;

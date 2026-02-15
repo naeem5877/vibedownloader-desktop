@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, Link2, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
 } from 'lucide-react';
-import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaSnapchat } from 'react-icons/fa6';
+import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaSnapchat, FaDiscord } from 'react-icons/fa6';
 import { Settings } from './Settings';
 
 // Types
+
 interface Format {
     format_id: string;
     ext: string;
@@ -129,6 +130,7 @@ export function Downloader() {
 
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
+    const [showDiscordModal, setShowDiscordModal] = useState(false);
 
     // Batch download features
     const [batchMode, setBatchMode] = useState(false);
@@ -268,7 +270,8 @@ export function Downloader() {
                                         searchQuery: metadata.searchQuery,
                                         title: metadata.title,
                                         artist: metadata.uploader || 'Unknown',
-                                        thumbnail: metadata.thumbnail
+                                        thumbnail: metadata.thumbnail,
+                                        suppressNotifications: true
                                     });
                                 } else {
                                     await window.electron.downloadVideo({
@@ -276,7 +279,8 @@ export function Downloader() {
                                         formatId,
                                         title,
                                         platform: currentPlatform.id,
-                                        thumbnail: metadata.thumbnail
+                                        thumbnail: metadata.thumbnail,
+                                        suppressNotifications: true
                                     });
                                 }
                             } catch (err: any) {
@@ -443,6 +447,13 @@ export function Downloader() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [showCookieModal, showSettings]);
+
+    // Batch Completion Notification
+    useEffect(() => {
+        if (isBatchComplete) {
+            window.electron.showNotification('Batch Download Complete', `All ${downloadQueue.length} media downloaded successfully.`);
+        }
+    }, [isBatchComplete, downloadQueue.length]);
 
 
     const handleSaveCookies = async () => {
@@ -776,7 +787,8 @@ export function Downloader() {
                         title: item.title,
                         artist: item.artist || '',
                         thumbnail: item.thumbnail,
-                        playlistTitle // This will create the /playlists/{title}/ folder
+                        playlistTitle, // This will create the /playlists/{title}/ folder
+                        suppressNotifications: true
                     });
                 } else {
                     await window.electron.downloadVideo({
@@ -784,7 +796,8 @@ export function Downloader() {
                         formatId: formatId,
                         title: item.title,
                         platform: currentPlatform.id,
-                        playlistTitle // This will create the /playlists/{title}/ folder
+                        playlistTitle, // This will create the /playlists/{title}/ folder
+                        suppressNotifications: true
                     });
                 }
                 successCount++;
@@ -800,9 +813,9 @@ export function Downloader() {
 
         // Show summary notification
         if (failCount === 0) {
-            // We rely on main process notifications for success, but maybe a summary alert?
-            // alert(`All ${successCount} items downloaded successfully!`);
+            window.electron.showNotification('Playlist Download Complete', `All ${successCount} media downloaded successfully.`);
         } else {
+            window.electron.showNotification('Download Complete', `Success: ${successCount}, Failed: ${failCount}`);
             alert(`Download complete. Success: ${successCount}, Failed: ${failCount}`);
         }
     };
@@ -847,15 +860,28 @@ export function Downloader() {
 
     return (
         <div className="w-full h-full bg-[#0a0a0a] text-white overflow-y-auto overflow-x-hidden relative">
-            <div className="max-w-2xl mx-auto px-6 pt-10 pb-24 relative">
-                {/* Settings Button - Top Right of Content Area */}
+            {/* Header Buttons Container - Fixed to Viewport */}
+            <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
+                {/* Discord Button */}
+                <button
+                    onClick={() => setShowDiscordModal(true)}
+                    className="w-10 h-10 rounded-xl bg-[#5865F2]/10 hover:bg-[#5865F2]/20 discord-border-animation flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm group"
+                    title="Join Discord"
+                >
+                    <FaDiscord className="w-5 h-5 text-[#5865F2] group-hover:scale-110 transition-transform" />
+                </button>
+
+                {/* Settings Button */}
                 <button
                     onClick={() => setShowSettings(true)}
-                    className="absolute top-10 right-6 z-40 w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm"
+                    className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm"
                     title="Settings"
                 >
                     <SettingsIcon className="w-5 h-5 text-white/60 hover:text-white/80" />
                 </button>
+            </div>
+
+            <div className="max-w-2xl mx-auto px-6 pt-12 pb-24 relative">
 
                 {/* Title */}
                 <div className="text-center mb-10">
@@ -1526,8 +1552,16 @@ export function Downloader() {
                                                     </div>
                                                 )}
                                                 {isDownloadingItem && (
-                                                    <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
-                                                        <Loader className="w-4 h-4 animate-spin" />
+                                                    <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-2">
+                                                        <Loader className="w-4 h-4 animate-spin mb-1 text-blue-400" />
+                                                        {progress?.percent !== undefined && (
+                                                            <div className="w-full h-1 bg-white/20 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className="h-full bg-blue-500 transition-all duration-300"
+                                                                    style={{ width: `${progress.percent}%` }}
+                                                                />
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -2025,6 +2059,59 @@ export function Downloader() {
                     </div>
                 </div>
             </div>
+
+            {/* Discord Modal */}
+            <AnimatePresence>
+                {showDiscordModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                        onClick={() => setShowDiscordModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-[#5865F2]/50 shadow-[0_0_50px_-10px_rgba(88,101,242,0.3)] bg-[#0f1016]"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {/* Background Gradient */}
+                            <div className="absolute inset-0 bg-gradient-to-b from-[#1a1c4b] to-[#0f1016]" />
+                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-[#5865F2]/20 via-transparent to-transparent opacity-50" />
+
+                            {/* Content */}
+                            <div className="relative p-8 flex flex-col items-center text-center z-10">
+                                <div className="w-20 h-20 rounded-2xl bg-[#5865F2] shadow-[0_10px_30px_-5px_rgba(88,101,242,0.5)] flex items-center justify-center mb-6 transform hover:scale-105 transition-transform duration-300">
+                                    <FaDiscord className="w-12 h-12 text-white" />
+                                </div>
+
+                                <h3 className="text-2xl font-bold text-white mb-2">Join Community</h3>
+                                <p className="text-white/60 text-sm mb-8 leading-relaxed">
+                                    Join our Discord server to get help, suggest features, and chat with other users!
+                                </p>
+
+                                <div className="flex flex-col gap-3 w-full">
+                                    <button
+                                        onClick={() => window.electron.openExternal('https://discord.com/invite/xev4Jgqz5t')}
+                                        className="w-full h-12 bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold rounded-xl transition-all shadow-lg shadow-[#5865F2]/20 hover:shadow-[#5865F2]/40 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
+                                    >
+                                        <FaDiscord className="w-5 h-5" />
+                                        Join Server
+                                    </button>
+                                    <button
+                                        onClick={() => setShowDiscordModal(false)}
+                                        className="w-full h-12 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-semibold rounded-xl transition-all border border-white/5 hover:border-white/10 cursor-pointer"
+                                    >
+                                        Maybe Later
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Settings Modal */}
             <Settings

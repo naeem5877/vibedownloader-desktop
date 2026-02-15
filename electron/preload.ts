@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('electron', {
         }
     },
 
+    // Notifications
+    showNotification: (title: string, body: string) => ipcRenderer.invoke('show-notification', { title, body }),
+
     // Window controls
     minimize: () => ipcRenderer.invoke('minimize-window'),
     maximize: () => ipcRenderer.invoke('maximize-window'),
