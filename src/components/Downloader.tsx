@@ -1420,7 +1420,7 @@ export function Downloader() {
                         </motion.div>
                     )}
                     {/* Single Video/Track Result */}
-                    {metadata && !complete && !isPlaylist && (
+                    {metadata && !loading && !complete && !isPlaylist && (
                         <motion.div key="video" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
                             {/* Thumbnail */}
                             <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-white/5 to-white/10 mb-5">
@@ -1674,7 +1674,7 @@ export function Downloader() {
                     )}
 
                     {/* Playlist/Album Result */}
-                    {metadata && !complete && isPlaylist && (
+                    {metadata && !loading && !complete && isPlaylist && (
                         <motion.div key="playlist" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
                             {/* Playlist Header */}
                             <div className="flex items-start gap-4 mb-4 p-4 bg-white/5 rounded-2xl border border-white/10">
@@ -1841,7 +1841,7 @@ export function Downloader() {
                     )}
 
                     {/* Success */}
-                    {complete && (
+                    {complete && !loading && (
                         <motion.div key="success" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="text-center py-16">
                             <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 relative">
                                 <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ backgroundColor: currentPlatform.color }} />
