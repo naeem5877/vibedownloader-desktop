@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('electron', {
     downloadSpotifyTrack: (params: any) => ipcRenderer.invoke('download-spotify-track', params),
     getProxyImage: (url: string) => ipcRenderer.invoke('proxy-image', url),
 
+    // Lossless Audio
+    checkLosslessAvailability: (params: { spotifyTrackId: string }) => ipcRenderer.invoke('check-lossless-availability', params),
+    downloadSpotifyLossless: (params: any) => ipcRenderer.invoke('download-spotify-lossless', params),
+
     // Cookies
     saveCookies: (content: string, platform: string) => ipcRenderer.invoke('save-cookies', content, platform),
     getCookiesStatus: (platform: string) => ipcRenderer.invoke('get-cookies-status', platform),

@@ -126,3 +126,32 @@ body {
     pointer-events: none;
     z-index: 10;
 }
+
+/* Lossless Card Animations */
+@keyframes lossless-gradient {
+    0% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+@keyframes lossless-glow {
+
+    0%,
+    100% {
+        opacity: 0.3;
+        box-shadow: 0 0 20px rgba(96, 165, 250, 0.1);
+    }
+
+    50% {
+        opacity: 0.6;
+        box-shadow: 0 0 40px rgba(96, 165, 250, 0.2);
+    }
+}

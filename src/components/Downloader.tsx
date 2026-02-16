@@ -25,6 +25,7 @@ interface PlaylistEntry {
     url: string;
     artist?: string;
     searchQuery?: string;
+    spotifyTrackId?: string;
 }
 
 interface VideoMetadata {
@@ -42,6 +43,18 @@ interface VideoMetadata {
     playlist_count?: number;
     searchQuery?: string; // For Spotify single tracks
     album?: string;
+    spotifyTrackId?: string; // For lossless support
+}
+
+interface LosslessInfo {
+    available: boolean;
+    service: 'tidal' | 'qobuz' | 'none';
+    quality: string;
+    bitDepth?: number;
+    sampleRate?: number;
+    format: string;
+    tidalURL?: string;
+    checking: boolean;
 }
 
 type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud' | 'snapchat';
@@ -128,6 +141,11 @@ export function Downloader() {
 
     const isSpotify = currentPlatform.id === 'spotify';
 
+    // Lossless state
+    const [losslessInfo, setLosslessInfo] = useState<LosslessInfo>({
+        available: false, service: 'none', quality: '', format: '', checking: false
+    });
+
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
     const [showDiscordModal, setShowDiscordModal] = useState(false);
@@ -141,7 +159,7 @@ export function Downloader() {
         title: string;
         status: 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
         progress: number;
-        mode: 'video' | 'audio';
+        mode: 'video' | 'audio' | 'lossless';
         error?: string;
         formatId?: string;
         platform?: string;
@@ -171,7 +189,7 @@ export function Downloader() {
             title: `Item ${index + 1}`,
             status: 'pending' as const,
             progress: 0,
-            mode: 'video' as const
+            mode: isSpotify ? 'lossless' as const : 'video' as const
         }));
 
         setDownloadQueue(queue);
@@ -184,7 +202,7 @@ export function Downloader() {
         setTimeout(() => processBatchQueue(0), 0);
     };
 
-    const toggleItemMode = (id: string, mode: 'video' | 'audio') => {
+    const toggleItemMode = (id: string, mode: 'video' | 'audio' | 'lossless') => {
         setDownloadQueue(prev => prev.map(item =>
             item.id === id && item.status === 'pending'
                 ? { ...item, mode }
@@ -265,14 +283,24 @@ export function Downloader() {
                         // Start download
                         (async () => {
                             try {
-                                if (isSpotify && metadata.searchQuery) {
-                                    await window.electron.downloadSpotifyTrack({
-                                        searchQuery: metadata.searchQuery,
-                                        title: metadata.title,
-                                        artist: metadata.uploader || 'Unknown',
-                                        thumbnail: metadata.thumbnail,
-                                        suppressNotifications: true
-                                    });
+                                if (isSpotify) {
+                                    if (mode === 'lossless' && metadata.spotifyTrackId) {
+                                        await window.electron.downloadSpotifyLossless({
+                                            spotifyTrackId: metadata.spotifyTrackId,
+                                            title: metadata.title,
+                                            artist: metadata.uploader || 'Unknown',
+                                            thumbnail: metadata.thumbnail,
+                                            suppressNotifications: true
+                                        });
+                                    } else {
+                                        await window.electron.downloadSpotifyTrack({
+                                            searchQuery: metadata.searchQuery || '',
+                                            title: metadata.title,
+                                            artist: metadata.uploader || 'Unknown',
+                                            thumbnail: metadata.thumbnail,
+                                            suppressNotifications: true
+                                        });
+                                    }
                                 } else {
                                     await window.electron.downloadVideo({
                                         url: currentItem.url,
@@ -538,6 +566,7 @@ export function Downloader() {
         setProgress(null);
         setSelectedItems(new Set());
         setSearchQuery('');
+        setLosslessInfo({ available: false, service: 'none', quality: '', format: '', checking: false });
 
         try {
             // Use different handler for Spotify
@@ -562,6 +591,30 @@ export function Downloader() {
                 // Auto-select all items in playlist
                 if (finalMetadata.entries) {
                     setSelectedItems(new Set(finalMetadata.entries.map((e: PlaylistEntry) => e.id)));
+                }
+
+                // Check lossless availability for Spotify single tracks
+                if (isSpotify && finalMetadata.spotifyTrackId && finalMetadata.contentType !== 'playlist') {
+                    setLosslessInfo(prev => ({ ...prev, checking: true }));
+                    try {
+                        const lossless = await window.electron.checkLosslessAvailability({
+                            spotifyTrackId: finalMetadata.spotifyTrackId
+                        });
+                        setLosslessInfo({
+                            available: lossless.available,
+                            service: lossless.service || 'none',
+                            quality: lossless.quality || '',
+                            bitDepth: lossless.bitDepth,
+                            sampleRate: lossless.sampleRate,
+                            format: lossless.format || '',
+                            tidalURL: lossless.tidalURL,
+                            checking: false
+                        });
+                    } catch {
+                        setLosslessInfo({ available: false, service: 'none', quality: '', format: '', checking: false });
+                    }
+                } else {
+                    setLosslessInfo({ available: false, service: 'none', quality: '', format: '', checking: false });
                 }
             } else {
                 setError(res.error || 'Failed to fetch info');
@@ -615,6 +668,31 @@ export function Downloader() {
                 title,
                 artist,
                 thumbnail: metadata?.thumbnail,
+                playlistTitle
+            });
+        } catch (err: any) {
+            setError(err.message);
+            setDownloading(false);
+            setDownloadingId(null);
+            setProgress(null);
+        }
+    }, [downloading, metadata]);
+
+    // Lossless FLAC download
+    const handleLosslessDownload = useCallback(async (spotifyTrackId: string, title: string, artist: string, tidalURL?: string, playlistTitle?: string) => {
+        if (downloading) return;
+
+        setDownloading(true);
+        setError(null);
+        setProgress({ percent: 0 });
+
+        try {
+            await window.electron.downloadSpotifyLossless({
+                spotifyTrackId,
+                title,
+                artist,
+                thumbnail: metadata?.thumbnail,
+                tidalURL,
                 playlistTitle
             });
         } catch (err: any) {
@@ -708,6 +786,7 @@ export function Downloader() {
         setSearchQuery('');
         setBatchUrls('');
         setDownloadQueue([]);
+        setLosslessInfo({ available: false, service: 'none', quality: '', format: '', checking: false });
     };
 
     // Batch download functions
@@ -758,7 +837,7 @@ export function Downloader() {
         metadata.entries.length > 0;
 
     // Bulk download (Playlist)
-    const handleBulkDownload = async (type: 'video' | 'audio_best' | 'audio_standard' | 'audio_low') => {
+    const handleBulkDownload = async (type: 'video' | 'lossless' | 'audio_best' | 'audio_standard' | 'audio_low') => {
         if (downloading || selectedItems.size === 0) return;
 
         setDownloading(true);
@@ -782,14 +861,38 @@ export function Downloader() {
                 const playlistTitle = metadata?.title;
 
                 if (isSpotify) {
-                    await window.electron.downloadSpotifyTrack({
-                        searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
-                        title: item.title,
-                        artist: item.artist || '',
-                        thumbnail: item.thumbnail,
-                        playlistTitle, // This will create the /playlists/{title}/ folder
-                        suppressNotifications: true
-                    });
+                    if (type === 'lossless' && item.spotifyTrackId) {
+                        try {
+                            await window.electron.downloadSpotifyLossless({
+                                spotifyTrackId: item.spotifyTrackId,
+                                title: item.title,
+                                artist: item.artist || '',
+                                thumbnail: item.thumbnail,
+                                playlistTitle,
+                                suppressNotifications: true
+                            });
+                        } catch (losslessErr) {
+                            console.warn(`Lossless failed for ${item.title}, falling back to YouTube`, losslessErr);
+                            // Fallback to standard
+                            await window.electron.downloadSpotifyTrack({
+                                searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
+                                title: item.title,
+                                artist: item.artist || '',
+                                thumbnail: item.thumbnail,
+                                playlistTitle,
+                                suppressNotifications: true
+                            });
+                        }
+                    } else {
+                        await window.electron.downloadSpotifyTrack({
+                            searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
+                            title: item.title,
+                            artist: item.artist || '',
+                            thumbnail: item.thumbnail,
+                            playlistTitle, // This will create the /playlists/{title}/ folder
+                            suppressNotifications: true
+                        });
+                    }
                 } else {
                     await window.electron.downloadVideo({
                         url: item.url,
@@ -846,6 +949,16 @@ export function Downloader() {
                     <Music className="w-3.5 h-3.5" /> Low
                 </button>
             </div>
+            {isSpotify && (
+                <button
+                    onClick={() => handleBulkDownload('lossless')}
+                    disabled={selectedItems.size === 0 || downloading}
+                    className="w-full h-10 bg-gradient-to-r from-purple-500/20 to-cyan-500/20 border border-cyan-500/30 rounded-xl font-bold text-xs text-cyan-400 flex items-center justify-center gap-2 cursor-pointer hover:from-purple-500/30 hover:to-cyan-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed group/bulk-lossless"
+                >
+                    <Disc className="w-4 h-4 text-cyan-400 group-hover/bulk-lossless:rotate-180 transition-transform duration-700" />
+                    {showLabels && `Download Lossless FLAC (${selectedItems.size})`}
+                </button>
+            )}
             {!isSpotify && (
                 <button
                     onClick={() => handleBulkDownload('video')}
@@ -891,6 +1004,9 @@ export function Downloader() {
                     <p className="text-white/40">
                         Download from {currentPlatform.name}
                         {isSpotify && <span className="text-green-400 text-xs ml-2">• via YouTube</span>}
+                        {isSpotify && losslessInfo.available && (
+                            <span className="text-xs ml-2 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent font-semibold">• Lossless Available</span>
+                        )}
                     </p>
                 </div>
 
@@ -1166,6 +1282,15 @@ export function Downloader() {
                                                             >
                                                                 Audio
                                                             </button>
+                                                            {isSpotify && (
+                                                                <button
+                                                                    onClick={() => toggleItemMode(item.id, 'lossless')}
+                                                                    className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'lossless' ? 'bg-gradient-to-r from-purple-500 to-cyan-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
+                                                                        }`}
+                                                                >
+                                                                    Lossless
+                                                                </button>
+                                                            )}
                                                         </div>
 
                                                         {/* Action Buttons */}
@@ -1391,6 +1516,96 @@ export function Downloader() {
                                             </div>
                                             <Download className="w-4 h-4 text-green-400/50 group-hover:text-green-400" />
                                         </button>
+                                    )}
+
+                                    {/* ✨ Lossless FLAC Card */}
+                                    {isSpotify && losslessInfo.checking && (
+                                        <div className="relative p-4 rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center animate-pulse">
+                                                    <Disc className="w-4 h-4 text-white/30" />
+                                                </div>
+                                                <div>
+                                                    <p className="font-medium text-sm text-white/40">Checking lossless availability...</p>
+                                                    <p className="text-xs text-white/20">Scanning Tidal & Qobuz</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {isSpotify && !losslessInfo.checking && losslessInfo.available && metadata.spotifyTrackId && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                                            className="relative group/lossless"
+                                        >
+                                            {/* Animated gradient border */}
+                                            <div className="absolute -inset-[1px] rounded-xl bg-gradient-to-r from-purple-500 via-cyan-400 to-purple-500 opacity-60 group-hover/lossless:opacity-100 transition-opacity duration-500" style={{ backgroundSize: '200% 100%', animation: 'lossless-gradient 3s linear infinite' }} />
+
+                                            <button
+                                                onClick={() => handleLosslessDownload(
+                                                    metadata.spotifyTrackId!,
+                                                    metadata.title,
+                                                    metadata.uploader,
+                                                    losslessInfo.tidalURL
+                                                )}
+                                                disabled={downloading}
+                                                className="relative w-full p-4 rounded-xl bg-[#0d0d0f] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed overflow-hidden text-left"
+                                            >
+                                                {/* Shimmer effect */}
+                                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.03] to-transparent -translate-x-full group-hover/lossless:animate-[shine_2s_ease-in-out_infinite] pointer-events-none" />
+
+                                                {/* Top row */}
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="relative">
+                                                            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500/30 to-cyan-500/30 flex items-center justify-center">
+                                                                <Disc className="w-5 h-5 text-cyan-400" />
+                                                            </div>
+                                                            {/* Pulse ring */}
+                                                            <div className="absolute -inset-1 rounded-lg border border-cyan-400/20 animate-ping opacity-30" style={{ animationDuration: '2s' }} />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-bold text-sm bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
+                                                                    Lossless FLAC
+                                                                </p>
+                                                                <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-cyan-500/15 text-cyan-400 rounded-md border border-cyan-500/20">
+                                                                    {losslessInfo.service === 'tidal' ? 'TIDAL' : 'QOBUZ'}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[11px] text-white/30 mt-0.5">
+                                                                CD Quality • Uncompressed Audio
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <Download className="w-5 h-5 text-cyan-400/50 group-hover/lossless:text-cyan-400 transition-colors" />
+                                                </div>
+
+                                                {/* Quality badges */}
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    {losslessInfo.quality && (
+                                                        <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-purple-500/10 text-purple-400/80 rounded-md border border-purple-500/15">
+                                                            {losslessInfo.quality}
+                                                        </span>
+                                                    )}
+                                                    {losslessInfo.bitDepth && (
+                                                        <span className="px-2 py-1 text-[10px] font-medium text-white/40 bg-white/5 rounded-md border border-white/5">
+                                                            {losslessInfo.bitDepth}-bit
+                                                        </span>
+                                                    )}
+                                                    {losslessInfo.sampleRate && (
+                                                        <span className="px-2 py-1 text-[10px] font-medium text-white/40 bg-white/5 rounded-md border border-white/5">
+                                                            {(losslessInfo.sampleRate / 1000).toFixed(1)} kHz
+                                                        </span>
+                                                    )}
+                                                    <span className="px-2 py-1 text-[10px] font-medium text-white/40 bg-white/5 rounded-md border border-white/5">
+                                                        FLAC
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        </motion.div>
                                     )}
 
                                     {/* Audio Options */}

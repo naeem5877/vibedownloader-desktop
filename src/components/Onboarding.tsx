@@ -11,7 +11,8 @@ import {
     ArrowRight,
     ExternalLink,
     Zap,
-    Download
+    Download,
+    Disc
 } from 'lucide-react';
 
 interface OnboardingProps {
@@ -48,13 +49,38 @@ const steps = [
                     <div className="p-4 rounded-2xl bg-white/5 border border-white/10 group-hover:bg-white/10 group-hover:border-green-400/30 transition-all duration-300">
                         <Music className="w-6 h-6 text-green-400" />
                     </div>
-                    <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Lossless Mono</span>
+                    <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Hi-Res Audio</span>
                 </div>
                 <div className="flex flex-col items-center gap-3 group">
                     <div className="p-4 rounded-2xl bg-white/5 border border-white/10 group-hover:bg-white/10 group-hover:border-red-400/30 transition-all duration-300">
                         <Youtube className="w-6 h-6 text-red-500" />
                     </div>
                     <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Playlists</span>
+                </div>
+            </div>
+        )
+    },
+    {
+        id: 'spotify-lossless',
+        icon: <Disc className="w-16 h-16 text-cyan-400" />,
+        title: "Lossless Spotify",
+        subtitle: "Audiophile-Grade Audio",
+        description: "The ultimate music experience. Automatically fetch 1411kbps FLAC audio directly from Tidal and Qobuz for your Spotify tracks.",
+        color: "from-cyan-500 via-blue-500 to-purple-600",
+        accent: "cyan",
+        extra: (
+            <div className="mt-8 p-6 rounded-3xl bg-white/[0.03] border border-white/10 flex items-center gap-6 max-w-sm mx-auto">
+                <div className="flex -space-x-3">
+                    <div className="w-12 h-12 rounded-2xl bg-[#1DB954] flex items-center justify-center border-4 border-[#08090d] shadow-2xl relative z-10">
+                        <Music className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="w-12 h-12 rounded-2xl bg-cyan-500 flex items-center justify-center border-4 border-[#08090d] shadow-2xl relative z-20">
+                        <Disc className="w-6 h-6 text-white" />
+                    </div>
+                </div>
+                <div className="text-left">
+                    <p className="text-white font-bold text-sm">Spotify → HI-RES FLAC</p>
+                    <p className="text-white/40 text-[10px] uppercase tracking-widest font-bold">100% Raw & Untouched</p>
                 </div>
             </div>
         )

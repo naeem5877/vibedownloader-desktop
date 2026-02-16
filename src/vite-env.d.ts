@@ -7,6 +7,36 @@ interface Window {
         downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean }) => Promise<any>;
         downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean }) => Promise<any>;
         getProxyImage: (url: string) => Promise<string | null>;
+
+        // Lossless Audio
+        checkLosslessAvailability: (params: { spotifyTrackId: string }) => Promise<{
+            success: boolean;
+            available: boolean;
+            service: 'tidal' | 'qobuz' | 'none';
+            quality: string;
+            bitDepth?: number;
+            sampleRate?: number;
+            format: string;
+            tidalURL?: string;
+            error?: string;
+        }>;
+        downloadSpotifyLossless: (params: {
+            spotifyTrackId: string;
+            title: string;
+            artist: string;
+            thumbnail?: string;
+            tidalURL?: string;
+            playlistTitle?: string;
+            suppressNotifications?: boolean;
+        }) => Promise<{
+            success: boolean;
+            path?: string;
+            quality?: string;
+            bitDepth?: number;
+            sampleRate?: number;
+            service?: string;
+            error?: string;
+        }>;
         showNotification: (title: string, body: string) => Promise<{ success: boolean; error?: string }>;
 
         saveCookies: (content: string, platform: string) => Promise<{ success: boolean; error?: string }>;

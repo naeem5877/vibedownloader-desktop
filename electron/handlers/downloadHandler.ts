@@ -9,6 +9,7 @@ import { getYtDlpWrap, ensureFFmpeg, getFfmpegBinaryPath, isFfmpegAvailable } fr
 import { getOrganizedPath, getCookiePath } from '../utils/paths';
 import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
+import { checkLosslessAvailability, getLosslessDownloadURL, parseTidalManifest } from '../utils/losslessService';
 
 export function registerDownloadHandlers() {
     ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean }) => {
@@ -410,6 +411,190 @@ export function registerDownloadHandlers() {
             return { success: true, path: filePath };
         } catch (e: any) {
             console.error('Thumbnail save error:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
+    // --- Lossless Audio Handlers ---
+
+    ipcMain.handle('check-lossless-availability', async (event: any, { spotifyTrackId }: { spotifyTrackId: string }) => {
+        try {
+            const result = await checkLosslessAvailability(spotifyTrackId);
+            return { success: true, ...result };
+        } catch (e: any) {
+            console.error('Lossless check error:', e);
+            return { success: false, available: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('download-spotify-lossless', async (event: any, {
+        spotifyTrackId, title, artist, thumbnail, tidalURL, playlistTitle, suppressNotifications
+    }: {
+        spotifyTrackId: string;
+        title: string;
+        artist: string;
+        thumbnail?: string;
+        tidalURL?: string;
+        playlistTitle?: string;
+        suppressNotifications?: boolean;
+    }) => {
+        try {
+            const mainWindow = getMainWindow();
+            console.log(`[Lossless Download] Starting for: ${artist} - ${title}`);
+
+            // Get the download URL
+            const downloadInfo = await getLosslessDownloadURL(spotifyTrackId, tidalURL);
+            if (!downloadInfo) {
+                throw new Error('Could not find lossless download source');
+            }
+
+            const downloadPath = getOrganizedPath('spotify', 'lossless', playlistTitle);
+            const safeTitle = `${artist} - ${title}`.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
+            const outputFile = path.join(downloadPath, `${safeTitle}.flac`);
+
+            // Check if file already exists
+            if (fs.existsSync(outputFile)) {
+                mainWindow?.webContents.send('download-progress', {
+                    complete: true,
+                    title: safeTitle,
+                    path: outputFile,
+                    lossless: true
+                });
+                return { success: true, path: outputFile, alreadyExists: true };
+            }
+
+            // Send initial progress
+            mainWindow?.webContents.send('download-progress', {
+                percent: 5,
+                totalSize: '...',
+                currentSpeed: 'Connecting to Tidal...',
+                eta: '...',
+                lossless: true
+            });
+
+            let actualDownloadURL = downloadInfo.url;
+
+            // Parse manifest if needed
+            if (downloadInfo.isManifest) {
+                const manifestData = downloadInfo.url.replace('MANIFEST:', '');
+                const parsed = parseTidalManifest(manifestData);
+                if (!parsed) {
+                    throw new Error('Failed to parse Tidal manifest - DASH manifests not yet supported');
+                }
+                actualDownloadURL = parsed.directURL;
+            }
+
+            // Download the file
+            mainWindow?.webContents.send('download-progress', {
+                percent: 15,
+                totalSize: '...',
+                currentSpeed: 'Downloading FLAC...',
+                eta: '...',
+                lossless: true
+            });
+
+            const resp = await fetch(actualDownloadURL, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+                }
+            });
+
+            if (!resp.ok) {
+                throw new Error(`Download failed with status ${resp.status}`);
+            }
+
+            const totalBytes = parseInt(resp.headers.get('content-length') || '0', 10);
+            const reader = resp.body?.getReader();
+            if (!reader) throw new Error('No response body');
+
+            const chunks: Uint8Array[] = [];
+            let downloadedBytes = 0;
+            const startTime = Date.now();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                chunks.push(value);
+                downloadedBytes += value.length;
+
+                // Calculate progress
+                const percent = totalBytes > 0 ? Math.round((downloadedBytes / totalBytes) * 80) + 15 : 50;
+                const elapsed = (Date.now() - startTime) / 1000;
+                const speed = elapsed > 0 ? (downloadedBytes / 1024 / 1024 / elapsed) : 0;
+                const remainingBytes = totalBytes - downloadedBytes;
+                const eta = speed > 0 ? Math.round(remainingBytes / 1024 / 1024 / speed) : 0;
+
+                mainWindow?.webContents.send('download-progress', {
+                    percent: Math.min(percent, 95),
+                    totalSize: totalBytes > 0 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB` : '...',
+                    currentSpeed: `${speed.toFixed(1)} MB/s`,
+                    eta: eta > 0 ? `${eta}s` : '...',
+                    downloaded: `${(downloadedBytes / 1024 / 1024).toFixed(1)} MB`,
+                    lossless: true
+                });
+            }
+
+            // Write the file
+            const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+            const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
+            fs.writeFileSync(outputFile, fileBuffer);
+
+            console.log(`[Lossless Download] File saved: ${outputFile} (${(fileBuffer.length / 1024 / 1024).toFixed(1)} MB)`);
+
+            // Embed thumbnail if available
+            let notificationThumbPath: string | undefined;
+            if (thumbnail) {
+                try {
+                    console.log('[Lossless] Fetching thumbnail for notification...');
+                    const thumbResp = await fetch(thumbnail, {
+                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                    });
+                    if (thumbResp.ok) {
+                        const contentType = thumbResp.headers.get('content-type') || 'image/jpeg';
+                        const thumbBuffer = Buffer.from(await thumbResp.arrayBuffer());
+                        const ext = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
+                        notificationThumbPath = path.join(app.getPath('temp'), `lossless_thumb_${Date.now()}.${ext}`);
+                        fs.writeFileSync(notificationThumbPath, thumbBuffer);
+                    }
+                } catch (e) {
+                    console.error('[Lossless] Failed to fetch thumbnail:', e);
+                }
+            }
+
+            // Send completion
+            mainWindow?.webContents.send('download-progress', {
+                complete: true,
+                title: safeTitle,
+                path: outputFile,
+                lossless: true
+            });
+
+            if (!suppressNotifications) {
+                const qualityLabel = downloadInfo.bitDepth && downloadInfo.sampleRate
+                    ? `${downloadInfo.bitDepth}-bit/${(downloadInfo.sampleRate / 1000).toFixed(1)}kHz`
+                    : 'Lossless';
+                showNotification(
+                    '🎵 Lossless Download Complete!',
+                    `${safeTitle} • FLAC ${qualityLabel}`,
+                    notificationThumbPath,
+                    outputFile
+                );
+            }
+
+            return {
+                success: true,
+                path: outputFile,
+                quality: downloadInfo.quality,
+                bitDepth: downloadInfo.bitDepth,
+                sampleRate: downloadInfo.sampleRate,
+                service: downloadInfo.service
+            };
+        } catch (e: any) {
+            console.error('[Lossless Download] Error:', e);
+            const mainWindow = getMainWindow();
+            mainWindow?.webContents.send('download-progress', { error: e.message });
+            showNotification('Lossless Download Failed', e.message);
             return { success: false, error: e.message };
         }
     });

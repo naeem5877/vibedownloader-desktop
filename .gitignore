@@ -37,6 +37,11 @@ pnpm-debug.log*
 Thumbs.db
 Desktop.ini
 
+# Knowledge Base
+LossLessKnowlageBase/
+
 # OS generated files
 *.DS_Store
 ._*
+
+# LossLess Audio Knowlage Base

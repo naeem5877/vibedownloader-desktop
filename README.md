@@ -12,7 +12,7 @@
   </p>
   
   <p>
-    Download videos, audio, and playlists from YouTube, Instagram, Snapchat, TikTok, Spotify, and more — locally, ad-free, and privacy-first.
+    Download videos, audio, and playlists from YouTube, Instagram, Snapchat, TikTok, Spotify, and more — including **Lossless Spotify FLAC** support via Tidal & Qobuz. Locally, ad-free, and privacy-first.
   </p>
 
   <p>
@@ -71,7 +71,7 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 Download from YouTube, Instagram (Reels, Stories, Posts), Snapchat, TikTok, Facebook, X (Twitter), Pinterest, and SoundCloud
 
 ### 🎵 Spotify Downloads
-Get tracks, albums, and playlists complete with metadata and cover art
+Get tracks, albums, and playlists complete with metadata and cover art. Support for **Lossless FLAC (1411kbps)** via high-fidelity sources like Tidal and Qobuz.
 
 ### 📦 Batch Downloading
 Queue multiple videos or audio tracks at once with individual format controls and seamless processing

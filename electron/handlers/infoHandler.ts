@@ -241,6 +241,8 @@ export function registerInfoHandlers() {
                     release_date: track.album?.release_date,
                     // For YouTube search
                     searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
+                    // For lossless support
+                    spotifyTrackId: track.id,
                     entries: []
                 };
             } else if (parsed.type === 'album') {
@@ -262,7 +264,8 @@ export function registerInfoHandlers() {
                         duration: Math.floor(track.duration_ms / 1000),
                         url: track.external_urls?.spotify || '',
                         artist: track.artists?.map((a: any) => a.name).join(', '),
-                        searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`
+                        searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
+                        spotifyTrackId: track.id
                     })) || []
                 };
             } else if (parsed.type === 'playlist') {
@@ -287,7 +290,8 @@ export function registerInfoHandlers() {
                             duration: Math.floor(track.duration_ms / 1000),
                             url: track.external_urls?.spotify || '',
                             artist: track.artists?.map((a: any) => a.name).join(', '),
-                            searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`
+                            searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
+                            spotifyTrackId: track.id
                         };
                     }).filter(Boolean) || []
                 };
