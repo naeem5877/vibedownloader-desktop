@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, Link2, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaSnapchat, FaDiscord } from 'react-icons/fa6';
 import { Settings } from './Settings';
+import ShinyText from './ui/ShinyText';
+import EmptyState from './ui/EmptyState';
 
 // Types
 
@@ -79,6 +81,18 @@ const platforms: Platform[] = [
     { id: 'soundcloud', name: 'SoundCloud', icon: <FaSoundcloud size={22} />, color: '#FF5500', bgClass: 'bg-orange-600' }
 ];
 
+const PLATFORM_DOMAINS: Record<string, string[]> = {
+    'youtube': ['youtube.com', 'youtu.be'],
+    'instagram': ['instagram.com', 'instagr.am'],
+    'tiktok': ['tiktok.com'],
+    'facebook': ['facebook.com', 'fb.watch', 'fb.com', 'messenger.com'],
+    'spotify': ['spotify.com'],
+    'x': ['twitter.com', 'x.com'],
+    'pinterest': ['pinterest.com', 'pin.it'],
+    'soundcloud': ['soundcloud.com'],
+    'snapchat': ['snapchat.com']
+};
+
 const formatNumber = (num: number) => {
     if (!num) return '0';
     if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
@@ -115,6 +129,18 @@ function CircularProgress({ percent, color }: { percent: number; color: string }
     );
 }
 
+const loadingMessages = [
+    "Fetching metadata...",
+    "Finding the best quality...",
+    "Searching media servers...",
+    "Analyzing video streams...",
+    "Bypassing restrictions...",
+    "Retrieving high-res content...",
+    "Sourcing thumbnails...",
+    "Almost there...",
+    "Initializing yt-dlp engine..."
+];
+
 export function Downloader() {
     const [url, setUrl] = useState('');
     const [currentPlatform, setCurrentPlatform] = useState<Platform>(platforms[0]);
@@ -146,6 +172,23 @@ export function Downloader() {
         available: false, service: 'none', quality: '', format: '', checking: false
     });
 
+    // Loading messages rotating
+    const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
+
+    useEffect(() => {
+        let interval: any;
+        if (loading) {
+            let i = 0;
+            interval = setInterval(() => {
+                i = (i + 1) % loadingMessages.length;
+                setLoadingMessage(loadingMessages[i]);
+            }, 2000);
+        } else {
+            setLoadingMessage(loadingMessages[0]);
+        }
+        return () => clearInterval(interval);
+    }, [loading]);
+
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
     const [showDiscordModal, setShowDiscordModal] = useState(false);
@@ -163,6 +206,9 @@ export function Downloader() {
         error?: string;
         formatId?: string;
         platform?: string;
+        speed?: string;
+        eta?: string;
+        downloaded?: string;
     }>>([]);
     const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
     const [batchDownloading, setBatchDownloading] = useState(false);
@@ -448,7 +494,13 @@ export function Downloader() {
                 if (isBatchActive) {
                     // Update current batch item progress
                     setDownloadQueue(prev => prev.map((q, idx) =>
-                        idx === index ? { ...q, progress: data.percent } : q
+                        idx === index ? {
+                            ...q,
+                            progress: data.percent,
+                            speed: data.currentSpeed,
+                            eta: data.eta,
+                            downloaded: data.downloaded
+                        } : q
                     ));
                 } else {
                     setProgress({
@@ -527,35 +579,29 @@ export function Downloader() {
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!url || loading) return;
+    const handleSubmit = async (e?: React.FormEvent, manualUrl?: string) => {
+        if (e) e.preventDefault();
+        const targetUrl = manualUrl || url;
+        if (!targetUrl || loading) return;
 
         // Platform validation
-        const u = url.toLowerCase();
-        const domains: Record<string, string[]> = {
-            'youtube': ['youtube.com', 'youtu.be'],
-            'instagram': ['instagram.com', 'instagr.am'],
-            'tiktok': ['tiktok.com'],
-            'facebook': ['facebook.com', 'fb.watch', 'fb.com', 'messenger.com'],
-            'spotify': ['spotify.com'],
-            'x': ['twitter.com', 'x.com'],
-            'pinterest': ['pinterest.com', 'pin.it'],
-            'soundcloud': ['soundcloud.com'],
-            'snapchat': ['snapchat.com']
-        };
-
-        const validDomains = domains[currentPlatform.id];
+        const u = targetUrl.toLowerCase();
+        const validDomains = PLATFORM_DOMAINS[currentPlatform.id];
         if (validDomains && !validDomains.some(d => u.includes(d))) {
-            const detectedId = Object.keys(domains).find(id => domains[id].some(d => u.includes(d)));
+            const detectedId = Object.keys(PLATFORM_DOMAINS).find(id => PLATFORM_DOMAINS[id].some(d => u.includes(d)));
             const detectedName = detectedId ? platforms.find(p => p.id === detectedId)?.name : null;
 
-            if (detectedName) {
-                setError(`⚠️ This looks like a ${detectedName} link. Please switch to the ${detectedName} tab above.`);
+            if (detectedName && detectedId) {
+                // Auto-switch platform if it's the wrong one
+                const newPlatform = platforms.find(p => p.id === detectedId);
+                if (newPlatform) {
+                    setCurrentPlatform(newPlatform);
+                    // The state won't update immediately, so we continue with detected logic
+                }
             } else {
                 setError(`Invalid URL for ${currentPlatform.name}. Please check your link.`);
+                return;
             }
-            return;
         }
 
         setLoading(true);
@@ -569,10 +615,14 @@ export function Downloader() {
         setLosslessInfo({ available: false, service: 'none', quality: '', format: '', checking: false });
 
         try {
-            // Use different handler for Spotify
-            const res = isSpotify
-                ? await window.electron.getSpotifyInfo(url)
-                : await window.electron.getVideoInfo(url);
+            // Determine platform for fetch logic
+            const detectedId = Object.keys(PLATFORM_DOMAINS).find(id => PLATFORM_DOMAINS[id].some(d => u.includes(d))) as PlatformId;
+            const finalPlatformId = detectedId || currentPlatform.id;
+            const isTargetSpotify = finalPlatformId === 'spotify';
+
+            const res = isTargetSpotify
+                ? await window.electron.getSpotifyInfo(targetUrl)
+                : await window.electron.getVideoInfo(targetUrl);
 
             console.log('Metadata response:', res);
             if (res.success && res.metadata) {
@@ -594,7 +644,7 @@ export function Downloader() {
                 }
 
                 // Check lossless availability for Spotify single tracks
-                if (isSpotify && finalMetadata.spotifyTrackId && finalMetadata.contentType !== 'playlist') {
+                if (isTargetSpotify && finalMetadata.spotifyTrackId && finalMetadata.contentType !== 'playlist') {
                     setLosslessInfo(prev => ({ ...prev, checking: true }));
                     try {
                         const lossless = await window.electron.checkLosslessAvailability({
@@ -775,6 +825,7 @@ export function Downloader() {
     }, []);
 
     const handlePlatformChange = (p: Platform) => {
+        if (loading || downloading || batchDownloading) return;
         setCurrentPlatform(p);
         setUrl('');
         setMetadata(null);
@@ -1014,15 +1065,21 @@ export function Downloader() {
                 <div className="flex flex-wrap justify-center gap-3 mb-6">
                     {platforms.map((p) => {
                         const isActive = currentPlatform.id === p.id;
+                        const isBusy = loading || downloading || batchDownloading;
+                        const isDisabled = isBusy && !isActive;
+
                         return (
                             <button
                                 key={p.id}
                                 onClick={() => handlePlatformChange(p)}
-                                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 cursor-pointer
+                                disabled={isDisabled}
+                                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300
                                     ${isActive
-                                        ? `${p.bgClass} scale-110 ${p.id === 'x' ? 'text-black' : p.id === 'tiktok' ? 'text-white' : 'text-white'}`
+                                        ? `${p.bgClass} scale-110 ${p.id === 'x' ? 'text-black' : 'text-white'}`
                                         : 'bg-white/[0.08] hover:bg-white/[0.12]'
-                                    }`}
+                                    }
+                                    ${isDisabled ? 'opacity-20 cursor-not-allowed grayscale scale-90' : 'cursor-pointer'}
+                                `}
                                 style={{
                                     color: isActive ? undefined : p.color,
                                     boxShadow: isActive ? `0 8px 32px -4px ${p.color}50, 0 0 0 2px ${p.color}` : 'none'
@@ -1044,10 +1101,11 @@ export function Downloader() {
                                 setDownloadQueue([]);
                             }
                         }}
-                        className={`px-4 py-2 rounded-xl font-medium text-sm transition-all cursor-pointer flex items-center gap-2 ${batchMode
+                        disabled={loading || downloading || batchDownloading}
+                        className={`px-4 py-2 rounded-xl font-medium text-sm transition-all flex items-center gap-2 ${batchMode
                             ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                             : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
-                            }`}
+                            } ${loading || downloading || batchDownloading ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
                     >
                         <Layers className="w-4 h-4" />
                         {batchMode ? 'Batch Mode' : 'Single Mode'}
@@ -1063,7 +1121,17 @@ export function Downloader() {
 
                                 <div className="relative">
                                     {/* The Glass Base */}
-                                    <div className="absolute inset-0 bg-[#0a0a0b]/40 backdrop-blur-lg rounded-xl border border-white/5 group-hover:border-white/10 group-focus-within:border-white/20 transition-all duration-300" />
+                                    <div
+                                        className="absolute inset-0 bg-[#0a0a0b]/60 backdrop-blur-xl rounded-xl border border-white/5 group-hover:border-white/10 transition-all duration-300"
+                                    />
+                                    <div
+                                        className="absolute inset-0 rounded-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500 pointer-events-none"
+                                        style={{
+                                            boxShadow: `0 0 25px ${currentPlatform.color}15`,
+                                            border: `1px solid ${currentPlatform.color}50`,
+                                            background: `linear-gradient(to right, ${currentPlatform.color}05, transparent)`
+                                        }}
+                                    />
 
                                     <div className="relative flex items-center h-14 sm:h-15">
                                         <div className="pl-5 pointer-events-none">
@@ -1075,8 +1143,8 @@ export function Downloader() {
                                             value={url}
                                             onChange={(e) => setUrl(e.target.value)}
                                             placeholder={isSpotify ? 'Drop link...' : `Paste link here...`}
-                                            disabled={loading || downloading}
-                                            className="w-full h-full pl-3 pr-36 bg-transparent text-white placeholder-white/10 outline-none font-medium text-sm tracking-tight disabled:opacity-50 transition-all"
+                                            disabled={loading || downloading || batchDownloading}
+                                            className="w-full h-full pl-3 pr-40 bg-transparent text-white placeholder-white/20 outline-none font-bold text-sm tracking-tight disabled:opacity-50 transition-all"
                                         />
 
                                         {/* Action Group Inside Input */}
@@ -1098,14 +1166,33 @@ export function Downloader() {
                                                 onClick={async () => {
                                                     try {
                                                         const text = await navigator.clipboard.readText();
+                                                        if (!text) return;
+
                                                         setUrl(text);
+
+                                                        // Detect platform
+                                                        const u = text.toLowerCase();
+                                                        const detectedId = Object.keys(PLATFORM_DOMAINS).find(id => PLATFORM_DOMAINS[id].some(d => u.includes(d)));
+
+                                                        if (detectedId) {
+                                                            const newPlatform = platforms.find(p => p.id === detectedId);
+                                                            if (newPlatform) {
+                                                                setCurrentPlatform(newPlatform);
+                                                                // Trigger fetch with manual URL
+                                                                handleSubmit(undefined, text);
+                                                            }
+                                                        } else {
+                                                            setError("URL not recognized or platform not supported. Please try again.");
+                                                            setTimeout(() => setError(null), 5000);
+                                                        }
                                                     } catch (e) {
                                                         console.log('Clipboard access denied');
                                                     }
                                                 }}
-                                                disabled={loading || downloading}
-                                                className="h-9 px-4 bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 rounded-lg text-[9px] font-bold uppercase tracking-wider text-white/30 hover:text-white transition-all cursor-pointer disabled:opacity-30 active:scale-95"
+                                                disabled={loading || downloading || batchDownloading}
+                                                className={`h-9 px-4 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-all active:scale-95 flex items-center gap-2 group/paste ${loading || downloading || batchDownloading ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
                                             >
+                                                <ClipboardIcon className="w-3.5 h-3.5 opacity-50 group-hover/paste:opacity-100 transition-opacity" />
                                                 Paste
                                             </button>
                                         </div>
@@ -1115,7 +1202,7 @@ export function Downloader() {
 
                             <button
                                 type="submit"
-                                disabled={!url || loading || downloading}
+                                disabled={!url || loading || downloading || batchDownloading}
                                 className={`h-14 sm:h-15 px-8 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all duration-500 cursor-pointer active:scale-95 disabled:opacity-20 disabled:cursor-not-allowed group/btn overflow-hidden relative
                                     ${loading
                                         ? 'bg-white/5 text-white/30 border border-white/5'
@@ -1255,12 +1342,21 @@ export function Downloader() {
 
                                                         {/* Progress Bar (Slim) */}
                                                         {(item.status === 'downloading' || item.status === 'processing') && (
-                                                            <div className="mt-3 w-full bg-white/10 rounded-full h-1 overflow-hidden">
-                                                                <div
-                                                                    className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                                                                    style={{ width: `${item.progress}%` }}
-                                                                />
-                                                            </div>
+                                                            <>
+                                                                <div className="mt-3 w-full bg-white/10 rounded-full h-1 overflow-hidden">
+                                                                    <div
+                                                                        className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                                                                        style={{ width: `${item.progress}%` }}
+                                                                    />
+                                                                </div>
+                                                                <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
+                                                                    <span>{item.speed && item.speed !== '...' ? item.speed : 'Downloading...'}</span>
+                                                                    <div className="flex items-center gap-2">
+                                                                        {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
+                                                                        {item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
+                                                                    </div>
+                                                                </div>
+                                                            </>
                                                         )}
                                                     </div>
 
@@ -1395,25 +1491,28 @@ export function Downloader() {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
                         >
-                            <div className="animate-pulse">
+                            <div className="animate-pulse relative">
                                 {/* Thumbnail */}
-                                <div className="w-full aspect-video bg-white/5 rounded-2xl mb-5 border border-white/5" />
-
-                                {/* Info */}
-                                <div className="space-y-3 mb-6">
-                                    <div className="h-7 bg-white/5 rounded-lg w-3/4" />
-                                    <div className="flex gap-4">
-                                        <div className="h-4 bg-white/5 rounded w-24" />
-                                        <div className="h-4 bg-white/5 rounded w-16" />
+                                <div className="w-full aspect-video bg-white/5 rounded-2xl mb-5 border border-white/5 flex flex-col items-center justify-center gap-4">
+                                    <div className="relative">
+                                        <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
+                                            <Loader className="w-8 h-8 text-white/20 animate-spin" />
+                                        </div>
                                     </div>
+                                    <ShinyText
+                                        text={loadingMessage}
+                                        disabled={false}
+                                        speed={3}
+                                        className="text-sm font-bold tracking-widest uppercase opacity-80"
+                                    />
                                 </div>
 
-                                {/* Actions */}
-                                <div className="border-t border-white/10 pt-5 space-y-3">
-                                    <div className="h-3 bg-white/5 rounded w-32" />
-                                    <div className="space-y-2">
-                                        <div className="h-14 bg-white/5 rounded-xl border border-white/5" />
-                                        <div className="h-14 bg-white/5 rounded-xl border border-white/5" />
+                                {/* Info */}
+                                <div className="space-y-3 mb-6 px-2">
+                                    <div className="h-6 bg-white/5 rounded-lg w-3/4" />
+                                    <div className="flex gap-4">
+                                        <div className="h-3 bg-white/5 rounded w-24" />
+                                        <div className="h-3 bg-white/5 rounded w-16" />
                                     </div>
                                 </div>
                             </div>
@@ -1767,16 +1866,23 @@ export function Downloader() {
                                                     </div>
                                                 )}
                                                 {isDownloadingItem && (
-                                                    <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-2">
+                                                    <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-2 text-center rounded-lg">
                                                         <Loader className="w-4 h-4 animate-spin mb-1 text-blue-400" />
+                                                        <p className="text-white font-bold text-[10px] mb-1">
+                                                            {progress?.percent ? `${Math.round(progress.percent)}%` : 'Starting...'}
+                                                        </p>
                                                         {progress?.percent !== undefined && (
-                                                            <div className="w-full h-1 bg-white/20 rounded-full overflow-hidden">
+                                                            <div className="w-[90%] h-1 bg-white/20 rounded-full overflow-hidden mb-1">
                                                                 <div
                                                                     className="h-full bg-blue-500 transition-all duration-300"
                                                                     style={{ width: `${progress.percent}%` }}
                                                                 />
                                                             </div>
                                                         )}
+                                                        <div className="flex flex-col items-center justify-center text-[9px] text-white/60 leading-tight">
+                                                            {progress?.speed && progress.speed !== '...' && <span>{progress.speed}</span>}
+                                                            {progress?.eta && progress.eta !== '...' && <span>{progress.eta} left</span>}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
@@ -1894,147 +2000,7 @@ export function Downloader() {
 
                     {/* Empty State */}
                     {!metadata && !loading && !complete && (
-                        <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-8">
-                            {/* Hero Icon */}
-                            <div className="text-center mb-10">
-                                <motion.div
-                                    className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4"
-                                    style={{
-                                        background: `linear-gradient(135deg, ${currentPlatform.color}20, ${currentPlatform.color}10)`,
-                                        boxShadow: `0 0 60px ${currentPlatform.color}20`
-                                    }}
-                                    animate={{ scale: [1, 1.05, 1] }}
-                                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                                >
-                                    <div style={{ color: currentPlatform.color }}>
-                                        {currentPlatform.icon}
-                                    </div>
-                                </motion.div>
-                                <h2 className="text-xl font-bold text-white mb-2">
-                                    Ready to Download
-                                </h2>
-                                <p className="text-white/40 text-sm">
-                                    {isSpotify ? 'Tracks, albums & playlists' : 'Videos, reels & playlists'}
-                                </p>
-                            </div>
-
-                            {/* How to Download Steps */}
-                            <div className="space-y-3 mb-8">
-                                <p className="text-white/30 text-xs uppercase tracking-widest text-center mb-4">How to Download</p>
-
-                                {/* Step 1 */}
-                                <motion.div
-                                    className="flex items-center gap-4 p-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl"
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: 0.1 }}
-                                >
-                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center shrink-0">
-                                        <Link2 className="w-5 h-5 text-blue-400" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="font-medium text-sm text-white">Copy the link</p>
-                                        <p className="text-xs text-white/40">Copy the video or playlist URL from {currentPlatform.name}</p>
-                                    </div>
-                                    <div className="w-6 h-6 rounded-full bg-white/5 flex items-center justify-center text-white/20 text-xs font-bold">1</div>
-                                </motion.div>
-
-                                {/* Step 2 */}
-                                <motion.div
-                                    className="flex items-center gap-4 p-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl"
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: 0.2 }}
-                                >
-                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/10 flex items-center justify-center shrink-0">
-                                        <ClipboardIcon className="w-5 h-5 text-purple-400" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="font-medium text-sm text-white">Paste it above</p>
-                                        <p className="text-xs text-white/40">Use the Paste button or press Ctrl+V</p>
-                                    </div>
-                                    <div className="w-6 h-6 rounded-full bg-white/5 flex items-center justify-center text-white/20 text-xs font-bold">2</div>
-                                </motion.div>
-
-                                {/* Step 3 */}
-                                <motion.div
-                                    className="flex items-center gap-4 p-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl"
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: 0.3 }}
-                                >
-                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/10 flex items-center justify-center shrink-0">
-                                        <Download className="w-5 h-5 text-green-400" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="font-medium text-sm text-white">Choose & download</p>
-                                        <p className="text-xs text-white/40">Select quality and start downloading</p>
-                                    </div>
-                                    <div className="w-6 h-6 rounded-full bg-white/5 flex items-center justify-center text-white/20 text-xs font-bold">3</div>
-                                </motion.div>
-                            </div>
-
-                            {/* Supported Content */}
-                            <motion.div
-                                className="p-4 bg-gradient-to-br from-white/[0.02] to-transparent border border-white/[0.05] rounded-2xl"
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.4 }}
-                            >
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Sparkles className="w-4 h-4 text-yellow-400" />
-                                    <span className="text-xs font-medium text-white/60">Supported Content</span>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    {isSpotify ? (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎵 Tracks</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">💿 Albums</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📋 Playlists</span>
-                                        </>
-                                    ) : currentPlatform.id === 'youtube' ? (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎬 Videos</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">💎 Premium</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎵 Music</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📺 Shorts</span>
-                                        </>
-                                    ) : currentPlatform.id === 'instagram' ? (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎬 Reels</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📷 Posts</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📖 Stories*</span>
-                                        </>
-                                    ) : currentPlatform.id === 'tiktok' ? (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎬 Videos</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎵 Sounds</span>
-                                        </>
-                                    ) : currentPlatform.id === 'soundcloud' ? (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎵 Tracks</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📋 Playlists</span>
-                                        </>
-                                    ) : currentPlatform.id === 'pinterest' ? (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📌 Pins</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎬 Videos</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">🎬 Videos</span>
-                                            <span className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/50">📷 Posts</span>
-                                        </>
-                                    )}
-                                </div>
-                                {['instagram', 'facebook'].includes(currentPlatform.id) && !hasCookies && (
-                                    <p className="text-[10px] text-white/30 mt-2">*Stories & private content require login (Click key icon)</p>
-                                )}
-                                {['youtube', 'tiktok'].includes(currentPlatform.id) && !hasCookies && (
-                                    <p className="text-[10px] text-white/30 mt-2">*Premium/Age-gated content requires login (Click key icon)</p>
-                                )}
-                            </motion.div>
-                        </motion.div>
+                        <EmptyState currentPlatform={currentPlatform} hasCookies={hasCookies} />
                     )}
                 </AnimatePresence>
 

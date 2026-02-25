@@ -103,6 +103,28 @@ async function downloadFFmpeg(): Promise<boolean> {
 
                 response.pipe(file);
 
+                const totalSize = parseInt(response.headers['content-length'] || '0', 10);
+                let downloadedSize = 0;
+                let lastPercent = 0;
+
+                response.on('data', (chunk: any) => {
+                    downloadedSize += chunk.length;
+                    if (totalSize > 0) {
+                        const percent = Math.floor((downloadedSize / totalSize) * 100);
+                        if (percent > lastPercent) {
+                            lastPercent = percent;
+                            const mainWindow = getMainWindow();
+                            if (mainWindow) {
+                                mainWindow.webContents.send('download-progress', {
+                                    percent: percent,
+                                    currentSpeed: 'Downloading FFmpeg...',
+                                    downloaded: `${(downloadedSize / (1024 * 1024)).toFixed(1)}MB / ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+                                });
+                            }
+                        }
+                    }
+                });
+
                 file.on('finish', () => {
                     file.close();
                     console.log('FFmpeg downloaded, extracting...');

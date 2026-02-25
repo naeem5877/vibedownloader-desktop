@@ -84,8 +84,21 @@ body {
     }
 }
 
+.animate-shine {
+    animation: shine 4s infinite linear;
+}
+
 .animate-pulse {
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+    display: none;
 }
 
 @property --border-angle {
@@ -118,6 +131,9 @@ body {
     /* Thin border width */
     background: conic-gradient(from var(--border-angle), #5865F2, #C0C0C0 50%, #5865F2);
     -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    mask:
         linear-gradient(#fff 0 0) content-box,
         linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;

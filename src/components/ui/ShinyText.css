@@ -1,0 +1,19 @@
+.shiny-text {
+    color: #b5b5b5;
+    background: linear-gradient(120deg,
+            rgba(255, 255, 255, 0) 40%,
+            rgba(255, 255, 255, 0.8) 50%,
+            rgba(255, 255, 255, 0) 60%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    display: inline-block;
+    line-height: 1;
+    position: relative;
+}
+
+.shiny-text.disabled {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+    color: inherit;
+}
