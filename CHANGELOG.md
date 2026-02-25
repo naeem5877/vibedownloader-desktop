@@ -1,3 +1,19 @@
+## [1.2.0] - 2026-02-26
+
+### ✨ New Features & UI Upgrades
+- **Upgraded Empty State**: A completely redesigned home screen that dynamically adapts to the selected platform with glassmorphic cards and animated tutorial steps.
+- **Atmospheric Animations**: Added concentric rotating rings, pulsing orbs, and platform-specific hero sections for a premium desktop experience.
+- **Shiny Loading Effects**: New `ShinyText` component for dynamic, high-energy status updates during metadata fetching.
+- **Next-Gen Input Field**: The URL input now features a reactive brand-colored focus glow and a refined frosted-glass design.
+
+### 🛡️ Reliability & Safety
+- **Platform Safety Lock**: Other platform buttons and mode toggles are now automatically locked during active downloads to prevent accidental operation interruptions.
+- **Intelligent Auto-Switch**: Improved paste logic that auto-detects the platform from the URL and switches the UI context instantly.
+
+### 🛠️ Minor Improvements
+- Added cursor-pointer affordance to all primary action buttons.
+- Optimized build configuration for faster deployment.
+- Cleaned up unused components and strict type-safety improvements.
 
 ## [1.0.11] - 2026-02-03
 
