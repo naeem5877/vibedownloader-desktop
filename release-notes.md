@@ -1,12 +1,13 @@
-### ✨ New Features
-- **Snapchat Support**: Direct video downloading from Snapchat (Spotlight and Public Stories) with official **Cookie support** for age-restricted or private snaps.
-- **Cookie File Upload**: Added "Upload .txt File" functionality to the login/vault modal, allowing users to import Netscape cookie files directly instead of manual pasting.
-- **System Tray Integration**: Added "Minimize to Tray" functionality with a premium animated toggle in settings, keeping the app ready for instant use.
+### 🚀 Performance & macOS Lag Fix
+- **GPU-Accelerated Scrolling**: Implemented dedicated hardware-acceleration layers to ensure buttery smooth scrolling even on high-refresh rate macOS displays.
+- **Optimized Empty State**: Re-engineered the platform display area to use light radial gradients instead of heavy real-time CSS blurs, significantly reducing GPU load.
+- **Memoized Components**: Key UI elements are now memoized to prevent unnecessary re-renders during active downloads.
 
-### 🚀 Performance & Optimizations
-- **Ultra-Fast Startup**: Re-engineered the engine initialization process to bypass non-essential checks, making the app launch almost twice as fast.
-- **Smart Background Throttling**: The app now automatically reduces CPU usage and mutes internal audio when hidden in the tray to ensure zero impact on system resources.
+### 🎨 UI & Animation Polish
+- **Static Platform Icons**: Fixed the "tilt" bug in the Empty State display; platform icons now stay perfectly upright while surrounding rings rotate.
+- **Refined Display Logic**: Improved loading skeleton logic and unified animation easing for a premium feel.
 
-### 🔧 Engine Improvements
-- **Intelligent Background Updates**: The downloader engine (yt-dlp) now checks for updates silently in the background after startup and notifies the user with a sleek UI popup when a new version is ready.
-- **Enhanced Engine Refresh**: Improved the manual engine update process in settings with better verification and cleaner file replacement.
+### 🛠️ Critical Bug Fixes
+- **Solved Queue Rendering**: Fixed rendering bugs where batch items would sometimes fail to render or duplicate.
+- **TDZ Safety Fix**: Resolved scope errors by reordering core playlist state logic.
+- **Ghost Removal**: Cleaned up duplicate function declarations for queue management.
