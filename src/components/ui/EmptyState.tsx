@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, memo } from 'react';
 import { motion } from 'framer-motion';
 import {
     Sparkles,
@@ -23,7 +23,7 @@ interface EmptyStateProps {
     hasCookies: boolean;
 }
 
-const EmptyState: React.FC<EmptyStateProps> = ({ currentPlatform, hasCookies }) => {
+const EmptyState: React.FC<EmptyStateProps> = memo(({ currentPlatform, hasCookies }) => {
     // Platform Data Configuration
     const platformData: Record<string, any> = useMemo(() => ({
         youtube: {
@@ -119,44 +119,51 @@ const EmptyState: React.FC<EmptyStateProps> = ({ currentPlatform, hasCookies }) 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="w-full max-w-xl mx-auto flex flex-col items-center py-4"
+            className="w-full max-w-xl mx-auto flex flex-col items-center py-4 hardware-accelerated"
         >
             {/* Hero Section */}
-            <div className="relative mb-8 flex flex-col items-center">
-                {/* Background Orbs */}
+            <div className="relative mb-8 flex flex-col items-center w-full">
+                {/* Optimized Background Gradient (No Blur Filter) */}
                 <div
-                    className="absolute -top-12 -left-20 w-48 h-48 rounded-full opacity-[0.03] blur-3xl pointer-events-none"
-                    style={{ backgroundColor: data.color }}
-                />
-                <div
-                    className="absolute -bottom-12 -right-20 w-40 h-40 rounded-full opacity-[0.03] blur-3xl pointer-events-none"
-                    style={{ backgroundColor: data.color }}
+                    className="absolute inset-x-0 -top-20 h-64 pointer-events-none opacity-20 transition-all duration-500"
+                    style={{
+                        background: `radial-gradient(circle at center, ${data.color}20 0%, transparent 70%)`
+                    }}
                 />
 
-                {/* Animated Rings */}
+                {/* Animated Display Area */}
                 <div className="relative w-32 h-32 flex items-center justify-center mb-6">
+                    {/* Pulsing Light */}
                     <motion.div
-                        animate={{ scale: [1, 1.1, 1] }}
-                        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                        className="absolute inset-0 rounded-full opacity-10"
+                        animate={{ opacity: [0.05, 0.12, 0.05] }}
+                        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                        className="absolute inset-0 rounded-full"
                         style={{ backgroundColor: data.color }}
                     />
+
+                    {/* Outer Rotating Ring */}
                     <motion.div
                         animate={{ rotate: 360 }}
-                        transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                        className="absolute inset-0 rounded-full border border-dashed opacity-20"
+                        transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+                        className="absolute inset-0 rounded-full border border-dashed opacity-20 will-change-transform"
                         style={{ borderColor: data.color }}
                     />
+
+                    {/* Inner Rotating Ring */}
                     <motion.div
                         animate={{ rotate: -360 }}
-                        transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-                        className="absolute inset-4 rounded-full border opacity-30 bg-white/[0.02] flex items-center justify-center"
+                        transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                        className="absolute inset-4 rounded-full border opacity-30 bg-white/[0.01] will-change-transform"
                         style={{ borderColor: data.color }}
+                    />
+
+                    {/* Static Center Icon (Not Tilted) */}
+                    <div
+                        className="relative z-10 flex items-center justify-center hardware-accelerated"
+                        style={{ color: data.color }}
                     >
-                        <div style={{ color: data.color }}>
-                            {data.icon}
-                        </div>
-                    </motion.div>
+                        {data.icon}
+                    </div>
                 </div>
 
                 <h2 className="text-2xl font-black text-white mb-2 tracking-tight">
@@ -176,19 +183,16 @@ const EmptyState: React.FC<EmptyStateProps> = ({ currentPlatform, hasCookies }) 
                         icon: <Link2 className="w-5 h-5 text-blue-400" />,
                         title: 'Copy the link',
                         desc: `Copy the media URL from ${currentPlatform.name}`,
-                        color: 'blue'
                     },
                     {
                         icon: <Clipboard className="w-5 h-5 text-purple-400" />,
                         title: 'Paste it above',
                         desc: 'Use the Paste button or manual input',
-                        color: 'purple'
                     },
                     {
                         icon: <Download className="w-5 h-5 text-green-400" />,
                         title: 'Choose & download',
                         desc: 'Select quality and start downloading',
-                        color: 'green'
                     }
                 ].map((step, i) => (
                     <motion.div
@@ -197,9 +201,9 @@ const EmptyState: React.FC<EmptyStateProps> = ({ currentPlatform, hasCookies }) 
                         variants={stepVariants}
                         initial="hidden"
                         animate="visible"
-                        className="flex items-center gap-4 p-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl group hover:bg-white/[0.05] transition-colors"
+                        className="flex items-center gap-4 p-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl group hover:bg-white/[0.05] transition-all hardware-accelerated"
                     >
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/5`}>
+                        <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/5 bg-white/[0.02]">
                             <div className="opacity-80 group-hover:scale-110 transition-transform">
                                 {step.icon}
                             </div>
@@ -244,6 +248,6 @@ const EmptyState: React.FC<EmptyStateProps> = ({ currentPlatform, hasCookies }) 
             </motion.div>
         </motion.div>
     );
-};
+});
 
 export default EmptyState;

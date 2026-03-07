@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
@@ -141,6 +141,272 @@ const loadingMessages = [
     "Initializing yt-dlp engine..."
 ];
 
+// Memoized Playlist Item for performance
+const PlaylistItem = memo(({
+    entry,
+    isSelected,
+    isDownloadingItem,
+    downloading,
+    progress,
+    isSpotify,
+    metadataUploader,
+    metadataTitle,
+    onToggle,
+    onSpotifyDownload,
+    onDownload,
+    onImgError
+}: {
+    entry: PlaylistEntry;
+    index: number;
+    isSelected: boolean;
+    isDownloadingItem: boolean;
+    downloading: boolean;
+    progress: any;
+    isSpotify: boolean;
+    metadataUploader: any;
+    metadataTitle: any;
+    onToggle: (id: string) => void;
+    onSpotifyDownload: any;
+    onDownload: any;
+    onImgError: any;
+}) => {
+    return (
+        <div
+            className={`flex items-center gap-3 p-2.5 rounded-xl group transition cursor-pointer hardware-accelerated
+                ${isSelected ? 'bg-white/8 border border-white/15' : 'bg-white/5 border border-transparent hover:bg-white/8'}`}
+            onClick={() => onToggle(entry.id)}
+        >
+            {/* Checkbox */}
+            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 transition
+                ${isSelected ? 'bg-white text-black' : 'bg-white/10'}`}>
+                {isSelected && <Check className="w-3.5 h-3.5" />}
+            </div>
+
+            {/* Thumbnail */}
+            <div className="w-12 h-12 rounded-lg bg-white/10 overflow-hidden shrink-0 relative">
+                {entry.thumbnail ? (
+                    <img src={entry.thumbnail} alt="" className="w-full h-full object-cover" onError={onImgError} />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-green-900/30 to-green-600/20">
+                        <Music className="w-5 h-5 text-green-500/50" />
+                    </div>
+                )}
+                {isDownloadingItem && (
+                    <div className="absolute inset-0 bg-black/85 optimized-blur flex flex-col items-center justify-center p-2 text-center rounded-lg">
+                        <Loader className="w-4 h-4 animate-spin mb-1 text-blue-400" />
+                        <p className="text-white font-bold text-[10px] mb-1">
+                            {progress?.percent ? `${Math.round(progress.percent)}%` : 'Starting...'}
+                        </p>
+                        {progress?.percent !== undefined && (
+                            <div className="w-[90%] h-1 bg-white/20 rounded-full overflow-hidden mb-1">
+                                <div
+                                    className="h-full bg-blue-500 transition-all duration-300"
+                                    style={{ width: `${progress.percent}%` }}
+                                />
+                            </div>
+                        )}
+                        <div className="flex flex-col items-center justify-center text-[9px] text-white/60 leading-tight">
+                            {progress?.speed && progress.speed !== '...' && <span>{progress.speed}</span>}
+                            {progress?.eta && progress.eta !== '...' && <span>{progress.eta} left</span>}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Info */}
+            <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm truncate" title={entry.title}>{entry.title}</p>
+                <p className="text-xs text-white/40">
+                    {entry.artist && <span>{entry.artist} • </span>}
+                    {formatDuration(entry.duration)}
+                </p>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex items-center gap-1 opacity-1 sm:opacity-0 group-hover:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
+                {isSpotify && entry.searchQuery ? (
+                    <button
+                        onClick={() => onSpotifyDownload(entry.searchQuery!, entry.title, entry.artist || (metadataUploader || 'Unknown'), entry.id, metadataTitle)}
+                        disabled={downloading}
+                        className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40"
+                        title="Download MP3"
+                    >
+                        <Music className="w-4 h-4 text-green-400" />
+                    </button>
+                ) : (
+                    <>
+                        <button
+                            onClick={() => onDownload('audio_best', entry.url, entry.title, entry.id, metadataTitle)}
+                            disabled={downloading}
+                            className="w-7 h-7 rounded-lg bg-green-500/20 flex items-center justify-center cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40"
+                            title="Download Audio"
+                        >
+                            <Music className="w-3.5 h-3.5 text-green-400" />
+                        </button>
+                        <button
+                            onClick={() => onDownload('best', entry.url, entry.title, entry.id, metadataTitle)}
+                            disabled={downloading}
+                            className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center cursor-pointer hover:bg-blue-500/30 transition disabled:opacity-40"
+                            title="Download Video"
+                        >
+                            <Film className="w-3.5 h-3.5 text-blue-400" />
+                        </button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}, (prev, next) => {
+    // Performance optimization: prevent re-render if this item isn't downloading and its state hasn't changed
+    return prev.isSelected === next.isSelected &&
+        prev.isDownloadingItem === next.isDownloadingItem &&
+        prev.progress?.percent === next.progress?.percent &&
+        prev.progress?.speed === next.progress?.speed &&
+        prev.entry.id === next.entry.id &&
+        prev.downloading === next.downloading;
+});
+
+// Memoized Batch Queue Item for performance
+const BatchQueueItem = memo(({
+    item,
+    index,
+    isSpotify,
+    onToggleMode,
+    onRemove,
+    onRetry
+}: {
+    item: any;
+    index: number;
+    isSpotify: boolean;
+    onToggleMode: (id: string, mode: 'video' | 'audio' | 'lossless') => void;
+    onRemove: (id: string) => void;
+    onRetry: (id: string) => void;
+}) => {
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className={`relative overflow-hidden group rounded-xl border transition-all duration-300 hardware-accelerated ${item.status === 'completed'
+                ? 'bg-green-500/5 border-green-500/20'
+                : item.status === 'failed'
+                    ? 'bg-red-500/5 border-red-500/20'
+                    : item.status === 'downloading' || item.status === 'processing'
+                        ? 'bg-blue-500/5 border-blue-500/20 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]'
+                        : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.05]'
+                }`}
+        >
+            {/* Progress Bar Background */}
+            {(item.status === 'downloading' || item.status === 'processing') && (
+                <div className="absolute inset-0 bg-blue-500/5 transition-all duration-500" style={{ width: `${item.progress}%` }} />
+            )}
+
+            <div className="relative p-4 flex items-center gap-4">
+                {/* Status Icon */}
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-300 ${item.status === 'completed' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                    item.status === 'failed' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                        item.status === 'downloading' || item.status === 'processing' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                            'bg-white/5 border-white/10 text-white/30'
+                    }`}>
+                    {item.status === 'completed' ? <CheckCircle2 className="w-5 h-5" /> :
+                        item.status === 'failed' ? <X className="w-5 h-5" /> :
+                            item.status === 'downloading' || item.status === 'processing' ? <Loader className="w-5 h-5 animate-spin" /> :
+                                <span className="font-bold text-xs">{index + 1}</span>}
+                </div>
+
+                {/* Content Info */}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        <p className="font-bold text-sm text-white truncate">{item.title}</p>
+                        {item.status === 'processing' && <span className="text-[10px] text-blue-400 animate-pulse">Fetching info...</span>}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                        <p className="text-white/40 truncate max-w-[200px]">{item.url}</p>
+                        {item.error && <span className="text-red-400 truncate max-w-[150px]">• {item.error}</span>}
+                    </div>
+
+                    {/* Progress Bar (Slim) */}
+                    {(item.status === 'downloading' || item.status === 'processing') && (
+                        <>
+                            <div className="mt-3 w-full bg-white/10 rounded-full h-1 overflow-hidden">
+                                <div
+                                    className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                                    style={{ width: `${item.progress}%` }}
+                                />
+                            </div>
+                            <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
+                                <span>{item.speed && item.speed !== '...' ? item.speed : 'Downloading...'}</span>
+                                <div className="flex items-center gap-2">
+                                    {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
+                                    {item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                {/* Actions & Toggles */}
+                <div className="flex items-center gap-2">
+                    {/* A/V Toggle - Only active if pending */}
+                    <div className={`flex bg-black/20 rounded-lg p-0.5 border border-white/5 ${item.status !== 'pending' ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <button
+                            onClick={() => onToggleMode(item.id, 'video')}
+                            className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'video' ? 'bg-blue-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
+                                }`}
+                        >
+                            Video
+                        </button>
+                        <button
+                            onClick={() => onToggleMode(item.id, 'audio')}
+                            className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'audio' ? 'bg-green-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
+                                }`}
+                        >
+                            Audio
+                        </button>
+                        {isSpotify && (
+                            <button
+                                onClick={() => onToggleMode(item.id, 'lossless')}
+                                className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'lossless' ? 'bg-gradient-to-r from-purple-500 to-cyan-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
+                                    }`}
+                            >
+                                Lossless
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Retry button for failed */}
+                    {item.status === 'failed' && (
+                        <button
+                            onClick={() => onRetry(item.id)}
+                            className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-all flex items-center justify-center cursor-pointer border border-blue-500/10"
+                            title="Retry Download"
+                        >
+                            <ArrowRight className="w-4 h-4" />
+                        </button>
+                    )}
+
+                    {/* Remove button for pending/failed/completed */}
+                    {item.status !== 'downloading' && item.status !== 'processing' && (
+                        <button
+                            onClick={() => onRemove(item.id)}
+                            className="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all flex items-center justify-center cursor-pointer border border-red-500/10"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
+            </div>
+        </motion.div>
+    );
+}, (prev, next) => {
+    return prev.item.status === next.item.status &&
+        prev.item.progress === next.item.progress &&
+        prev.item.mode === next.item.mode &&
+        prev.item.speed === next.item.speed &&
+        prev.item.error === next.item.error &&
+        prev.isSpotify === next.isSpotify;
+});
+
 export function Downloader() {
     const [url, setUrl] = useState('');
     const [currentPlatform, setCurrentPlatform] = useState<Platform>(platforms[0]);
@@ -248,13 +514,31 @@ export function Downloader() {
         setTimeout(() => processBatchQueue(0), 0);
     };
 
-    const toggleItemMode = (id: string, mode: 'video' | 'audio' | 'lossless') => {
+    const toggleItemMode = useCallback((id: string, mode: 'video' | 'audio' | 'lossless') => {
         setDownloadQueue(prev => prev.map(item =>
             item.id === id && item.status === 'pending'
                 ? { ...item, mode }
                 : item
         ));
-    };
+    }, []);
+
+    const removeFromQueue = useCallback((id: string) => {
+        setDownloadQueue(prev => prev.filter(q => q.id !== id));
+    }, []);
+    const handleRetryBatchItem = useCallback(async (id: string) => {
+        const itemIndex = queueRef.current.findIndex(q => q.id === id);
+        if (itemIndex >= 0) {
+            setDownloadQueue(prev => prev.map(q =>
+                q.id === id ? { ...q, status: 'pending', error: undefined } : q
+            ));
+            if (!batchDownloading) {
+                setBatchDownloading(true);
+                batchStateRef.current.downloading = true;
+                // Small delay to ensure state updates before processing
+                setTimeout(() => processBatchQueue(itemIndex), 50);
+            }
+        }
+    }, [batchDownloading]);
 
     const processBatchQueue = async (startIndex: number) => {
         // We use queueRef to get the total count, but we must be careful about concurrency
@@ -421,9 +705,6 @@ export function Downloader() {
         setCurrentBatchIndex(0);
     };
 
-    const removeFromQueue = (id: string) => {
-        setDownloadQueue(prev => prev.filter(q => q.id !== id));
-    };
 
     // Check cookies when platform changes
     useEffect(() => {
@@ -851,25 +1132,14 @@ export function Downloader() {
 
 
     // Playlist helpers
-    const toggleItem = (id: string) => {
+    const toggleItem = useCallback((id: string) => {
         setSelectedItems(prev => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         });
-    };
-
-    const selectAll = () => {
-        if (metadata?.entries) {
-            setSelectedItems(new Set(filteredEntries.map(e => e.id)));
-        }
-    };
-
-    const deselectAll = () => {
-        setSelectedItems(new Set());
-    };
-
+    }, []);
 
     // Filter entries by search
     const filteredEntries = useMemo(() => {
@@ -881,6 +1151,16 @@ export function Downloader() {
             (e.artist && e.artist.toLowerCase().includes(q))
         );
     }, [metadata?.entries, searchQuery]);
+
+    const selectAll = useCallback(() => {
+        if (metadata?.entries) {
+            setSelectedItems(new Set(filteredEntries.map(e => e.id)));
+        }
+    }, [metadata?.entries, filteredEntries]);
+
+    const deselectAll = useCallback(() => {
+        setSelectedItems(new Set());
+    }, []);
 
     const isPlaylist = metadata &&
         (metadata.contentType === 'playlist' || (metadata.contentType === 'story' && (metadata.entries?.length || 0) > 1)) &&
@@ -1293,137 +1573,18 @@ export function Downloader() {
                                     </span>
                                 </div>
 
-                                <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-1">
-                                    <AnimatePresence>
+                                <div className="space-y-3 max-h-[500px] smooth-scroll custom-scrollbar pr-1 hardware-accelerated">
+                                    <AnimatePresence initial={false}>
                                         {downloadQueue.map((item, index) => (
-                                            <motion.div
+                                            <BatchQueueItem
                                                 key={item.id}
-                                                layout
-                                                initial={{ opacity: 0, y: 10 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                exit={{ opacity: 0, scale: 0.95 }}
-                                                className={`relative overflow-hidden group rounded-xl border transition-all duration-300 ${item.status === 'completed'
-                                                    ? 'bg-green-500/5 border-green-500/20'
-                                                    : item.status === 'failed'
-                                                        ? 'bg-red-500/5 border-red-500/20'
-                                                        : item.status === 'downloading' || item.status === 'processing'
-                                                            ? 'bg-blue-500/5 border-blue-500/20 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]'
-                                                            : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.05]'
-                                                    }`}
-                                            >
-                                                {/* Progress Bar Background */}
-                                                {(item.status === 'downloading' || item.status === 'processing') && (
-                                                    <div className="absolute inset-0 bg-blue-500/5 transition-all duration-500" style={{ width: `${item.progress}%` }} />
-                                                )}
-
-                                                <div className="relative p-4 flex items-center gap-4">
-                                                    {/* Status Icon */}
-                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-300 ${item.status === 'completed' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
-                                                        item.status === 'failed' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-                                                            item.status === 'downloading' || item.status === 'processing' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
-                                                                'bg-white/5 border-white/10 text-white/30'
-                                                        }`}>
-                                                        {item.status === 'completed' ? <CheckCircle2 className="w-5 h-5" /> :
-                                                            item.status === 'failed' ? <X className="w-5 h-5" /> :
-                                                                item.status === 'downloading' || item.status === 'processing' ? <Loader className="w-5 h-5 animate-spin" /> :
-                                                                    <span className="font-bold text-xs">{index + 1}</span>}
-                                                    </div>
-
-                                                    {/* Content Info */}
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <p className="font-bold text-sm text-white truncate">{item.title}</p>
-                                                            {item.status === 'processing' && <span className="text-[10px] text-blue-400 animate-pulse">Fetching info...</span>}
-                                                        </div>
-                                                        <div className="flex items-center gap-3 text-xs">
-                                                            <p className="text-white/40 truncate max-w-[200px]">{item.url}</p>
-                                                            {item.error && <span className="text-red-400 truncate max-w-[150px]">• {item.error}</span>}
-                                                        </div>
-
-                                                        {/* Progress Bar (Slim) */}
-                                                        {(item.status === 'downloading' || item.status === 'processing') && (
-                                                            <>
-                                                                <div className="mt-3 w-full bg-white/10 rounded-full h-1 overflow-hidden">
-                                                                    <div
-                                                                        className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                                                                        style={{ width: `${item.progress}%` }}
-                                                                    />
-                                                                </div>
-                                                                <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
-                                                                    <span>{item.speed && item.speed !== '...' ? item.speed : 'Downloading...'}</span>
-                                                                    <div className="flex items-center gap-2">
-                                                                        {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
-                                                                        {item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
-                                                                    </div>
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                    </div>
-
-                                                    {/* Actions & Toggles */}
-                                                    <div className="flex items-center gap-2">
-                                                        {/* A/V Toggle - Only active if pending */}
-                                                        <div className={`flex bg-black/20 rounded-lg p-0.5 border border-white/5 ${item.status !== 'pending' ? 'opacity-50 pointer-events-none' : ''}`}>
-                                                            <button
-                                                                onClick={() => toggleItemMode(item.id, 'video')}
-                                                                className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'video' ? 'bg-blue-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
-                                                                    }`}
-                                                            >
-                                                                Video
-                                                            </button>
-                                                            <button
-                                                                onClick={() => toggleItemMode(item.id, 'audio')}
-                                                                className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'audio' ? 'bg-green-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
-                                                                    }`}
-                                                            >
-                                                                Audio
-                                                            </button>
-                                                            {isSpotify && (
-                                                                <button
-                                                                    onClick={() => toggleItemMode(item.id, 'lossless')}
-                                                                    className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all cursor-pointer ${item.mode === 'lossless' ? 'bg-gradient-to-r from-purple-500 to-cyan-500 text-white shadow-sm' : 'text-white/40 hover:text-white/60'
-                                                                        }`}
-                                                                >
-                                                                    Lossless
-                                                                </button>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Action Buttons */}
-                                                        {item.status === 'failed' && (
-                                                            <button
-                                                                onClick={async () => {
-                                                                    const itemIndex = downloadQueue.findIndex(q => q.id === item.id);
-                                                                    if (itemIndex >= 0) {
-                                                                        setDownloadQueue(prev => prev.map(q =>
-                                                                            q.id === item.id ? { ...q, status: 'pending', error: undefined } : q
-                                                                        ));
-                                                                        if (!batchDownloading) {
-                                                                            setBatchDownloading(true);
-                                                                            // Small delay to ensure state updates before processing
-                                                                            setTimeout(() => processBatchQueue(itemIndex), 50);
-                                                                        }
-                                                                    }
-                                                                }}
-                                                                className="p-2 rounded-lg bg-white/5 hover:bg-green-500/20 text-white/40 hover:text-green-400 transition ml-2 border border-transparent hover:border-green-500/20 cursor-pointer"
-                                                                title="Retry"
-                                                            >
-                                                                <PlayCircle className="w-4 h-4" />
-                                                            </button>
-                                                        )}
-
-                                                        {item.status !== 'downloading' && item.status !== 'processing' && (
-                                                            <button
-                                                                onClick={() => removeFromQueue(item.id)}
-                                                                className="p-2 rounded-lg bg-white/5 hover:bg-red-500/20 text-white/40 hover:text-red-400 transition ml-1 border border-transparent hover:border-red-500/20 cursor-pointer"
-                                                                title="Remove"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </motion.div>
+                                                item={item}
+                                                index={index}
+                                                isSpotify={isSpotify}
+                                                onToggleMode={toggleItemMode}
+                                                onRemove={removeFromQueue}
+                                                onRetry={handleRetryBatchItem}
+                                            />
                                         ))}
                                     </AnimatePresence>
                                 </div>
@@ -1838,99 +1999,25 @@ export function Downloader() {
                             </div>
 
                             {/* Playlist Items */}
-                            <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
-                                {filteredEntries.map((entry, index) => {
-                                    const isSelected = selectedItems.has(entry.id);
-                                    const isDownloadingItem = downloadingId === entry.id;
-
-                                    return (
-                                        <div
-                                            key={entry.id || index}
-                                            className={`flex items-center gap-3 p-2.5 rounded-xl group transition cursor-pointer
-                                                ${isSelected ? 'bg-white/8 border border-white/15' : 'bg-white/5 border border-transparent hover:bg-white/8'}`}
-                                            onClick={() => toggleItem(entry.id)}
-                                        >
-                                            {/* Checkbox */}
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 transition
-                                                ${isSelected ? 'bg-white text-black' : 'bg-white/10'}`}>
-                                                {isSelected && <Check className="w-3.5 h-3.5" />}
-                                            </div>
-
-                                            {/* Thumbnail */}
-                                            <div className="w-12 h-12 rounded-lg bg-white/10 overflow-hidden shrink-0 relative">
-                                                {entry.thumbnail ? (
-                                                    <img src={entry.thumbnail} alt="" className="w-full h-full object-cover" onError={handleImgError} />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-green-900/30 to-green-600/20">
-                                                        <Music className="w-5 h-5 text-green-500/50" />
-                                                    </div>
-                                                )}
-                                                {isDownloadingItem && (
-                                                    <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-2 text-center rounded-lg">
-                                                        <Loader className="w-4 h-4 animate-spin mb-1 text-blue-400" />
-                                                        <p className="text-white font-bold text-[10px] mb-1">
-                                                            {progress?.percent ? `${Math.round(progress.percent)}%` : 'Starting...'}
-                                                        </p>
-                                                        {progress?.percent !== undefined && (
-                                                            <div className="w-[90%] h-1 bg-white/20 rounded-full overflow-hidden mb-1">
-                                                                <div
-                                                                    className="h-full bg-blue-500 transition-all duration-300"
-                                                                    style={{ width: `${progress.percent}%` }}
-                                                                />
-                                                            </div>
-                                                        )}
-                                                        <div className="flex flex-col items-center justify-center text-[9px] text-white/60 leading-tight">
-                                                            {progress?.speed && progress.speed !== '...' && <span>{progress.speed}</span>}
-                                                            {progress?.eta && progress.eta !== '...' && <span>{progress.eta} left</span>}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Info */}
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-sm truncate" title={entry.title}>{entry.title}</p>
-                                                <p className="text-xs text-white/40">
-                                                    {entry.artist && <span>{entry.artist} • </span>}
-                                                    {formatDuration(entry.duration)}
-                                                </p>
-                                            </div>
-
-                                            {/* Quick Actions */}
-                                            <div className="flex items-center gap-1 opacity-1 sm:opacity-0 group-hover:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
-                                                {isSpotify && entry.searchQuery ? (
-                                                    <button
-                                                        onClick={() => handleSpotifyDownload(entry.searchQuery!, entry.title, entry.artist || (metadata?.uploader || 'Unknown'), entry.id, metadata?.title)}
-                                                        disabled={downloading}
-                                                        className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40"
-                                                        title="Download MP3"
-                                                    >
-                                                        <Music className="w-4 h-4 text-green-400" />
-                                                    </button>
-                                                ) : (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleDownload('audio_best', entry.url, entry.title, entry.id, metadata?.title)}
-                                                            disabled={downloading}
-                                                            className="w-7 h-7 rounded-lg bg-green-500/20 flex items-center justify-center cursor-pointer hover:bg-green-500/30 transition disabled:opacity-40"
-                                                            title="Download Audio"
-                                                        >
-                                                            <Music className="w-3.5 h-3.5 text-green-400" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDownload('best', entry.url, entry.title, entry.id, metadata?.title)}
-                                                            disabled={downloading}
-                                                            className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center cursor-pointer hover:bg-blue-500/30 transition disabled:opacity-40"
-                                                            title="Download Video"
-                                                        >
-                                                            <Film className="w-3.5 h-3.5 text-blue-400" />
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                            <div className="space-y-1.5 max-h-[400px] smooth-scroll pr-1 hardware-accelerated">
+                                {filteredEntries.map((entry, index) => (
+                                    <PlaylistItem
+                                        key={entry.id || index}
+                                        entry={entry}
+                                        index={index}
+                                        isSelected={selectedItems.has(entry.id)}
+                                        isDownloadingItem={downloadingId === entry.id}
+                                        downloading={downloading}
+                                        progress={downloadingId === entry.id ? progress : null}
+                                        isSpotify={isSpotify}
+                                        metadataUploader={metadata?.uploader}
+                                        metadataTitle={metadata?.title}
+                                        onToggle={toggleItem}
+                                        onSpotifyDownload={handleSpotifyDownload}
+                                        onDownload={handleDownload}
+                                        onImgError={handleImgError}
+                                    />
+                                ))}
 
                                 {filteredEntries.length === 0 && searchQuery && (
                                     <div className="text-center py-8 text-white/30 text-sm">
@@ -2216,7 +2303,7 @@ export function Downloader() {
             </div >
 
             {/* Footer */}
-            <div className="fixed bottom-0 left-0 right-0 py-3 px-6 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/95 to-transparent pointer-events-none">
+            < div className="fixed bottom-0 left-0 right-0 py-3 px-6 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/95 to-transparent pointer-events-none" >
                 <div className="max-w-2xl mx-auto flex items-center justify-between pointer-events-auto">
                     <a
                         href="https://vibedownloader.me"
@@ -2239,63 +2326,65 @@ export function Downloader() {
                         </a>
                     </div>
                 </div>
-            </div>
+            </div >
 
             {/* Discord Modal */}
             <AnimatePresence>
-                {showDiscordModal && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-                        onClick={() => setShowDiscordModal(false)}
-                    >
+                {
+                    showDiscordModal && (
                         <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.9, opacity: 0 }}
-                            className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-[#5865F2]/50 shadow-[0_0_50px_-10px_rgba(88,101,242,0.3)] bg-[#0f1016]"
-                            onClick={(e) => e.stopPropagation()}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                            onClick={() => setShowDiscordModal(false)}
                         >
-                            {/* Background Gradient */}
-                            <div className="absolute inset-0 bg-gradient-to-b from-[#1a1c4b] to-[#0f1016]" />
-                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-[#5865F2]/20 via-transparent to-transparent opacity-50" />
+                            <motion.div
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0.9, opacity: 0 }}
+                                className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-[#5865F2]/50 shadow-[0_0_50px_-10px_rgba(88,101,242,0.3)] bg-[#0f1016]"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                {/* Background Gradient */}
+                                <div className="absolute inset-0 bg-gradient-to-b from-[#1a1c4b] to-[#0f1016]" />
+                                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-[#5865F2]/20 via-transparent to-transparent opacity-50" />
 
-                            {/* Content */}
-                            <div className="relative p-8 flex flex-col items-center text-center z-10">
-                                <div className="w-20 h-20 rounded-2xl bg-[#5865F2] shadow-[0_10px_30px_-5px_rgba(88,101,242,0.5)] flex items-center justify-center mb-6 transform hover:scale-105 transition-transform duration-300">
-                                    <FaDiscord className="w-12 h-12 text-white" />
+                                {/* Content */}
+                                <div className="relative p-8 flex flex-col items-center text-center z-10">
+                                    <div className="w-20 h-20 rounded-2xl bg-[#5865F2] shadow-[0_10px_30px_-5px_rgba(88,101,242,0.5)] flex items-center justify-center mb-6 transform hover:scale-105 transition-transform duration-300">
+                                        <FaDiscord className="w-12 h-12 text-white" />
+                                    </div>
+
+                                    <h3 className="text-2xl font-bold text-white mb-2">Join Community</h3>
+                                    <p className="text-white/60 text-sm mb-8 leading-relaxed">
+                                        Join our Discord server to get help, suggest features, and chat with other users!
+                                    </p>
+
+                                    <div className="flex flex-col gap-3 w-full">
+                                        <button
+                                            onClick={() => window.electron.openExternal('https://discord.com/invite/xev4Jgqz5t')}
+                                            className="w-full h-12 bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold rounded-xl transition-all shadow-lg shadow-[#5865F2]/20 hover:shadow-[#5865F2]/40 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
+                                        >
+                                            <FaDiscord className="w-5 h-5" />
+                                            Join Server
+                                        </button>
+                                        <button
+                                            onClick={() => setShowDiscordModal(false)}
+                                            className="w-full h-12 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-semibold rounded-xl transition-all border border-white/5 hover:border-white/10 cursor-pointer"
+                                        >
+                                            Maybe Later
+                                        </button>
+                                    </div>
                                 </div>
-
-                                <h3 className="text-2xl font-bold text-white mb-2">Join Community</h3>
-                                <p className="text-white/60 text-sm mb-8 leading-relaxed">
-                                    Join our Discord server to get help, suggest features, and chat with other users!
-                                </p>
-
-                                <div className="flex flex-col gap-3 w-full">
-                                    <button
-                                        onClick={() => window.electron.openExternal('https://discord.com/invite/xev4Jgqz5t')}
-                                        className="w-full h-12 bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold rounded-xl transition-all shadow-lg shadow-[#5865F2]/20 hover:shadow-[#5865F2]/40 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
-                                    >
-                                        <FaDiscord className="w-5 h-5" />
-                                        Join Server
-                                    </button>
-                                    <button
-                                        onClick={() => setShowDiscordModal(false)}
-                                        className="w-full h-12 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-semibold rounded-xl transition-all border border-white/5 hover:border-white/10 cursor-pointer"
-                                    >
-                                        Maybe Later
-                                    </button>
-                                </div>
-                            </div>
+                            </motion.div>
                         </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                    )
+                }
+            </AnimatePresence >
 
             {/* Settings Modal */}
-            <Settings
+            < Settings
                 isOpen={showSettings}
                 onClose={() => setShowSettings(false)}
             />

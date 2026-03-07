@@ -171,3 +171,26 @@ body {
         box-shadow: 0 0 40px rgba(96, 165, 250, 0.2);
     }
 }
+
+/* Hardware acceleration and smooth scrolling performance */
+.smooth-scroll {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    will-change: transform;
+    content-visibility: auto;
+}
+
+.hardware-accelerated {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+    will-change: transform, opacity;
+}
+
+/* Optimize backdrop blur for performance */
+.optimized-blur {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transform: translateZ(0);
+}
