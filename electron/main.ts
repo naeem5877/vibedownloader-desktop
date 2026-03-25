@@ -146,36 +146,64 @@ if (process.platform === 'win32') {
     app.setAppUserModelId('com.vibedownloader.app');
 }
 
-app.whenReady().then(async () => {
-    try {
-        await ensureYtDlp();
-    } catch (e) {
-        console.error("Failed to ensure yt-dlp binary:", e);
-    }
+const gotTheLock = app.requestSingleInstanceLock();
 
-    checkFFmpegOnStartup();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', (event, commandLine, workingDirectory) => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            if (!mainWindow.isVisible()) mainWindow.show();
+            mainWindow.focus();
+        }
+    });
 
-    createWindow();
-    createTray();
+    app.whenReady().then(async () => {
+        try {
+            await ensureYtDlp();
+        } catch (e) {
+            console.error("Failed to ensure yt-dlp binary:", e);
+        }
 
-    // Removed: checkForYtDlpUpdate() - Disabled to avoid unnecessary notifications
+        checkFFmpegOnStartup();
 
-    // Register all IPC handlers
-    registerDownloadHandlers();
-    registerInfoHandlers();
-    registerCookieHandlers();
-    registerGeneralHandlers();
-    registerUpdaterHandlers();
+        createWindow();
+        
+        const settings = loadSettings();
+        if (settings.minimizeToTray) {
+            createTray();
+        }
 
-    // Initialize auto-updater (only in production)
-    if (app.isPackaged) {
-        setupAutoUpdater();
-    }
-});
+        // @ts-ignore - custom event
+        app.on('settings-changed', (newSettings: any) => {
+            if (newSettings.minimizeToTray) {
+                if (!tray) createTray();
+            } else {
+                if (tray) {
+                    tray.destroy();
+                    tray = null;
+                }
+            }
+        });
 
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-});
+        // Register all IPC handlers
+        registerDownloadHandlers();
+        registerInfoHandlers();
+        registerCookieHandlers();
+        registerGeneralHandlers();
+        registerUpdaterHandlers();
+
+        // Initialize auto-updater (only in production)
+        if (app.isPackaged) {
+            setupAutoUpdater();
+        }
+    });
+
+    app.on('window-all-closed', () => {
+        if (process.platform !== 'darwin') app.quit();
+    });
+}
 
 app.on('activate', () => {
     if (mainWindow === null) createWindow();

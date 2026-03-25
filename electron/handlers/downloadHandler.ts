@@ -18,8 +18,9 @@ export function registerDownloadHandlers() {
             const ytDlpWrap = getYtDlpWrap();
 
             // Detect platform and content type from URL if not provided
-            const isInstagram = url.includes('instagram.com') || url.includes('instagr.am');
-            const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com');
+            const isFbcdnUrl = url.includes('fbcdn.net');
+            const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com') || (isFbcdnUrl && platform === 'facebook');
+            const isInstagram = platform === 'instagram' || url.includes('instagram.com') || url.includes('instagr.am') || (isFbcdnUrl && platform !== 'facebook');
             const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
             const isTiktok = url.includes('tiktok.com');
             const isSpotify = url.includes('spotify.com');
@@ -30,30 +31,39 @@ export function registerDownloadHandlers() {
 
             // Determine platform
             let detectedPlatform = platform || 'youtube';
-            if (isInstagram) detectedPlatform = 'instagram';
-            else if (isFacebook) detectedPlatform = 'facebook';
-            else if (isYoutube) detectedPlatform = 'youtube';
-            else if (isTiktok) detectedPlatform = 'tiktok';
-            else if (isSpotify) detectedPlatform = 'spotify';
-            else if (isPinterest) detectedPlatform = 'pinterest';
-            else if (isSoundcloud) detectedPlatform = 'soundcloud';
-            else if (isX) detectedPlatform = 'x';
-            else if (isSnapchat) detectedPlatform = 'snapchat';
+            if (!platform || platform === 'youtube') {
+                // Auto-detect from URL
+                if (isInstagram) detectedPlatform = 'instagram';
+                else if (isFacebook) detectedPlatform = 'facebook';
+                else if (isYoutube) detectedPlatform = 'youtube';
+                else if (isTiktok) detectedPlatform = 'tiktok';
+                else if (isSpotify) detectedPlatform = 'spotify';
+                else if (isPinterest) detectedPlatform = 'pinterest';
+                else if (isSoundcloud) detectedPlatform = 'soundcloud';
+                else if (isX) detectedPlatform = 'x';
+                else if (isSnapchat) detectedPlatform = 'snapchat';
+            }
 
             // Determine content type from URL patterns
-            let detectedContentType = contentType || 'video';
-            if (formatId && formatId.startsWith('audio_')) {
-                detectedContentType = 'audio';
-            } else if (url.includes('/reel/') || url.includes('/reels/')) {
-                detectedContentType = 'reels';
-            } else if (url.includes('/stories/') || url.includes('/story/')) {
-                detectedContentType = 'stories';
-            } else if (url.includes('/shorts/')) {
-                detectedContentType = 'shorts';
-            } else if (url.includes('/playlist')) {
-                detectedContentType = 'playlist';
-            } else if (url.includes('/p/') && isInstagram) {
-                detectedContentType = 'post';
+            let detectedContentType = contentType;
+            if (!detectedContentType) {
+                if (formatId && formatId.startsWith('audio_')) {
+                    detectedContentType = 'audio';
+                } else if (url.includes('/reel/') || url.includes('/reels/')) {
+                    detectedContentType = 'reels';
+                } else if (url.includes('/stories/') || url.includes('/story/')) {
+                    detectedContentType = 'stories';
+                } else if (url.includes('/shorts/')) {
+                    detectedContentType = 'shorts';
+                } else if (url.includes('/playlist')) {
+                    detectedContentType = 'playlist';
+                } else if (url.includes('/p/') && isInstagram) {
+                    detectedContentType = 'post';
+                } else if (isFbcdnUrl && isInstagram) {
+                    detectedContentType = 'stories'; // Default direct CDN to stories
+                } else {
+                    detectedContentType = 'video';
+                }
             }
 
             // Get organized download path
@@ -90,12 +100,78 @@ export function registerDownloadHandlers() {
 
             // If no unique ID found from URL, generate a short timestamp-based ID
             if (!uniqueId) {
-                uniqueId = Date.now().toString(36);
+                if (url.includes('fbcdn.net')) {
+                   // Extract ID from filename before query params
+                   const match = url.match(/\/([^\/?#]+)\.(mp4|jpg|jpeg|png)[\?#]/i);
+                   if (match) uniqueId = match[1].substring(0, 10);
+                   else uniqueId = Date.now().toString(36);
+                } else {
+                   uniqueId = Date.now().toString(36);
+                }
             }
 
             // Create filename with unique ID to prevent overwrites
             const uniqueFilename = `${safeTitle}_${uniqueId}`;
+            // If it's a direct fbcdn image url, force jpg ext, else use formatId
+            const isFbcdnImage = url.includes('fbcdn.net') && (url.includes('.jpg?') || url.includes('.jpeg?'));
+            const finalExt = isFbcdnImage ? 'jpg' : ext;
             const outputTemplate = path.join(downloadPath, `${uniqueFilename}.%(ext)s`);
+            const finalFilePath = path.join(downloadPath, `${uniqueFilename}.${finalExt}`);
+
+            // ==========================================
+            // FAST PATH: Direct CDN links (e.g. IG Stories)
+            // ==========================================
+            if (url.includes('fbcdn.net')) {
+                console.log('Using FAST PATH for direct CDN URL:', url.substring(0, 50));
+                mainWindow?.webContents.send('download-progress', { percent: 10, currentSpeed: 'Downloading...' });
+
+                const resp = await fetch(url, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                });
+
+                if (!resp.ok) throw new Error(`Failed to direct download: ${resp.status}`);
+
+                const totalBytes = parseInt(resp.headers.get('content-length') || '0', 10);
+                const reader = resp.body?.getReader();
+                if (!reader) throw new Error('No response body');
+
+                const chunks: Uint8Array[] = [];
+                let downloadedBytes = 0;
+                const startTime = Date.now();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    downloadedBytes += value.length;
+
+                    const percent = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 50;
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = elapsed > 0 ? (downloadedBytes / 1024 / 1024 / elapsed) : 0;
+                    
+                    mainWindow?.webContents.send('download-progress', {
+                        percent: Math.min(percent, 99),
+                        currentSpeed: `${speed.toFixed(1)} MB/s`,
+                        downloaded: `${(downloadedBytes / 1024 / 1024).toFixed(1)} MB`,
+                        totalSize: totalBytes > 0 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB` : '...'
+                    });
+                }
+                
+                const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+                const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
+                fs.writeFileSync(finalFilePath, fileBuffer);
+                
+                mainWindow?.webContents.send('download-progress', {
+                    complete: true,
+                    title: safeTitle,
+                    path: finalFilePath
+                });
+                
+                if (!suppressNotifications) {
+                    showNotification('Download Complete! ✅', `${safeTitle} saved`, undefined, finalFilePath);
+                }
+                return { success: true };
+            }
 
             const args = [
                 url,
@@ -202,10 +278,9 @@ export function registerDownloadHandlers() {
             // Speed up downloads with parallel fragments
             args.push('--concurrent-fragments', '16');
 
-            const finalFilePath = path.join(downloadPath, `${uniqueFilename}.${ext}`);
-
             console.log("Starting download with args:", args);
             console.log("Saving to:", downloadPath);
+
 
             const ytDlpEventEmitter = ytDlpWrap.exec(args);
 

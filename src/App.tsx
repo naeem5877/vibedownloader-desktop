@@ -6,18 +6,37 @@ import { AnimatePresence } from 'framer-motion';
 
 function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const hasOnboarded = localStorage.getItem('vibe_onboarding_completed');
-    if (!hasOnboarded) {
-      setShowOnboarding(true);
-    }
+    const checkOnboarding = async () => {
+      try {
+        const settings = await window.electron.getSettings();
+        if (!settings.onboardingCompleted) {
+          setShowOnboarding(true);
+        }
+      } catch (error) {
+        console.error("Failed to load onboarding state:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkOnboarding();
   }, []);
 
-  const handleOnboardingComplete = () => {
-    localStorage.setItem('vibe_onboarding_completed', 'true');
+  const handleOnboardingComplete = async () => {
+    try {
+      const settings = await window.electron.getSettings();
+      await window.electron.saveSettings({ ...settings, onboardingCompleted: true });
+    } catch (error) {
+      console.error("Failed to save onboarding state:", error);
+    }
     setShowOnboarding(false);
   };
+
+  if (loading) {
+    return <div className="h-screen w-screen bg-[#0a0a0b]" />;
+  }
 
   return (
     <>

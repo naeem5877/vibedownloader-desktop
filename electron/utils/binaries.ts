@@ -64,121 +64,115 @@ export async function checkForYtDlpUpdate() {
 }
 
 async function downloadFFmpeg(): Promise<boolean> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const AdmZip = require('adm-zip');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const https = require('https');
-
-    // Download FFmpeg essentials build (much smaller than full build ~25MB vs ~100MB)
-    const ffmpegUrl = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
-    const tempZipPath = path.join(app.getPath('userData'), 'ffmpeg-temp.zip');
     const ffmpegDir = path.join(app.getPath('userData'), 'ffmpeg');
+    const ffmpegExePath = path.join(ffmpegDir, 'ffmpeg.exe');
+    const tempZipPath = path.join(app.getPath('userData'), 'ffmpeg-temp.zip');
 
-    console.log('Downloading FFmpeg...');
+    // Use BtbN's GitHub Releases - much faster than gyan.dev (~45MB vs ~100MB)
+    // This is the 'essentials' (no extras) Windows 64-bit GPL build
+    const FFMPEGReleaseUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip';
+    // Fallback to smaller standalone from evermeet-like mirror
+    const FALLBACK_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
 
-    return new Promise((resolve) => {
-        const file = fs.createWriteStream(tempZipPath);
+    console.log('Downloading FFmpeg from GitHub Releases (fast CDN)...');
+    const mainWindow = getMainWindow();
 
-        const downloadWithRedirects = (url: string, redirectCount = 0) => {
-            if (redirectCount > 5) {
-                console.error('Too many redirects');
-                resolve(false);
-                return;
-            }
+    const tryDownload = async (downloadUrl: string): Promise<boolean> => {
+        return new Promise((resolve) => {
+            const https = require('https');
+            const file = fs.createWriteStream(tempZipPath);
 
-            https.get(url, (response: any) => {
-                // Handle redirects
-                if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
-                    const redirectUrl = response.headers.location;
-                    console.log('Redirecting to:', redirectUrl);
-                    downloadWithRedirects(redirectUrl, redirectCount + 1);
-                    return;
-                }
+            const downloadWithRedirects = (url: string, redirectCount = 0) => {
+                if (redirectCount > 8) { resolve(false); return; }
 
-                if (response.statusCode !== 200) {
-                    console.error('FFmpeg download failed with status:', response.statusCode);
-                    resolve(false);
-                    return;
-                }
+                https.get(url, { headers: { 'User-Agent': 'VibeDownloader/1.0' } }, (response: any) => {
+                    if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+                        downloadWithRedirects(response.headers.location, redirectCount + 1);
+                        return;
+                    }
+                    if (response.statusCode !== 200) {
+                        console.error('FFmpeg download HTTP error:', response.statusCode);
+                        resolve(false);
+                        return;
+                    }
 
-                response.pipe(file);
+                    const totalSize = parseInt(response.headers['content-length'] || '0', 10);
+                    let downloadedSize = 0;
+                    let lastPercent = -1;
 
-                const totalSize = parseInt(response.headers['content-length'] || '0', 10);
-                let downloadedSize = 0;
-                let lastPercent = 0;
-
-                response.on('data', (chunk: any) => {
-                    downloadedSize += chunk.length;
-                    if (totalSize > 0) {
-                        const percent = Math.floor((downloadedSize / totalSize) * 100);
-                        if (percent > lastPercent) {
-                            lastPercent = percent;
-                            const mainWindow = getMainWindow();
-                            if (mainWindow) {
-                                mainWindow.webContents.send('download-progress', {
-                                    percent: percent,
+                    response.on('data', (chunk: Buffer) => {
+                        downloadedSize += chunk.length;
+                        if (totalSize > 0) {
+                            const percent = Math.floor((downloadedSize / totalSize) * 100);
+                            if (percent !== lastPercent) {
+                                lastPercent = percent;
+                                mainWindow?.webContents.send('download-progress', {
+                                    percent,
                                     currentSpeed: 'Downloading FFmpeg...',
-                                    downloaded: `${(downloadedSize / (1024 * 1024)).toFixed(1)}MB / ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+                                    downloaded: `${(downloadedSize / 1024 / 1024).toFixed(1)} MB / ${(totalSize / 1024 / 1024).toFixed(1)} MB`
                                 });
                             }
                         }
-                    }
-                });
+                    });
 
-                file.on('finish', () => {
-                    file.close();
-                    console.log('FFmpeg downloaded, extracting...');
+                    response.pipe(file);
 
-                    try {
-                        const zip = new AdmZip(tempZipPath);
-                        const zipEntries = zip.getEntries();
+                    file.on('finish', () => {
+                        file.close();
+                        console.log('FFmpeg zip downloaded, extracting...');
 
-                        // Find ffmpeg.exe in the zip
-                        const ffmpegEntry = zipEntries.find((entry: any) =>
-                            entry.entryName.endsWith('bin/ffmpeg.exe')
-                        );
+                        try {
+                            const AdmZip = require('adm-zip');
+                            const zip = new AdmZip(tempZipPath);
+                            const ffmpegEntry = zip.getEntries().find((e: any) => e.entryName.endsWith('bin/ffmpeg.exe'));
 
-                        if (ffmpegEntry) {
-                            if (!fs.existsSync(ffmpegDir)) {
-                                fs.mkdirSync(ffmpegDir, { recursive: true });
+                            if (!ffmpegEntry) {
+                                console.error('ffmpeg.exe not found in zip');
+                                resolve(false);
+                                return;
                             }
 
-                            const ffmpegData = zip.readFile(ffmpegEntry);
-                            fs.writeFileSync(path.join(ffmpegDir, 'ffmpeg.exe'), ffmpegData);
+                            if (!fs.existsSync(ffmpegDir)) fs.mkdirSync(ffmpegDir, { recursive: true });
 
-                            // Also extract ffprobe if available
-                            const ffprobeEntry = zipEntries.find((entry: any) =>
-                                entry.entryName.endsWith('bin/ffprobe.exe')
-                            );
-                            if (ffprobeEntry) {
-                                const ffprobeData = zip.readFile(ffprobeEntry);
-                                fs.writeFileSync(path.join(ffmpegDir, 'ffprobe.exe'), ffprobeData);
+                            zip.extractEntryTo(ffmpegEntry, ffmpegDir, false, true);
+                            // Rename if needed
+                            const extractedName = path.join(ffmpegDir, path.basename(ffmpegEntry.entryName));
+                            if (fs.existsSync(extractedName) && extractedName !== ffmpegExePath) {
+                                fs.renameSync(extractedName, ffmpegExePath);
                             }
 
-                            console.log('FFmpeg extracted successfully');
+                            // Extract ffprobe too
+                            const ffprobeEntry = zip.getEntries().find((e: any) => e.entryName.endsWith('bin/ffprobe.exe'));
+                            if (ffprobeEntry) zip.extractEntryTo(ffprobeEntry, ffmpegDir, false, true);
+
+                            if (fs.existsSync(tempZipPath)) fs.unlinkSync(tempZipPath);
+
+                            console.log('FFmpeg extracted successfully to:', ffmpegExePath);
                             ffmpegAvailable = true;
-
-                            // Clean up temp zip
-                            fs.unlinkSync(tempZipPath);
                             resolve(true);
-                        } else {
-                            console.error('ffmpeg.exe not found in zip');
+                        } catch (e) {
+                            console.error('Failed to extract FFmpeg:', e);
                             resolve(false);
                         }
-                    } catch (e) {
-                        console.error('Failed to extract FFmpeg:', e);
-                        resolve(false);
-                    }
+                    });
+                }).on('error', (err: any) => {
+                    console.error('FFmpeg download error:', err);
+                    if (fs.existsSync(tempZipPath)) try { fs.unlinkSync(tempZipPath); } catch {}
+                    resolve(false);
                 });
-            }).on('error', (err: any) => {
-                console.error('FFmpeg download error:', err);
-                fs.unlinkSync(tempZipPath);
-                resolve(false);
-            });
-        };
+            };
 
-        downloadWithRedirects(ffmpegUrl);
-    });
+            downloadWithRedirects(downloadUrl);
+        });
+    };
+
+    // Try primary, then fallback
+    let success = await tryDownload(FFMPEGReleaseUrl);
+    if (!success) {
+        console.log('Primary FFmpeg URL failed, trying fallback...');
+        success = await tryDownload(FALLBACK_URL);
+    }
+    return success;
 }
 
 export async function ensureFFmpeg(): Promise<boolean> {

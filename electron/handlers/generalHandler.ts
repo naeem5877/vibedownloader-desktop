@@ -57,6 +57,8 @@ export function registerGeneralHandlers() {
     ipcMain.handle('save-settings', async (event: any, settings: any) => {
         try {
             saveSettings(settings);
+            // @ts-ignore - custom event
+            app.emit('settings-changed', settings);
             return { success: true };
         } catch (e: any) {
             return { success: false, error: e.message };

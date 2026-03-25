@@ -8,6 +8,7 @@ export const settingsPath = () => path.join(app.getPath('userData'), 'settings.j
 export interface AppSettings {
     downloadBasePath: string;
     minimizeToTray: boolean;
+    onboardingCompleted?: boolean;
 }
 
 export function loadSettings(): AppSettings {
@@ -16,7 +17,8 @@ export function loadSettings(): AppSettings {
             const settings = JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'));
             return {
                 downloadBasePath: settings.downloadBasePath || app.getPath('downloads'),
-                minimizeToTray: settings.minimizeToTray ?? true // Default to true for better UX
+                minimizeToTray: settings.minimizeToTray ?? true, // Default to true for better UX
+                onboardingCompleted: settings.onboardingCompleted ?? false
             };
         }
     } catch (e) {
@@ -24,7 +26,8 @@ export function loadSettings(): AppSettings {
     }
     return {
         downloadBasePath: app.getPath('downloads'),
-        minimizeToTray: true
+        minimizeToTray: true,
+        onboardingCompleted: false
     };
 }
 

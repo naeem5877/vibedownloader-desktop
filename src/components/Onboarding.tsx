@@ -171,10 +171,10 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#050505]/95 backdrop-blur-xl p-4 md:p-8 overflow-hidden"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#050505]/95 p-4 md:p-8 overflow-hidden"
         >
-            {/* Ambient Background Glow - Simplified for performance */}
-            <div className={`fixed inset-0 opacity-10 transition-all duration-1000 bg-gradient-to-br ${step.color} blur-[100px] pointer-events-none`} />
+            {/* Ambient Background Glow - GPU composited, no transition */}
+            <div className={`fixed inset-0 opacity-[0.08] bg-gradient-to-br ${step.color} pointer-events-none`} style={{ willChange: 'opacity' }} />
 
             <div className="w-full max-w-2xl bg-[#0a0b10] border border-white/10 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col relative max-h-[90vh] transition-all duration-500">
                 {/* Visual Accent Line */}
@@ -191,15 +191,15 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                             animate="center"
                             exit="exit"
                             transition={{
-                                x: { type: "spring", stiffness: 400, damping: 35 },
-                                opacity: { duration: 0.25 },
-                                scale: { duration: 0.25 }
+                                x: { type: "spring", stiffness: 300, damping: 30 },
+                                opacity: { duration: 0.2 },
+                                scale: { duration: 0.2 }
                             }}
                             className="flex flex-col items-center justify-center min-h-full px-6 md:px-16 text-center will-change-transform"
                         >
                             {/* Icon Container with multi-layered glow */}
                             <div className="relative mb-8 md:mb-10 group shrink-0">
-                                <div className={`absolute inset-0 bg-gradient-to-br ${step.color} opacity-30 blur-2xl group-hover:opacity-50 transition-opacity duration-700`} />
+                                <div className={`absolute inset-0 bg-gradient-to-br ${step.color} opacity-30 blur-xl group-hover:opacity-50 transition-opacity duration-700`} />
                                 <div className="relative p-6 md:p-8 rounded-[32px] bg-white/[0.03] border border-white/10 shadow-2xl overflow-hidden">
                                     <div className="absolute inset-0 bg-white/5 opacity-50 group-hover:opacity-100 transition-opacity" />
                                     <div className="relative z-10 scale-90 md:scale-100">
@@ -289,34 +289,21 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                                 )}
                             </span>
 
-                            {/* Animated Shine Effect - Simplified */}
-                            <div
-                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-shine"
-                            />
+                            {/* Removed continuous shine animation - was causing GPU repaints */}
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* Subtle Floating Elements - Hardware accelerated */}
-            <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-                <motion.div
-                    animate={{
-                        y: [0, -30, 0],
-                        x: [0, 20, 0],
-                        opacity: [0.05, 0.1, 0.05]
-                    }}
-                    transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-                    className="absolute top-1/4 -left-20 w-[400px] h-[400px] rounded-full bg-blue-500/10 blur-[120px] will-change-transform"
+            {/* Subtle Floating Elements - Optimized by removing continuous animation and CSS blurs */}
+            <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 flex items-center justify-between opacity-30 mix-blend-screen">
+                <div 
+                    className="w-[60vw] h-[60vw] rounded-full -translate-x-1/2"
+                    style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.1) 0%, rgba(0,0,0,0) 70%)' }}
                 />
-                <motion.div
-                    animate={{
-                        y: [0, 30, 0],
-                        x: [0, -20, 0],
-                        opacity: [0.05, 0.1, 0.05]
-                    }}
-                    transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-                    className="absolute bottom-1/4 -right-20 w-[400px] h-[400px] rounded-full bg-purple-500/10 blur-[120px] will-change-transform"
+                <div 
+                    className="w-[60vw] h-[60vw] rounded-full translate-x-1/2 translate-y-1/3"
+                    style={{ background: 'radial-gradient(circle, rgba(168,85,247,0.1) 0%, rgba(0,0,0,0) 70%)' }}
                 />
             </div>
         </motion.div>

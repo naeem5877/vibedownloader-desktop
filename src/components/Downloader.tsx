@@ -637,6 +637,7 @@ export function Downloader() {
                                         formatId,
                                         title,
                                         platform: currentPlatform.id,
+                                        contentType: metadata.contentType === 'story' ? 'story' : undefined,
                                         thumbnail: metadata.thumbnail,
                                         suppressNotifications: true
                                     });
@@ -1162,10 +1163,9 @@ export function Downloader() {
         setSelectedItems(new Set());
     }, []);
 
-    const isPlaylist = metadata &&
-        (metadata.contentType === 'playlist' || (metadata.contentType === 'story' && (metadata.entries?.length || 0) > 1)) &&
-        metadata.entries &&
-        metadata.entries.length > 0;
+    const hasEntries = metadata && metadata.entries && metadata.entries.length > 0;
+    const isPlaylist = hasEntries && metadata?.contentType === 'playlist';
+    const isStory = hasEntries && metadata?.contentType === 'story';
 
     // Bulk download (Playlist)
     const handleBulkDownload = async (type: 'video' | 'lossless' | 'audio_best' | 'audio_standard' | 'audio_low') => {
@@ -1230,6 +1230,7 @@ export function Downloader() {
                         formatId: formatId,
                         title: item.title,
                         platform: currentPlatform.id,
+                        contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                         playlistTitle, // This will create the /playlists/{title}/ folder
                         suppressNotifications: true
                     });
@@ -1680,7 +1681,7 @@ export function Downloader() {
                         </motion.div>
                     )}
                     {/* Single Video/Track Result */}
-                    {metadata && !loading && !complete && !isPlaylist && (
+                    {metadata && !loading && !complete && !isPlaylist && !isStory && (
                         <motion.div key="video" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
                             {/* Thumbnail */}
                             <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-white/5 to-white/10 mb-5">
@@ -2029,6 +2030,132 @@ export function Downloader() {
                             {/* Download Actions (BOTTOM) */}
                             <div className="mt-4 pt-4 border-t border-white/10">
                                 <DownloadActions />
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Story Result (Instagram) */}
+                    {metadata && !loading && !complete && isStory && (
+                        <motion.div key="story" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+                            <div className="mb-4 p-5 bg-gradient-to-br from-[#E4405F]/10 via-[#F56040]/10 to-[#FCAF45]/10 rounded-3xl border border-[#E4405F]/20 backdrop-blur-sm">
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-16 h-16 rounded-full p-[2px] bg-gradient-to-tr from-[#FCAF45] via-[#F56040] to-[#C13584] shadow-lg shrink-0">
+                                            <div className="w-full h-full rounded-full border-2 border-[#0a0a0a] overflow-hidden bg-white/5 relative">
+                                                {metadata.thumbnail ? (
+                                                    <img src={metadata.thumbnail} className="w-full h-full object-cover" alt="" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center bg-black">
+                                                        <User className="w-6 h-6 text-white/50" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h2 className="font-bold text-xl text-white tracking-tight">{metadata.uploader}'s Stories</h2>
+                                            <p className="text-white/60 text-sm font-medium">{(metadata.entries?.length ?? 0)} stories available • {selectedItems.size} selected</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            selectAll();
+                                            handleBulkDownload('video');
+                                        }}
+                                        disabled={downloading}
+                                        className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-[#E4405F] to-[#F58529] text-white rounded-xl font-bold text-sm hover:opacity-90 transition transform active:scale-95 cursor-pointer flex items-center justify-center gap-2 shadow-xl shadow-[#E4405F]/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        Download All
+                                    </button>
+                                </div>
+
+                                <div className="flex gap-2 mb-4">
+                                    <button onClick={selectAll} className="flex-1 h-10 bg-white/10 rounded-xl text-xs font-bold text-white hover:bg-white/20 transition cursor-pointer border border-white/5 flex items-center justify-center gap-2">
+                                        <CheckSquare className="w-4 h-4" /> Select All
+                                    </button>
+                                    <button onClick={deselectAll} className="flex-1 h-10 bg-white/5 rounded-xl text-xs font-bold text-white/60 hover:bg-white/10 hover:text-white transition cursor-pointer border border-white/5 flex items-center justify-center gap-2">
+                                        <Square className="w-4 h-4" /> Deselect All
+                                    </button>
+                                </div>
+
+                                {/* Story Grid */}
+                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-1 pb-2 hardware-accelerated">
+                                    {(metadata.entries ?? []).map((entry: any, index: number) => {
+                                        const selected = selectedItems.has(entry.id);
+                                        const isDl = downloadingId === entry.id;
+                                        return (
+                                            <div 
+                                                key={entry.id || index}
+                                                onClick={() => toggleItem(entry.id)}
+                                                className={`relative aspect-[9/16] rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 group
+                                                    ${selected ? 'ring-2 ring-white scale-[0.98]' : 'hover:ring-2 hover:ring-white/50'}
+                                                `}
+                                            >
+                                                {/* Background */}
+                                                {entry.thumbnail ? (
+                                                    <img src={entry.thumbnail} className="absolute inset-0 w-full h-full object-cover" alt="" onError={handleImgError} />
+                                                ) : (
+                                                    <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
+                                                        <Film className="w-8 h-8 text-white/20" />
+                                                    </div>
+                                                )}
+
+                                                {/* Top gradient & Text */}
+                                                <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/80 to-transparent p-2 z-10">
+                                                    <div className="flex gap-[2px]">
+                                                        {(metadata.entries ?? []).map((_: any, i: number) => (
+                                                            <div key={i} className={`h-[3px] flex-1 rounded-full ${i <= index ? 'bg-white' : 'bg-white/30'}`} />
+                                                        ))}
+                                                    </div>
+                                                    <p className="text-[10px] items-center flex gap-1 font-medium text-white/80 mt-1.5 pl-1 truncate">
+                                                        <User className="w-3 h-3" /> {metadata.uploader}
+                                                    </p>
+                                                </div>
+
+                                                {/* Checkbox */}
+                                                <div className={`absolute bottom-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 z-10
+                                                    ${selected ? 'bg-white text-black' : 'bg-black/50 border border-white/50 text-transparent group-hover:bg-black/80 group-hover:text-white'}
+                                                `}>
+                                                    <Check className="w-3.5 h-3.5" />
+                                                </div>
+
+                                                {/* Download Quick Action */}
+                                                {!selected && (
+                                                    <button 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDownload('best', entry.url, `Story Part ${index+1}`, entry.id, metadata.title);
+                                                        }}
+                                                        disabled={downloading}
+                                                        className="absolute bottom-2 left-2 w-8 h-8 rounded-full bg-white/20 text-white backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-white hover:text-black cursor-pointer z-20"
+                                                    >
+                                                        <Download className="w-4 h-4" />
+                                                    </button>
+                                                )}
+
+                                                <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+
+                                                {isDl && (
+                                                    <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center text-center p-2 z-30 backdrop-blur-sm">
+                                                        <Loader className="w-6 h-6 animate-spin mb-2 text-white" />
+                                                        <span className="text-xs font-bold">{progress?.percent ? `${Math.round(progress.percent)}%` : 'Starting'}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+
+                                {/* Bottom Download Action */}
+                                <div className="mt-4 pt-4 border-t border-white/10">
+                                    <button
+                                        onClick={() => handleBulkDownload('video')}
+                                        disabled={selectedItems.size === 0 || downloading}
+                                        className="w-full h-14 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl font-bold text-sm text-white transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                                    >
+                                        <Film className="w-5 h-5" /> Download Selected Stories ({selectedItems.size})
+                                    </button>
+                                </div>
                             </div>
                         </motion.div>
                     )}
