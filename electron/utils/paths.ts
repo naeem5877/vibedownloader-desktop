@@ -8,7 +8,6 @@ export const settingsPath = () => path.join(app.getPath('userData'), 'settings.j
 export interface AppSettings {
     downloadBasePath: string;
     minimizeToTray: boolean;
-    onboardingCompleted?: boolean;
 }
 
 export function loadSettings(): AppSettings {
@@ -18,7 +17,6 @@ export function loadSettings(): AppSettings {
             return {
                 downloadBasePath: settings.downloadBasePath || app.getPath('downloads'),
                 minimizeToTray: settings.minimizeToTray ?? true, // Default to true for better UX
-                onboardingCompleted: settings.onboardingCompleted ?? false
             };
         }
     } catch (e) {
@@ -27,7 +25,6 @@ export function loadSettings(): AppSettings {
     return {
         downloadBasePath: app.getPath('downloads'),
         minimizeToTray: true,
-        onboardingCompleted: false
     };
 }
 
