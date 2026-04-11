@@ -68,10 +68,9 @@ async function downloadFFmpeg(): Promise<boolean> {
     const ffmpegExePath = path.join(ffmpegDir, 'ffmpeg.exe');
     const tempZipPath = path.join(app.getPath('userData'), 'ffmpeg-temp.zip');
 
-    // Use BtbN's GitHub Releases - much faster than gyan.dev (~45MB vs ~100MB)
-    // This is the 'essentials' (no extras) Windows 64-bit GPL build
-    const FFMPEGReleaseUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip';
-    // Fallback to smaller standalone from evermeet-like mirror
+    // Use custom FFmpeg download link provided by user
+    const FFMPEGReleaseUrl = 'https://github.com/naeem589020/ffmpeg/releases/download/ffmpeg/ffmpeg.zip';
+    // Fallback to the standard BtbN standalone build
     const FALLBACK_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
 
     console.log('Downloading FFmpeg from GitHub Releases (fast CDN)...');
@@ -124,26 +123,30 @@ async function downloadFFmpeg(): Promise<boolean> {
                         try {
                             const AdmZip = require('adm-zip');
                             const zip = new AdmZip(tempZipPath);
-                            const ffmpegEntry = zip.getEntries().find((e: any) => e.entryName.endsWith('bin/ffmpeg.exe'));
+                            let foundFfmpeg = false;
 
-                            if (!ffmpegEntry) {
+                            if (!fs.existsSync(ffmpegDir)) fs.mkdirSync(ffmpegDir, { recursive: true });
+
+                            // Extract all .exe files (ffmpeg, ffprobe, ffplay, etc.)
+                            zip.getEntries().forEach((entry: any) => {
+                                if (!entry.isDirectory && entry.entryName.endsWith('.exe')) {
+                                    zip.extractEntryTo(entry, ffmpegDir, false, true);
+                                    if (entry.entryName.endsWith('ffmpeg.exe')) {
+                                        foundFfmpeg = true;
+                                        // Rename if needed
+                                        const extractedName = path.join(ffmpegDir, path.basename(entry.entryName));
+                                        if (fs.existsSync(extractedName) && extractedName !== ffmpegExePath) {
+                                            fs.renameSync(extractedName, ffmpegExePath);
+                                        }
+                                    }
+                                }
+                            });
+
+                            if (!foundFfmpeg) {
                                 console.error('ffmpeg.exe not found in zip');
                                 resolve(false);
                                 return;
                             }
-
-                            if (!fs.existsSync(ffmpegDir)) fs.mkdirSync(ffmpegDir, { recursive: true });
-
-                            zip.extractEntryTo(ffmpegEntry, ffmpegDir, false, true);
-                            // Rename if needed
-                            const extractedName = path.join(ffmpegDir, path.basename(ffmpegEntry.entryName));
-                            if (fs.existsSync(extractedName) && extractedName !== ffmpegExePath) {
-                                fs.renameSync(extractedName, ffmpegExePath);
-                            }
-
-                            // Extract ffprobe too
-                            const ffprobeEntry = zip.getEntries().find((e: any) => e.entryName.endsWith('bin/ffprobe.exe'));
-                            if (ffprobeEntry) zip.extractEntryTo(ffprobeEntry, ffmpegDir, false, true);
 
                             if (fs.existsSync(tempZipPath)) fs.unlinkSync(tempZipPath);
 
