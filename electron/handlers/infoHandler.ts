@@ -23,7 +23,7 @@ export function registerInfoHandlers() {
                 '--no-warnings',
                 '--socket-timeout', '30',
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=web_embedded,android_vr',
+                '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded',
                 '--no-check-certificates'
             ];
 
@@ -198,8 +198,11 @@ export function registerInfoHandlers() {
                 return { success: true, metadata };
             }
 
-            // Add User-Agent to help with Facebook/Instagram
-            args.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
+            // Add User-Agent to help with Facebook/Instagram/YouTube
+            const defaultUA = process.platform === 'darwin' 
+                ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+            args.push('--user-agent', defaultUA);
 
             // STRICT SEPARATION: Only use cookies for the specific platform
             if (cookiePath && fs.existsSync(cookiePath)) {

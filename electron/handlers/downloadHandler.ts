@@ -176,7 +176,7 @@ export function registerDownloadHandlers() {
             const args = [
                 url,
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=web_embedded,android_vr',
+                '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded',
                 '--no-check-certificates',
                 '-o', outputTemplate,
                 '--no-playlist'
@@ -197,8 +197,11 @@ export function registerDownloadHandlers() {
                 cookiePath = getCookiePath('snapchat');
             }
 
-            // Add User-Agent to help with Facebook/Instagram
-            args.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
+            // Add User-Agent to help with Facebook/Instagram/YouTube
+            const defaultUA = process.platform === 'darwin' 
+                ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+            args.push('--user-agent', defaultUA);
 
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
@@ -373,7 +376,7 @@ export function registerDownloadHandlers() {
             const args = [
                 ytSearchUrl,
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=web_embedded,android_vr',
+                '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded',
                 '--no-check-certificates',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '-o', outputTemplate,
