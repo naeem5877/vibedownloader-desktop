@@ -137,7 +137,7 @@ export async function checkLosslessAvailability(spotifyTrackId: string, trackTit
                 const deezerSearchURL = `https://api.deezer.com/search?q=${query}&limit=5`;
                 const deezerResp = await axios.get(deezerSearchURL, {
                     headers: { 'User-Agent': getRandomUA() },
-                    timeout: 8000
+                    timeout: 15000 // Increased from 8s to 15s
                 });
                 
                 if (deezerResp.data?.data?.length > 0) {

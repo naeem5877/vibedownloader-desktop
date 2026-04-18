@@ -26,7 +26,11 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install
+        run: |
+          npm ci || npm install
+        env:
+          ELECTRON_MIRROR: "https://artifacts.electronjs.org/headers/dist/"
+          ELECTRON_CUSTOM_DIR: "v28.0.0"
 
       - name: Build & Release
         shell: bash
