@@ -162,6 +162,7 @@ if (!gotTheLock) {
     app.whenReady().then(async () => {
         try {
             await ensureYtDlp();
+            checkForYtDlpUpdate();
         } catch (e) {
             console.error("Failed to ensure yt-dlp binary:", e);
         }

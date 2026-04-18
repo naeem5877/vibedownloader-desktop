@@ -59,8 +59,17 @@ export async function ensureYtDlp() {
 }
 
 export async function checkForYtDlpUpdate() {
-    // Disabled as per user request to avoid unnecessary notifications
-    console.log("Background yt-dlp update check is disabled.");
+    console.log("Checking for yt-dlp updates in the background...");
+    if (fs.existsSync(ytDlpBinaryPath)) {
+        const { execFile } = require('child_process');
+        execFile(ytDlpBinaryPath, ['-U'], (error: any, stdout: string, stderr: string) => {
+            if (error) {
+                console.error("Failed to update yt-dlp:", stderr || error.message);
+            } else {
+                console.log("yt-dlp update check complete:", stdout.trim());
+            }
+        });
+    }
 }
 
 async function downloadFFmpeg(): Promise<boolean> {

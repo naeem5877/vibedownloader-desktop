@@ -9,7 +9,7 @@ interface Window {
         getProxyImage: (url: string) => Promise<string | null>;
 
         // Lossless Audio
-        checkLosslessAvailability: (params: { spotifyTrackId: string }) => Promise<{
+        checkLosslessAvailability: (params: { spotifyTrackId: string, trackTitle?: string, artistName?: string }) => Promise<{
             success: boolean;
             available: boolean;
             service: 'tidal' | 'qobuz' | 'none';

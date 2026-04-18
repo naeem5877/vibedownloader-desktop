@@ -47,7 +47,9 @@ export function registerDownloadHandlers() {
             // Determine content type from URL patterns
             let detectedContentType = contentType;
             if (!detectedContentType) {
-                if (formatId && formatId.startsWith('audio_')) {
+                if (url.includes('music.youtube.com') && formatId && formatId.startsWith('audio_')) {
+                    detectedContentType = 'music';
+                } else if (formatId && formatId.startsWith('audio_')) {
                     detectedContentType = 'audio';
                 } else if (url.includes('/reel/') || url.includes('/reels/')) {
                     detectedContentType = 'reels';
@@ -176,7 +178,6 @@ export function registerDownloadHandlers() {
             const args = [
                 url,
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded',
                 '--no-check-certificates',
                 '-o', outputTemplate,
                 '--no-playlist'
@@ -202,6 +203,13 @@ export function registerDownloadHandlers() {
                 ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
                 : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
             args.push('--user-agent', defaultUA);
+
+            if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
+                // When using browser cookies, we must use the web client for age verification to work
+                args.push('--extractor-args', 'youtube:player_client=web');
+            } else {
+                args.push('--extractor-args', 'youtube:player_client=android,ios,web,web_embedded');
+            }
 
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
@@ -232,7 +240,7 @@ export function registerDownloadHandlers() {
                 if (formatId && formatId !== 'best') {
                     args.push('-f', `${formatId}+bestaudio/best`);
                 } else {
-                    args.push('-S', 'vcodec:h264,res,acodec:m4a');
+                    args.push('-S', 'res,ext:mp4:m4a');
                 }
             }
 
@@ -413,38 +421,50 @@ export function registerDownloadHandlers() {
 
                 let notificationThumbPath: string | undefined;
 
-                // Embed thumbnail logic...
+                // Embed thumbnail logic with retry and longer timeout
                 try {
                     if (thumbnail) {
-                        console.log('Fetching Spotify thumbnail...');
-                        const response = await fetch(thumbnail, {
-                            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                        });
-                        if (response.ok) {
-                            const contentType = response.headers.get('content-type') || 'image/jpeg';
-                            const buffer = await response.arrayBuffer();
-                            const imageBuffer = Buffer.from(buffer);
+                        console.log('Fetching Spotify thumbnail (with retry):', thumbnail.slice(0, 60));
 
-                            // Save temp for notification
-                            const ext = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
-                            notificationThumbPath = path.join(app.getPath('temp'), `spotify_thumb_${Date.now()}.${ext}`);
-                            fs.writeFileSync(notificationThumbPath, imageBuffer);
-
-                            const tags = {
-                                title, artist,
-                                image: {
-                                    mime: contentType,
-                                    type: { id: 3, name: "front cover" },
-                                    description: "Cover",
-                                    imageBuffer
+                        const axios = require('axios');
+                        try {
+                            const response = await axios.get(thumbnail, {
+                                responseType: 'arraybuffer',
+                                timeout: 3000,
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                                    'Referer': 'https://open.spotify.com/',
+                                    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
                                 }
-                            };
-                            const success = NodeID3.update(tags, finalFilePath);
-                            console.log("Spotify thumbnail embedding result:", success);
+                            });
+
+                            if (response.status === 200) {
+                                const contentType = response.headers['content-type'] || 'image/jpeg';
+                                const imageBuffer = Buffer.from(response.data);
+
+                                // Save temp for notification
+                                const imgExt = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
+                                notificationThumbPath = path.join(app.getPath('temp'), `spotify_thumb_${Date.now()}.${imgExt}`);
+                                fs.writeFileSync(notificationThumbPath, imageBuffer);
+
+                                const tags = {
+                                    title, artist,
+                                    image: {
+                                        mime: contentType,
+                                        type: { id: 3, name: "front cover" },
+                                        description: "Cover",
+                                        imageBuffer
+                                    }
+                                };
+                                const embedResult = NodeID3.update(tags, finalFilePath);
+                                console.log("Spotify thumbnail embedding result:", embedResult);
+                            }
+                        } catch (e: any) {
+                            console.warn('Skipping thumbnail due to slow connection or block:', e.message);
                         }
                     }
-                } catch (e) {
-                    console.error("Failed to embed Spotify thumbnail:", e);
+                } catch (e: any) {
+                    console.warn('Failed to embed Spotify thumbnail (non-fatal):', e.message || e);
                 }
 
                 mainWindow?.webContents.send('download-progress', {
@@ -467,19 +487,24 @@ export function registerDownloadHandlers() {
 
     ipcMain.handle('save-thumbnail', async (event: any, { url, title }: { url: string, title: string }) => {
         try {
-            const response = await fetch(url, {
+            const axios = require('axios');
+            const response = await axios.get(url, {
+                responseType: 'arraybuffer',
+                timeout: 3000,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    'Referer': 'https://open.spotify.com/',
+                    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
                 }
             });
-            if (!response.ok) throw new Error('Failed to fetch thumbnail');
 
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            if (response.status !== 200) throw new Error(`CDN returned ${response.status}`);
 
+            const buffer = Buffer.from(response.data);
             const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const downloadPath = app.getPath('downloads');
-            const ext = response.headers.get('content-type')?.includes('png') ? 'png' : 'jpg';
+            const contentType = response.headers['content-type'] || 'image/jpeg';
+            const ext = contentType.includes('png') ? 'png' : 'jpg';
             const filePath = path.join(downloadPath, `${safeTitle}_thumbnail.${ext}`);
 
             fs.writeFileSync(filePath, buffer);
@@ -488,16 +513,16 @@ export function registerDownloadHandlers() {
 
             return { success: true, path: filePath };
         } catch (e: any) {
-            console.error('Thumbnail save error:', e);
-            return { success: false, error: e.message };
+            console.error('Thumbnail save failed or timed out:', e.message);
+            return { success: false, error: 'Thumbnail unavailable or took too long to load.' };
         }
     });
 
     // --- Lossless Audio Handlers ---
 
-    ipcMain.handle('check-lossless-availability', async (event: any, { spotifyTrackId }: { spotifyTrackId: string }) => {
+    ipcMain.handle('check-lossless-availability', async (event: any, { spotifyTrackId, trackTitle, artistName }: { spotifyTrackId: string, trackTitle?: string, artistName?: string }) => {
         try {
-            const result = await checkLosslessAvailability(spotifyTrackId);
+            const result = await checkLosslessAvailability(spotifyTrackId, trackTitle, artistName);
             return { success: true, ...result };
         } catch (e: any) {
             console.error('Lossless check error:', e);

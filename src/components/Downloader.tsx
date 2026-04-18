@@ -185,7 +185,7 @@ const PlaylistItem = memo(({
             {/* Thumbnail */}
             <div className="w-12 h-12 rounded-lg bg-white/10 overflow-hidden shrink-0 relative">
                 {entry.thumbnail ? (
-                    <img src={entry.thumbnail} alt="" className="w-full h-full object-cover" onError={onImgError} />
+                    <img src={entry.thumbnail} alt="" className="w-full h-full object-cover" onError={onImgError} referrerPolicy="no-referrer" />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-green-900/30 to-green-600/20">
                         <Music className="w-5 h-5 text-green-500/50" />
@@ -910,12 +910,23 @@ export function Downloader() {
             if (res.success && res.metadata) {
                 let finalMetadata = res.metadata;
 
-                // Proxy thumbnail for Instagram/Facebook (fbcdn.net has CORS issues)
-                if (finalMetadata.thumbnail && finalMetadata.thumbnail.includes('fbcdn.net')) {
-                    console.log('Proxying Instagram thumbnail...');
-                    const proxyResult = await window.electron.getProxyImage(finalMetadata.thumbnail);
-                    if (proxyResult) {
-                        finalMetadata = { ...finalMetadata, thumbnail: proxyResult };
+                // Proxy thumbnail for Instagram/Facebook/Spotify (improves CORS/Referer reliability)
+                const useProxy = finalMetadata.thumbnail && (
+                    finalMetadata.thumbnail.includes('fbcdn.net') || 
+                    finalMetadata.thumbnail.includes('scdn.co') || 
+                    finalMetadata.thumbnail.includes('spotifycdn.com') ||
+                    finalMetadata.thumbnail.includes('googleusercontent.com')
+                );
+
+                if (useProxy) {
+                    console.log('Proxying thumbnail for stability:', finalMetadata.thumbnail.slice(0, 50));
+                    try {
+                        const proxyResult = await window.electron.getProxyImage(finalMetadata.thumbnail);
+                        if (proxyResult) {
+                            finalMetadata = { ...finalMetadata, thumbnail: proxyResult };
+                        }
+                    } catch (proxyErr) {
+                        console.warn('Thumbnail proxy failed:', proxyErr);
                     }
                 }
 
@@ -930,7 +941,9 @@ export function Downloader() {
                     setLosslessInfo(prev => ({ ...prev, checking: true }));
                     try {
                         const lossless = await window.electron.checkLosslessAvailability({
-                            spotifyTrackId: finalMetadata.spotifyTrackId
+                            spotifyTrackId: finalMetadata.spotifyTrackId,
+                            trackTitle: finalMetadata.title,
+                            artistName: finalMetadata.uploader
                         });
                         setLosslessInfo({
                             available: lossless.available,
@@ -1096,6 +1109,7 @@ export function Downloader() {
     const handleImgError = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
         const img = e.currentTarget;
         const src = img.src;
+        // Attempt to fall back to lower resolution YouTube thumbnails if applicable
         const res = ['maxresdefault', 'sddefault', 'hqdefault', 'mqdefault'];
         for (let i = 0; i < res.length - 1; i++) {
             if (src.includes(res[i])) {
@@ -1103,7 +1117,16 @@ export function Downloader() {
                 return;
             }
         }
-        img.style.display = 'none';
+        
+        // If it's an external image (like lh3.googleusercontent) and fails, avoid breaking the layout
+        if (src.includes('googleusercontent.com') || src.includes('ggpht.com')) {
+            // Keep the container size but maybe show a broken state or a generic icon
+            // For now, we'll let the user see a broken image icon rather than shrinking the entire div to 0 height
+            // We ensure it doesn't loop infinitely
+            img.onerror = null;
+        } else {
+            img.style.display = 'none';
+        }
     }, []);
 
     const handlePlatformChange = (p: Platform) => {
@@ -1686,7 +1709,7 @@ export function Downloader() {
                             {/* Thumbnail */}
                             <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-white/5 to-white/10 mb-5">
                                 {metadata.thumbnail ? (
-                                    <img src={metadata.thumbnail} alt="" onError={handleImgError} className="w-full aspect-video object-cover" />
+                                    <img src={metadata.thumbnail} alt="" onError={handleImgError} className="w-full aspect-video object-cover" referrerPolicy="no-referrer" />
                                 ) : (
                                     <div className="w-full aspect-video flex items-center justify-center bg-gradient-to-br from-green-900/30 to-green-600/20">
                                         <Disc className="w-20 h-20 text-green-500/50" />
@@ -1941,7 +1964,7 @@ export function Downloader() {
                             <div className="flex items-start gap-4 mb-4 p-4 bg-white/5 rounded-2xl border border-white/10">
                                 <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0">
                                     {metadata.thumbnail ? (
-                                        <img src={metadata.thumbnail} alt="" className="w-full h-full object-cover" />
+                                        <img src={metadata.thumbnail} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: `${currentPlatform.color}20` }}>
                                             <List className="w-7 h-7" style={{ color: currentPlatform.color }} />
@@ -2043,7 +2066,7 @@ export function Downloader() {
                                         <div className="w-16 h-16 rounded-full p-[2px] bg-gradient-to-tr from-[#FCAF45] via-[#F56040] to-[#C13584] shadow-lg shrink-0">
                                             <div className="w-full h-full rounded-full border-2 border-[#0a0a0a] overflow-hidden bg-white/5 relative">
                                                 {metadata.thumbnail ? (
-                                                    <img src={metadata.thumbnail} className="w-full h-full object-cover" alt="" />
+                                                    <img src={metadata.thumbnail} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center bg-black">
                                                         <User className="w-6 h-6 text-white/50" />
@@ -2093,7 +2116,7 @@ export function Downloader() {
                                             >
                                                 {/* Background */}
                                                 {entry.thumbnail ? (
-                                                    <img src={entry.thumbnail} className="absolute inset-0 w-full h-full object-cover" alt="" onError={handleImgError} />
+                                                    <img src={entry.thumbnail} className="absolute inset-0 w-full h-full object-cover" alt="" onError={handleImgError} referrerPolicy="no-referrer" />
                                                 ) : (
                                                     <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
                                                         <Film className="w-8 h-8 text-white/20" />

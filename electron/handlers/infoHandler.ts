@@ -3,8 +3,96 @@ import fs from 'fs';
 import path from 'path';
 import { getYtDlpWrap } from '../utils/binaries';
 import { getCookiePath } from '../utils/paths';
-import { spotifyApiRequest, extractSpotifyId } from '../utils/spotify';
+import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
 import { igApi } from 'insta-fetcher';
+
+async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string | null> {
+    try {
+        console.log(`[YT Music] Fetching album art for ${videoId} via API...`);
+        // Method 1: Internal Next API
+        const endpoint = "https://music.youtube.com/youtubei/v1/next?prettyPrint=false";
+        const payload = {
+            "videoId": videoId,
+            "context": {
+                "client": {
+                    "clientName": "WEB_REMIX",
+                    "clientVersion": "1.20240101.01.00",
+                    "hl": "en",
+                    "gl": "US"
+                }
+            }
+        };
+        const headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Origin": "https://music.youtube.com",
+            "Referer": `https://music.youtube.com/watch?v=${videoId}`,
+            "X-YouTube-Client-Name": "67",
+            "X-YouTube-Client-Version": "1.20240101.01.00"
+        };
+        
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+            headers: headers as any
+        });
+        
+        if (resp.ok) {
+            const raw = await resp.text();
+            const lh3Urls = raw.match(/https:\/\/lh3\.googleusercontent\.com\/[^"\\]+/g);
+            if (lh3Urls && lh3Urls.length > 0) {
+                let bestUrl = lh3Urls[0];
+                let maxSize = 0;
+                for (const u of lh3Urls) {
+                    const match = u.match(/=w(\d+)/);
+                    const size = match ? parseInt(match[1], 10) : 0;
+                    if (size > maxSize) {
+                        maxSize = size;
+                        bestUrl = u;
+                    }
+                }
+                const finalUrl = bestUrl.replace(/=w\d+[^"]*$/, '=w2000-h2000-l90-rj');
+                return finalUrl;
+            }
+        }
+    } catch (e) {
+        console.error('[YT Music] API method failed:', e);
+    }
+    
+    // Method 2: Page Scrape fallback
+    try {
+        console.log(`[YT Music] Trying page scrape for ${videoId}...`);
+        const resp = await fetch(`https://music.youtube.com/watch?v=${videoId}`, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cookie": "CONSENT=YES+; SOCS=CAI"
+            }
+        });
+        if (resp.ok) {
+            const raw = await resp.text();
+            const lh3Urls = raw.match(/https:\/\/lh3\.googleusercontent\.com\/[^"\\]+/g);
+            if (lh3Urls && lh3Urls.length > 0) {
+                let bestUrl = lh3Urls[0];
+                let maxSize = 0;
+                for (const u of lh3Urls) {
+                    const match = u.match(/=w(\d+)/);
+                    const size = match ? parseInt(match[1], 10) : 0;
+                    if (size > maxSize) {
+                        maxSize = size;
+                        bestUrl = u;
+                    }
+                }
+                const finalUrl = bestUrl.replace(/=w\d+[^"]*$/, '=w2000-h2000-l90-rj');
+                return finalUrl;
+            }
+        }
+    } catch (e) {
+        console.error('[YT Music] Page scrape failed:', e);
+    }
+    
+    return null;
+}
 
 export function registerInfoHandlers() {
     ipcMain.handle('get-video-info', async (event: any, url: any) => {
@@ -23,7 +111,6 @@ export function registerInfoHandlers() {
                 '--no-warnings',
                 '--socket-timeout', '30',
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded',
                 '--no-check-certificates'
             ];
 
@@ -204,6 +291,13 @@ export function registerInfoHandlers() {
                 : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
             args.push('--user-agent', defaultUA);
 
+            if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
+                // When using browser cookies, we must use the web client for age verification to work
+                args.push('--extractor-args', 'youtube:player_client=web');
+            } else {
+                args.push('--extractor-args', 'youtube:player_client=android,ios,web,web_embedded');
+            }
+
             // STRICT SEPARATION: Only use cookies for the specific platform
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
@@ -243,7 +337,22 @@ export function registerInfoHandlers() {
             }
 
             let thumbnail = raw.thumbnail;
-            if (raw.thumbnails && raw.thumbnails.length > 0) {
+            let ytMusicArtFound = false;
+            
+            const isMusic = isYoutube && (url.includes('music.youtube.com') || raw.categories?.includes('Music') || raw.uploader?.endsWith('- Topic'));
+
+            if (isMusic && raw.id) {
+                try {
+                    const ytMusicArt = await fetchYouTubeMusicAlbumArt(raw.id);
+                    if (ytMusicArt) {
+                        thumbnail = ytMusicArt;
+                        ytMusicArtFound = true;
+                        console.log('✅ Premium YT Music square art fetched:', thumbnail);
+                    }
+                } catch(e) { console.error('YT Music art fetch error:', e); }
+            }
+
+            if (!ytMusicArtFound && raw.thumbnails && raw.thumbnails.length > 0) {
                 // Sort thumbnails by resolution total pixels (fallback reference)
                 const sortedByRes = [...raw.thumbnails].sort((a: any, b: any) =>
                     ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0))
@@ -256,22 +365,20 @@ export function registerInfoHandlers() {
                 );
 
                 if (googleArt && isYoutube) {
-                    // Upgrade resolution to 1200x1200px and FORCE JPEG (-rj)
+                    // Upgrade resolution to 2000x2000px and FORCE JPEG (-rj)
                     let highResUrl = googleArt.url;
                     if (highResUrl.includes('=w')) {
-                        highResUrl = highResUrl.replace(/=w\d+-h\d+/, '=w1200-h1200');
+                        highResUrl = highResUrl.replace(/=w\d+-h\d+/, '=w2000-h2000');
                         // Add -rj if not present to force JPEG
                         if (!highResUrl.includes('-rj')) {
-                            highResUrl = highResUrl.split('=').slice(0, -1).join('=') + '=w1200-h1200-rj';
+                            highResUrl = highResUrl.split('=').slice(0, -1).join('=') + '=w2000-h2000-rj';
                         }
                     } else if (!highResUrl.includes('=')) {
-                        highResUrl += '=w1200-h1200-l90-rj';
+                        highResUrl += '=w2000-h2000-l90-rj';
                     }
                     thumbnail = highResUrl;
-                    console.log('Force JPEG Premium square art selected:', thumbnail);
+                    console.log('Force JPEG Premium square art selected (from metadata):', thumbnail);
                 } else {
-                    const isMusic = isYoutube && (url.includes('music.youtube.com') || raw.categories?.includes('Music') || raw.uploader?.endsWith('- Topic'));
-
                     if (isMusic) {
                         // 2. Music-specific square check
                         const squareThumb = raw.thumbnails.find((t: any) => {
@@ -365,98 +472,23 @@ export function registerInfoHandlers() {
     });
 
     ipcMain.handle('get-spotify-info', async (event: any, url: any) => {
-        if (!url) return { success: false, error: "No URL provided" };
+        if (!url) return { success: false, error: 'No URL provided' };
         console.log(`Fetching Spotify info for ${url}...`);
 
+        // Quick validation before hitting the network
+        if (!extractSpotifyId(url)) {
+            return { success: false, error: 'Invalid Spotify URL' };
+        }
+
         try {
-            const parsed = extractSpotifyId(url);
-            if (!parsed) {
-                console.error(`Invalid Spotify URL: ${url}`);
-                return { success: false, error: "Invalid Spotify URL" };
-            }
-            console.log(`Extracted Spotify ID: ${parsed.id} (${parsed.type})`);
-
-            let metadata: any = {
-                contentType: parsed.type,
-                entries: []
-            };
-
-            if (parsed.type === 'track') {
-                const track = await spotifyApiRequest(`/tracks/${parsed.id}`);
-                metadata = {
-                    id: track.id,
-                    title: track.name,
-                    thumbnail: track.album?.images?.[0]?.url || '',
-                    uploader: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
-                    duration: Math.floor(track.duration_ms / 1000),
-                    view_count: track.popularity || 0,
-                    webpage_url: track.external_urls?.spotify || url,
-                    contentType: 'video', // Single track = video-like
-                    album: track.album?.name,
-                    release_date: track.album?.release_date,
-                    // For YouTube search
-                    searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
-                    // For lossless support
-                    spotifyTrackId: track.id,
-                    entries: []
-                };
-            } else if (parsed.type === 'album') {
-                const album = await spotifyApiRequest(`/albums/${parsed.id}`);
-                metadata = {
-                    id: album.id,
-                    title: album.name,
-                    thumbnail: album.images?.[0]?.url || '',
-                    uploader: album.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
-                    duration: 0,
-                    view_count: album.popularity || 0,
-                    webpage_url: album.external_urls?.spotify || url,
-                    contentType: 'playlist',
-                    playlist_count: album.tracks?.total || 0,
-                    entries: album.tracks?.items?.map((track: any, i: number) => ({
-                        id: track.id,
-                        title: track.name,
-                        thumbnail: album.images?.[0]?.url || '',
-                        duration: Math.floor(track.duration_ms / 1000),
-                        url: track.external_urls?.spotify || '',
-                        artist: track.artists?.map((a: any) => a.name).join(', '),
-                        searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
-                        spotifyTrackId: track.id
-                    })) || []
-                };
-            } else if (parsed.type === 'playlist') {
-                const playlist = await spotifyApiRequest(`/playlists/${parsed.id}`);
-                metadata = {
-                    id: playlist.id,
-                    title: playlist.name,
-                    thumbnail: playlist.images?.[0]?.url || '',
-                    uploader: playlist.owner?.display_name || 'Unknown',
-                    duration: 0,
-                    view_count: playlist.followers?.total || 0,
-                    webpage_url: playlist.external_urls?.spotify || url,
-                    contentType: 'playlist',
-                    playlist_count: playlist.tracks?.total || 0,
-                    entries: playlist.tracks?.items?.slice(0, 100).map((item: any, i: number) => {
-                        const track = item.track;
-                        if (!track) return null;
-                        return {
-                            id: track.id,
-                            title: track.name,
-                            thumbnail: track.album?.images?.[0]?.url || '',
-                            duration: Math.floor(track.duration_ms / 1000),
-                            url: track.external_urls?.spotify || '',
-                            artist: track.artists?.map((a: any) => a.name).join(', '),
-                            searchQuery: `${track.artists?.[0]?.name} - ${track.name} audio`,
-                            spotifyTrackId: track.id
-                        };
-                    }).filter(Boolean) || []
-                };
-            }
-
-            console.log(`Spotify metadata: ${metadata.title}, ${metadata.entries?.length || 0} tracks`);
+            const metadata = await fetchSpotifyInfo(url);
+            console.log(`[Spotify] Got metadata: "${metadata.title}" — ${metadata.entries?.length || 0} tracks`);
             return { success: true, metadata };
         } catch (e: any) {
-            console.error("Spotify fetch error:", e);
-            return { success: false, error: e.message || "Failed to fetch Spotify info" };
+            console.error('[Spotify] Fetch error:', e.message);
+            // Give the user a helpful message
+            const msg = e.message || 'Failed to fetch Spotify info';
+            return { success: false, error: `⚠️ ${msg}` };
         }
     });
 }

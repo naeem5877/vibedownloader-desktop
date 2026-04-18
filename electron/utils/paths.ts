@@ -50,6 +50,7 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
     const contentFolders: Record<string, string> = {
         'video': 'Videos',
         'audio': 'Audio',
+        'music': 'Music',
         'reel': 'Reels',
         'reels': 'Reels',
         'story': 'Stories',

@@ -63,9 +63,7 @@ if (!envLoaded) {
     console.warn('No .env file found or no variables loaded');
 }
 
-// Ensure the variables are exported with fallbacks
-export const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
-export const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
-
-console.log('SPOTIFY_CLIENT_ID exists:', !!process.env.SPOTIFY_CLIENT_ID);
-console.log('SPOTIFY_CLIENT_ID value starts with:', process.env.SPOTIFY_CLIENT_ID?.substring(0, 4) + '...');
+// Spotify credentials are no longer needed — metadata is fetched via spotify-url-info (no API key required).
+// Keeping these as empty exports to avoid breaking any stale references during the transition.
+export const SPOTIFY_CLIENT_ID = '';
+export const SPOTIFY_CLIENT_SECRET = '';

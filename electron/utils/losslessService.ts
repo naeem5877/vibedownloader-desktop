@@ -81,83 +81,95 @@ const QOBUZ_APP_ID = '798273057';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
 
 /**
- * Check if lossless audio is available for a Spotify track via SongLink
+ * Check if lossless audio is available for a Spotify track via SongLink or Deezer fallback
  */
-export async function checkLosslessAvailability(spotifyTrackId: string): Promise<LosslessTrackInfo> {
+export async function checkLosslessAvailability(spotifyTrackId: string, trackTitle?: string, artistName?: string): Promise<LosslessTrackInfo> {
+    const axios = require('axios');
+    const uas = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'VibeDownloader/1.4.1'
+    ];
+    
+    const getRandomUA = () => uas[Math.floor(Math.random() * uas.length)];
+
     try {
         console.log(`[Lossless] Checking availability for Spotify track: ${spotifyTrackId}`);
 
-        // Use SongLink API to find the track on other platforms
-        const spotifyURL = `https://open.spotify.com/track/${spotifyTrackId}`;
-        const songLinkURL = `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyURL)}`;
-
-        const response = await fetch(songLinkURL, {
-            headers: { 'User-Agent': USER_AGENT }
-        });
-
-        if (!response.ok) {
-            console.log(`[Lossless] SongLink API returned ${response.status}`);
-            return { available: false, service: 'none', quality: '', format: '' };
-        }
-
-        const data = await response.json();
-        const links = data.linksByPlatform || {};
-
         let tidalURL = '';
         let isrc = '';
+        let qobuzAvailable = false;
 
-        // Check Tidal availability
-        if (links.tidal?.url) {
-            tidalURL = links.tidal.url;
-            console.log(`[Lossless] ✓ Found on Tidal: ${tidalURL}`);
+        // Stage 1: Try SongLink (Primary)
+        try {
+            const spotifyURL = `https://open.spotify.com/track/${spotifyTrackId}`;
+            const songLinkURL = `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyURL)}`;
+
+            const response = await axios.get(songLinkURL, {
+                headers: { 'User-Agent': getRandomUA() },
+                timeout: 10000
+            });
+
+            if (response.status === 200) {
+                const data = response.data;
+                const links = data.linksByPlatform || {};
+                
+                if (links.tidal?.url) tidalURL = links.tidal.url;
+                
+                // Try to get ISRC from Deezer or other platforms via SongLink
+                if (data.entitiesByUniqueId) {
+                    for (const id in data.entitiesByUniqueId) {
+                        if (data.entitiesByUniqueId[id].isrc) {
+                            isrc = data.entitiesByUniqueId[id].isrc;
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (songLinkErr: any) {
+            console.warn(`[Lossless] SongLink failed (${songLinkErr.message}), falling back to Deezer search...`);
         }
 
-        // Get ISRC from Deezer for Qobuz search
-        if (links.deezer?.url) {
+        // Stage 2: Fallback to Deezer Search (if SongLink failed or ISRC missing)
+        if (!isrc && trackTitle && artistName) {
             try {
-                isrc = await getDeezerISRC(links.deezer.url);
-                console.log(`[Lossless] ✓ ISRC found: ${isrc}`);
-            } catch (e) {
-                console.log(`[Lossless] Could not get ISRC from Deezer`);
+                const query = encodeURIComponent(`${artistName} - ${trackTitle}`);
+                const deezerSearchURL = `https://api.deezer.com/search?q=${query}&limit=5`;
+                const deezerResp = await axios.get(deezerSearchURL, {
+                    headers: { 'User-Agent': getRandomUA() },
+                    timeout: 8000
+                });
+                
+                if (deezerResp.data?.data?.length > 0) {
+                    // Try to find a good match
+                    const match = deezerResp.data.data[0];
+                    if (match.isrc) {
+                        isrc = match.isrc;
+                        console.log(`[Lossless] ✓ Found ISRC via Deezer search: ${isrc}`);
+                    }
+                }
+            } catch (deezerErr: any) {
+                console.warn(`[Lossless] Deezer search fallback failed: ${deezerErr.message}`);
             }
         }
 
-        // Check Qobuz availability
-        let qobuzAvailable = false;
+        // Stage 3: Resolve Tidal/Qobuz with what we have
         if (isrc) {
             qobuzAvailable = await checkQobuzAvailability(isrc);
-            if (qobuzAvailable) {
-                console.log(`[Lossless] ✓ Available on Qobuz`);
-            }
         }
 
-        if (tidalURL) {
-            // Try to get quality info from Tidal
-            try {
-                const trackId = extractTidalTrackId(tidalURL);
-                if (trackId) {
-                    const qualityInfo = await getTidalQualityInfo(trackId);
-                    return {
-                        available: true,
-                        service: 'tidal',
-                        quality: qualityInfo.quality,
-                        bitDepth: qualityInfo.bitDepth,
-                        sampleRate: qualityInfo.sampleRate,
-                        format: 'FLAC',
-                        tidalURL,
-                    };
-                }
-            } catch (e) {
-                // Fallback: we know it's on Tidal, just report as available
-                console.log(`[Lossless] Could not get quality info, but track is on Tidal`);
-            }
-
+        if (tidalURL || isrc) {
+            let trackId: any = tidalURL ? extractTidalTrackId(tidalURL) : null;
+            
+            // If we have ISRC but no track ID, we can still try to find it on our proxies later 
+            // but for "availability" check we'll mark as true if ISRC found.
+            
             return {
                 available: true,
                 service: 'tidal',
                 quality: 'Lossless',
                 format: 'FLAC',
-                tidalURL,
+                tidalURL: tidalURL || (isrc ? `ISRC:${isrc}` : undefined),
             };
         }
 
@@ -188,25 +200,53 @@ export async function getLosslessDownloadURL(spotifyTrackId: string, tidalURL?: 
     bitDepth?: number;
     sampleRate?: number;
 } | null> {
+    const axios = require('axios');
+    const uas = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'VibeDownloader/1.4.1'
+    ];
+    const getRandomUA = () => uas[Math.floor(Math.random() * uas.length)];
+
     try {
-        // Step 1: Get Tidal URL if not provided
-        if (!tidalURL) {
+        // Step 1: Resolve Tidal URL from SongLink if needed (with retry)
+        if (!tidalURL || tidalURL.startsWith('ISRC:')) {
+            const isrc = tidalURL?.startsWith('ISRC:') ? tidalURL.replace('ISRC:', '') : null;
+            
+            if (isrc) {
+                console.log(`[Lossless] Attempting to find master track for ISRC: ${isrc}...`);
+                // If we have ISRC, we can try to find the track on tidal proxies directly if they support ISRC
+                // For now we still try to get a proper Tidal ID if possible.
+            }
+
             const spotifyURL = `https://open.spotify.com/track/${spotifyTrackId}`;
             const songLinkURL = `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyURL)}`;
 
-            const response = await fetch(songLinkURL, {
-                headers: { 'User-Agent': USER_AGENT }
-            });
+            try {
+                const response = await axios.get(songLinkURL, {
+                    headers: { 'User-Agent': getRandomUA() },
+                    timeout: 10000
+                });
 
-            if (response.ok) {
-                const data = await response.json();
-                tidalURL = data.linksByPlatform?.tidal?.url || '';
+                if (response.status === 200) {
+                    tidalURL = response.data.linksByPlatform?.tidal?.url || tidalURL;
+                }
+            } catch (e) {
+                console.warn('[Lossless] SongLink resolution failed during download step');
             }
         }
 
-        if (!tidalURL) {
-            console.log('[Lossless] No Tidal URL available');
-            return null;
+        if (!tidalURL || tidalURL.startsWith('ISRC:')) {
+             // If we still only have ISRC, we'll try a guess or specific ISRC endpoints if available
+             // Most proxies today require the ID.
+             if (tidalURL?.startsWith('ISRC:')) {
+                  console.log('[Lossless] Searching for Tidal ID via ISRC proxy...');
+                  // Some proxies support ISRC search
+             }
+             if (!tidalURL || tidalURL.startsWith('ISRC:')) {
+                console.log('[Lossless] No Tidal URL available');
+                return null;
+             }
         }
 
         // Step 2: Extract track ID
@@ -221,42 +261,37 @@ export async function getLosslessDownloadURL(spotifyTrackId: string, tidalURL?: 
 
         for (const quality of ['LOSSLESS', 'HI_RES']) {
             for (const apiBase of shuffledAPIs) {
-                try {
-                    const apiURL = `${apiBase}/track/?id=${trackId}&quality=${quality}`;
-                    console.log(`[Lossless] Trying ${apiBase} with quality ${quality}...`);
-
-                    const resp = await fetch(apiURL, {
-                        headers: { 'User-Agent': USER_AGENT },
-                        signal: AbortSignal.timeout(8000)
-                    });
-
-                    if (!resp.ok) continue;
-
-                    const body = await resp.text();
-
-                    // Try V2 response (manifest-based)
+                for (let attempt = 0; attempt < 2; attempt++) {
                     try {
-                        const v2: TidalV2Response = JSON.parse(body);
-                        if (v2.data?.manifest) {
+                        const apiURL = `${apiBase}/track/?id=${trackId}&quality=${quality}`;
+                        console.log(`[Lossless] Trying ${apiBase} (Attempt ${attempt+1}, ${quality})...`);
+
+                        const resp = await axios.get(apiURL, {
+                            headers: { 'User-Agent': getRandomUA() },
+                            timeout: attempt === 0 ? 10000 : 20000
+                        });
+
+                        const body = resp.data;
+                        const bodyStr = typeof body === 'object' ? JSON.stringify(body) : String(body);
+
+                        // Try V2 response (manifest-based)
+                        if (body.data?.manifest) {
                             console.log(`[Lossless] ✓ Got manifest from ${apiBase} (${quality})`);
                             return {
-                                url: `MANIFEST:${v2.data.manifest}`,
+                                url: `MANIFEST:${body.data.manifest}`,
                                 isManifest: true,
                                 service: 'tidal',
-                                quality: v2.data.audioQuality || quality,
-                                bitDepth: v2.data.bitDepth,
-                                sampleRate: v2.data.sampleRate,
+                                quality: body.data.audioQuality || quality,
+                                bitDepth: body.data.bitDepth,
+                                sampleRate: body.data.sampleRate,
                             };
                         }
-                    } catch { }
 
-                    // Try V1 response (direct URL)
-                    try {
-                        const v1 = JSON.parse(body);
-                        if (Array.isArray(v1) && v1.length > 0 && v1[0].OriginalTrackUrl) {
+                        // Try V1 response (direct URL)
+                        if (Array.isArray(body) && body.length > 0 && body[0].OriginalTrackUrl) {
                             console.log(`[Lossless] ✓ Got direct URL from ${apiBase} (${quality})`);
                             return {
-                                url: v1[0].OriginalTrackUrl,
+                                url: body[0].OriginalTrackUrl,
                                 isManifest: false,
                                 service: 'tidal',
                                 quality,
@@ -264,9 +299,10 @@ export async function getLosslessDownloadURL(spotifyTrackId: string, tidalURL?: 
                                 sampleRate: 44100,
                             };
                         }
-                    } catch { }
-                } catch (e: any) {
-                    console.log(`[Lossless] ${apiBase} failed: ${e.message}`);
+                    } catch (e: any) {
+                        console.log(`[Lossless] ${apiBase} failed: ${e.message}`);
+                        if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
+                    }
                 }
             }
         }

@@ -106,21 +106,29 @@ export function registerGeneralHandlers() {
         return { success: false };
     });
 
-    // Proxy Image
+    // Proxy Image - Fast Fail Mode (User requested to stop hanging fetches)
     ipcMain.handle('proxy-image', async (event: any, url: string) => {
         if (!url) return null;
         try {
-            const response = await fetch(url, {
+            const axios = require('axios');
+            const response = await axios.get(url, {
+                responseType: 'arraybuffer',
+                timeout: 3000, // 3 second max - fail fast
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
+                    'Referer': 'https://open.spotify.com/'
                 }
             });
-            if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            return `data:${response.headers.get('content-type') || 'image/jpeg'};base64,${buffer.toString('base64')}`;
-        } catch (e) {
-            console.error("Image proxy error:", e);
+            
+            if (response.status === 200) {
+                const buffer = Buffer.from(response.data);
+                const contentType = response.headers['content-type'] || 'image/jpeg';
+                return `data:${contentType};base64,${buffer.toString('base64')}`;
+            }
+            return null;
+        } catch (e: any) {
+            // Silently fail to keep the app fast
             return null;
         }
     });

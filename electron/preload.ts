@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electron', {
     getProxyImage: (url: string) => ipcRenderer.invoke('proxy-image', url),
 
     // Lossless Audio
-    checkLosslessAvailability: (params: { spotifyTrackId: string }) => ipcRenderer.invoke('check-lossless-availability', params),
+    checkLosslessAvailability: (params: { spotifyTrackId: string, trackTitle?: string, artistName?: string }) => ipcRenderer.invoke('check-lossless-availability', params),
     downloadSpotifyLossless: (params: any) => ipcRenderer.invoke('download-spotify-lossless', params),
 
     // Cookies
