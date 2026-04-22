@@ -1,3 +1,11 @@
+## [1.6.0] - 2026-04-22
+
+### 🛠️ Engine & Stability Fixes
+- **YouTube Quality Fix**: Resolved an issue where some YouTube videos were limited to 360p by prioritizing modern DASH clients (`web`, `web_creator`) and adding mobile client fallbacks.
+- **Lossless Fetching Repair**: Fixed connection issues and timeouts when fetching lossless audio from Tidal/Qobuz proxies.
+- **Spotify API Optimization**: Improved the robustness of Spotify metadata scraping with enhanced fallbacks for regional blocks and API errors.
+- **Version Bump**: Official transition to v1.6.0 with updated internal service headers.
+
 ## [1.3.0] - 2026-03-07
 
 ### 🚀 Performance & macOS Lag Fix

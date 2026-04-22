@@ -30,13 +30,13 @@ async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string | null
             "X-YouTube-Client-Name": "67",
             "X-YouTube-Client-Version": "1.20240101.01.00"
         };
-        
+
         const resp = await fetch(endpoint, {
             method: 'POST',
             body: JSON.stringify(payload),
             headers: headers as any
         });
-        
+
         if (resp.ok) {
             const raw = await resp.text();
             const lh3Urls = raw.match(/https:\/\/lh3\.googleusercontent\.com\/[^"\\]+/g);
@@ -58,7 +58,7 @@ async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string | null
     } catch (e) {
         console.error('[YT Music] API method failed:', e);
     }
-    
+
     // Method 2: Page Scrape fallback
     try {
         console.log(`[YT Music] Trying page scrape for ${videoId}...`);
@@ -90,7 +90,7 @@ async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string | null
     } catch (e) {
         console.error('[YT Music] Page scrape failed:', e);
     }
-    
+
     return null;
 }
 
@@ -150,7 +150,7 @@ export function registerInfoHandlers() {
                         }
                     }
                 }
-                
+
                 if (!sessionid) {
                     throw new Error("🔒 Login required. This content is private or requires authentication.");
                 }
@@ -246,11 +246,11 @@ export function registerInfoHandlers() {
                 };
 
                 const hdUrl = extractFbUrl(/"browser_native_hd_url"\s*:\s*"([^"]+)"/) ||
-                              extractFbUrl(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/);
+                    extractFbUrl(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/);
                 const sdUrl = extractFbUrl(/"browser_native_sd_url"\s*:\s*"([^"]+)"/) ||
-                              extractFbUrl(/"playable_url"\s*:\s*"([^"]+)"/);
+                    extractFbUrl(/"playable_url"\s*:\s*"([^"]+)"/);
                 const thumbnailUrl = extractFbUrl(/"preferred_thumbnail"\s*.*?"uri"\s*:\s*"([^"]+)"/) ||
-                                     extractFbUrl(/"thumbnail_image"\s*.*?"uri"\s*:\s*"([^"]+)"/);
+                    extractFbUrl(/"thumbnail_image"\s*.*?"uri"\s*:\s*"([^"]+)"/);
 
                 const videoUrl = hdUrl || sdUrl;
                 if (!videoUrl) {
@@ -286,16 +286,16 @@ export function registerInfoHandlers() {
             }
 
             // Add User-Agent to help with Facebook/Instagram/YouTube
-            const defaultUA = process.platform === 'darwin' 
+            const defaultUA = process.platform === 'darwin'
                 ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
                 : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
             args.push('--user-agent', defaultUA);
 
             if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
                 // When using browser cookies, we must use the web client for age verification to work
-                args.push('--extractor-args', 'youtube:player_client=web');
+                args.push('--extractor-args', 'youtube:player_client=android_vr,web,tv,web_safari');
             } else {
-                args.push('--extractor-args', 'youtube:player_client=android,ios,web,web_embedded');
+                args.push('--extractor-args', 'youtube:player_client=android_vr,web,tv,web_safari');
             }
 
             // STRICT SEPARATION: Only use cookies for the specific platform
@@ -338,7 +338,7 @@ export function registerInfoHandlers() {
 
             let thumbnail = raw.thumbnail;
             let ytMusicArtFound = false;
-            
+
             const isMusic = isYoutube && (url.includes('music.youtube.com') || raw.categories?.includes('Music') || raw.uploader?.endsWith('- Topic'));
 
             if (isMusic && raw.id) {
@@ -349,7 +349,7 @@ export function registerInfoHandlers() {
                         ytMusicArtFound = true;
                         console.log('✅ Premium YT Music square art fetched:', thumbnail);
                     }
-                } catch(e) { console.error('YT Music art fetch error:', e); }
+                } catch (e) { console.error('YT Music art fetch error:', e); }
             }
 
             if (!ytMusicArtFound && raw.thumbnails && raw.thumbnails.length > 0) {

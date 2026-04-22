@@ -103,12 +103,12 @@ export function registerDownloadHandlers() {
             // If no unique ID found from URL, generate a short timestamp-based ID
             if (!uniqueId) {
                 if (url.includes('fbcdn.net')) {
-                   // Extract ID from filename before query params
-                   const match = url.match(/\/([^\/?#]+)\.(mp4|jpg|jpeg|png)[\?#]/i);
-                   if (match) uniqueId = match[1].substring(0, 10);
-                   else uniqueId = Date.now().toString(36);
+                    // Extract ID from filename before query params
+                    const match = url.match(/\/([^\/?#]+)\.(mp4|jpg|jpeg|png)[\?#]/i);
+                    if (match) uniqueId = match[1].substring(0, 10);
+                    else uniqueId = Date.now().toString(36);
                 } else {
-                   uniqueId = Date.now().toString(36);
+                    uniqueId = Date.now().toString(36);
                 }
             }
 
@@ -150,7 +150,7 @@ export function registerDownloadHandlers() {
                     const percent = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 50;
                     const elapsed = (Date.now() - startTime) / 1000;
                     const speed = elapsed > 0 ? (downloadedBytes / 1024 / 1024 / elapsed) : 0;
-                    
+
                     mainWindow?.webContents.send('download-progress', {
                         percent: Math.min(percent, 99),
                         currentSpeed: `${speed.toFixed(1)} MB/s`,
@@ -158,17 +158,17 @@ export function registerDownloadHandlers() {
                         totalSize: totalBytes > 0 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB` : '...'
                     });
                 }
-                
+
                 const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
                 fs.writeFileSync(finalFilePath, fileBuffer);
-                
+
                 mainWindow?.webContents.send('download-progress', {
                     complete: true,
                     title: safeTitle,
                     path: finalFilePath
                 });
-                
+
                 if (!suppressNotifications) {
                     showNotification('Download Complete! ✅', `${safeTitle} saved`, undefined, finalFilePath);
                 }
@@ -199,16 +199,16 @@ export function registerDownloadHandlers() {
             }
 
             // Add User-Agent to help with Facebook/Instagram/YouTube
-            const defaultUA = process.platform === 'darwin' 
+            const defaultUA = process.platform === 'darwin'
                 ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
                 : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
             args.push('--user-agent', defaultUA);
 
             if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
                 // When using browser cookies, we must use the web client for age verification to work
-                args.push('--extractor-args', 'youtube:player_client=web');
+                args.push('--extractor-args', 'youtube:player_client=android_vr,web,tv,web_safari');
             } else {
-                args.push('--extractor-args', 'youtube:player_client=android,ios,web,web_embedded');
+                args.push('--extractor-args', 'youtube:player_client=android_vr,web,tv,web_safari');
             }
 
             if (cookiePath && fs.existsSync(cookiePath)) {
@@ -384,7 +384,7 @@ export function registerDownloadHandlers() {
             const args = [
                 ytSearchUrl,
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded',
+                '--extractor-args', 'youtube:player_client=tv,web_safari,ios',
                 '--no-check-certificates',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '-o', outputTemplate,
