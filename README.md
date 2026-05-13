@@ -130,8 +130,8 @@ Available on Windows, macOS, Linux, and Android
 ## 🎬 Demo
 
 <div align="center">
-  <video src="Screenshots/Videos/demo.mp4" autoplay loop muted playsinline width="90%">
-    <a href="Screenshots/Videos/demo.mp4">
+  <video src="https://raw.githubusercontent.com/naeem5877/vibedownloader-desktop/main/Screenshots/Videos/demo.mp4" autoplay loop muted playsinline width="90%">
+    <a href="https://raw.githubusercontent.com/naeem5877/vibedownloader-desktop/main/Screenshots/Videos/demo.mp4">
       <img src="Screenshots/Screenshot-1.png" alt="Watch Demo" width="90%" />
     </a>
   </video>
@@ -366,4 +366,4 @@ If you create a fork or modified version:
 
 <sub>© 2026 VibeDownloader. Released under GPL v3.0 License.</sub>
 
-</div>
+</div> 
