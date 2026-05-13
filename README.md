@@ -12,7 +12,7 @@
   </p>
   
   <p>
-    Download videos, audio, and playlists from YouTube, Instagram, Snapchat, TikTok, Spotify, and more — including **Lossless Spotify FLAC** support via Tidal & Qobuz. Locally, ad-free, and privacy-first.
+    Download videos, audio, and playlists from YouTube, Instagram, Snapchat, TikTok, Spotify, and more — including <strong>Lossless Spotify FLAC</strong> support via Tidal & Qobuz. Locally, ad-free, and privacy-first.
   </p>
 
   <p>
@@ -123,6 +123,18 @@ Available on Windows, macOS, Linux, and Android
   <br />
   <img src="Screenshots/Screenshot-7.png" width="45%" />
   <img src="Screenshots/Screenshot-8.png" width="45%" />
+</div>
+
+---
+
+## 🎬 Demo
+
+<div align="center">
+  <video src="Screenshots/Videos/demo.mp4" autoplay loop muted playsinline width="90%">
+    <a href="Screenshots/Videos/demo.mp4">
+      <img src="Screenshots/Screenshot-1.png" alt="Watch Demo" width="90%" />
+    </a>
+  </video>
 </div>
 
 ---
