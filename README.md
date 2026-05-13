@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/225136eb-e0b4-49e6-b1fc-fd4defa17629
+
 <div align="center">
   <a href="https://github.com/naeem5877/vibedownloader-desktop">
     <img src="public/logo.png" alt="VibeDownloader Logo" width="140" height="auto" />
@@ -130,11 +134,7 @@ Available on Windows, macOS, Linux, and Android
 ## 🎬 Demo
 
 <div align="center">
-  <video src="https://raw.githubusercontent.com/naeem5877/vibedownloader-desktop/main/Screenshots/Videos/demo.mp4" autoplay loop muted playsinline width="90%">
-    <a href="https://raw.githubusercontent.com/naeem5877/vibedownloader-desktop/main/Screenshots/Videos/demo.mp4">
-      <img src="Screenshots/Screenshot-1.png" alt="Watch Demo" width="90%" />
-    </a>
-  </video>
+  <video src="https://github.com/user-attachments/assets/7d7b50c8-982c-4c70-82b2-dc0ec49f980c" autoplay loop muted playsinline width="90%"></video>
 </div>
 
 ---
