@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/225136eb-e0b4-49e6-b1fc-fd4defa17629
-
 <div align="center">
   <a href="https://github.com/naeem5877/vibedownloader-desktop">
     <img src="public/logo.png" alt="VibeDownloader Logo" width="140" height="auto" />
