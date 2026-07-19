@@ -100,7 +100,7 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
             contentType: 'video',
             album: '',
             release_date: releaseDate,
-            searchQuery: `${data.artists?.[0]?.name || artists.split(',')[0]} - ${data.name} audio`,
+            searchQuery: `${data.artists?.[0]?.name || artists.split(',')[0]} - ${data.name} official audio`,
             spotifyTrackId: data.id,
             entries: []
         };
@@ -140,7 +140,7 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
             duration: Math.floor((track.duration || 0) / 1000),
             url: trackId ? `https://open.spotify.com/track/${trackId}` : '',
             artist: artistName,
-            searchQuery: `${track.artist || artistName} - ${track.name || track.title} audio`,
+            searchQuery: `${track.artist || artistName} - ${track.name || track.title} official audio`,
             spotifyTrackId: trackId
         };
     }).filter((t: any) => t.id && (t.title || t.name));
@@ -242,7 +242,7 @@ async function fetchSpotifyOGFallback(url: string, parsed: { type: string, id: s
             contentType: 'video',
             album: '',
             release_date: '',
-            searchQuery: `${uploader} - ${title} audio`,
+            searchQuery: `${uploader} - ${title} official audio`,
             spotifyTrackId: parsed.id,
             entries: []
         };

@@ -61,8 +61,7 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
         'shorts': 'Shorts',
         'post': 'Posts',
         'track': 'Tracks',
-        'album': 'Albums',
-        'lossless': 'Lossless'
+        'album': 'Albums'
     };
 
     // Map platforms to folder names
