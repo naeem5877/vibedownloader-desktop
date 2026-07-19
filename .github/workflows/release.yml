@@ -40,3 +40,15 @@ jobs:
           npm run build
           npm run build:electron
           npx electron-builder --publish always
+
+      - name: Notify Discord
+        if: success()
+        shell: bash
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          curl -H "Content-Type: application/json" \
+          -d "{
+            \"content\": \"🚀 **New VibeDownloader Release!**\n\n📦 Version: ${{ github.ref_name }}\n\n⬇️ Download:\nhttps://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}\"
+          }" \
+          "$DISCORD_WEBHOOK"
