@@ -42,7 +42,7 @@ jobs:
           npx electron-builder --publish always
 
       - name: Notify Discord
-        if: success() && env.DISCORD_WEBHOOK != ''
+        if: success()
         shell: bash
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
