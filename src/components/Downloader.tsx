@@ -257,14 +257,12 @@ const PlaylistItem = memo(({
 const BatchQueueItem = memo(({
     item,
     index,
-    isSpotify,
     onToggleMode,
     onRemove,
     onRetry
 }: {
     item: any;
     index: number;
-    isSpotify: boolean;
     onToggleMode: (id: string, mode: 'video' | 'audio') => void;
     onRemove: (id: string) => void;
     onRetry: (id: string) => void;
@@ -381,8 +379,7 @@ const BatchQueueItem = memo(({
         prev.item.progress === next.item.progress &&
         prev.item.mode === next.item.mode &&
         prev.item.speed === next.item.speed &&
-        prev.item.error === next.item.error &&
-        prev.isSpotify === next.isSpotify;
+        prev.item.error === next.item.error;
 });
 
 export function Downloader() {
@@ -1477,7 +1474,6 @@ export function Downloader() {
                                                 key={item.id}
                                                 item={item}
                                                 index={index}
-                                                isSpotify={isSpotify}
                                                 onToggleMode={toggleItemMode}
                                                 onRemove={removeFromQueue}
                                                 onRetry={handleRetryBatchItem}
