@@ -393,6 +393,14 @@ export function registerDownloadHandlers() {
                 '--concurrent-fragments', '16'
             ];
 
+            // Pass ffmpeg location to yt-dlp so it can find ffprobe/ffmpeg
+            if (isFfmpegAvailable()) {
+                const ffmpegPath = getFfmpegBinaryPath();
+                if (fs.existsSync(ffmpegPath)) {
+                    args.push('--ffmpeg-location', path.dirname(ffmpegPath));
+                }
+            }
+
             const ytDlpEventEmitter = ytDlpWrap.exec(args);
 
             ytDlpEventEmitter.on('progress', (progress: any) => {
