@@ -45,6 +45,14 @@ interface Window {
 
         getSettings: () => Promise<any>;
         saveSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+
+        // External URL from browser extension
+        onExternalDownloadUrl: (callback: (data: { url: string; title: string; thumbnail: string }) => void) => void;
+        offExternalDownloadUrl?: () => void;
+
+        // External Spotify search from browser extension (title/artist → YouTube)
+        onExternalSpotifyDownload: (callback: (data: { searchQuery: string; title: string; artist: string; thumbnail: string }) => void) => void;
+        offExternalSpotifyDownload?: () => void;
     }
 }
 

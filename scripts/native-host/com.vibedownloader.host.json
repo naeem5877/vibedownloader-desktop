@@ -1,0 +1,9 @@
+{
+    "name": "com.vibedownloader.host",
+    "description": "VibeDownloader Native Messaging Host",
+    "path": "PLACEHOLDER_PATH_TO_BAT",
+    "type": "stdio",
+    "allowed_origins": [
+        "chrome-extension://PLACEHOLDER_EXTENSION_ID/"
+    ]
+}

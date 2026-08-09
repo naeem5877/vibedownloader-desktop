@@ -1,0 +1,108 @@
+{
+    "manifest_version": 3,
+    "name": "VibeDownloader",
+    "version": "1.0.0",
+    "description": "Download YouTube videos directly from the page with VibeDownloader",
+    "permissions": [
+        "activeTab",
+        "scripting"
+    ],
+    "host_permissions": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://www.instagram.com/*",
+        "https://www.tiktok.com/*",
+        "https://www.facebook.com/*",
+        "https://facebook.com/*",
+        "https://m.facebook.com/*",
+        "https://open.spotify.com/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.youtube.com/watch*",
+                "https://youtube.com/watch*",
+                "https://m.youtube.com/watch*",
+                "https://www.youtube.com/shorts/*",
+                "https://youtube.com/shorts/*",
+                "https://m.youtube.com/shorts/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/youtube.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://music.youtube.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/youtube-music.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://www.instagram.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/instagram.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://www.facebook.com/*",
+                "https://facebook.com/*",
+                "https://m.facebook.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/facebook.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://www.tiktok.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/tiktok.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://open.spotify.com/*"
+            ],
+            "js": ["platforms/spotify-bootstrap.js"],
+            "run_at": "document_start"
+        },
+        {
+            "matches": [
+                "https://open.spotify.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/spotify-dom-watcher.js", "platforms/spotify.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "web_accessible_resources": [
+        {
+            "resources": ["platforms/spotify-clipboard-hook.js"],
+            "matches": ["https://open.spotify.com/*"]
+        }
+    ],
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    }
+}

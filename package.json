@@ -46,6 +46,7 @@
     "react-icons": "^5.5.0",
     "spotify-uri": "^4.1.0",
     "spotify-url-info": "^3.3.0",
+    "ws": "^8.21.1",
     "yt-dlp-wrap": "^2.3.12"
   },
   "devDependencies": {
@@ -54,6 +55,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",

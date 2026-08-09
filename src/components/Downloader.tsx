@@ -425,6 +425,23 @@ export function Downloader() {
         return () => clearInterval(interval);
     }, [loading]);
 
+    // Listen for URLs from browser extension via WebSocket
+    useEffect(() => {
+        const handler = (data: { url: string; title: string; thumbnail: string }) => {
+            if (data.url) {
+                setUrl(data.url);
+                // Auto-fetch after setting URL
+                setTimeout(() => {
+                    handleSubmit(undefined, data.url);
+                }, 100);
+            }
+        };
+        window.electron.onExternalDownloadUrl(handler);
+        return () => {
+            window.electron.offExternalDownloadUrl?.();
+        };
+    }, []);
+
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
     const [showDiscordModal, setShowDiscordModal] = useState(false);
@@ -932,7 +949,7 @@ export function Downloader() {
     }, [metadata, downloading, url]);
 
     // Spotify track download (via YouTube)
-    const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string, playlistTitle?: string) => {
+    const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string, playlistTitle?: string, externalThumbnail?: string) => {
         if (downloading) return;
 
         setDownloading(true);
@@ -945,7 +962,7 @@ export function Downloader() {
                 searchQuery,
                 title,
                 artist,
-                thumbnail: metadata?.thumbnail,
+                thumbnail: externalThumbnail || metadata?.thumbnail,
                 playlistTitle
             });
         } catch (err: any) {
@@ -955,6 +972,44 @@ export function Downloader() {
             setProgress(null);
         }
     }, [downloading, metadata]);
+
+    // Listen for Spotify search from browser extension (title/artist → YouTube download).
+    // NOTE: this does NOT auto-start the download — it opens the app and shows the
+    // track card (like the URL flow) so the user clicks the Download button manually.
+    useEffect(() => {
+        const handler = (data: { searchQuery: string; title: string; artist: string; thumbnail: string }) => {
+            if (!data.searchQuery) return;
+
+            const spotifyPlatform = platforms.find(p => p.id === 'spotify');
+            if (spotifyPlatform) setCurrentPlatform(spotifyPlatform);
+
+            setUrl('');
+            setMetadata({
+                id: `spotify-search-${Date.now()}`,
+                title: data.title || 'Spotify Track',
+                uploader: data.artist || 'Unknown Artist',
+                thumbnail: data.thumbnail || '',
+                view_count: 0,
+                duration: 0,
+                formats: [],
+                webpage_url: '',
+                contentType: 'video',
+                searchQuery: data.searchQuery,
+            });
+            setComplete(false);
+            setError(null);
+            setLoading(false);
+            setDownloading(false);
+            setDownloadingId(null);
+            setProgress(null);
+            setSelectedItems(new Set());
+            setSearchQuery('');
+        };
+        window.electron.onExternalSpotifyDownload(handler);
+        return () => {
+            window.electron.offExternalSpotifyDownload?.();
+        };
+    }, []);
 
     // Get all available video formats sorted by resolution - prioritize MP4 over WEBM
     const formats = useMemo(() => {

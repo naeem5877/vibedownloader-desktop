@@ -97,6 +97,14 @@ async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string | null
 export function registerInfoHandlers() {
     ipcMain.handle('get-video-info', async (event: any, url: any) => {
         if (!url) return { success: false, error: "No URL provided" };
+
+        // TikTok tracking params (is_from_webapp, sender_device) can cause
+        // yt-dlp's webpage request to fail. The video ID lives in the path,
+        // so strip all query params for TikTok video URLs.
+        if (typeof url === 'string' && url.includes('tiktok.com') && /\/video\/\d+/.test(url)) {
+            url = url.split('?')[0];
+        }
+
         console.log(`Fetching info for ${url}...`);
 
         try {

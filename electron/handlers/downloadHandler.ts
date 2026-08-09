@@ -16,6 +16,13 @@ export function registerDownloadHandlers() {
             const mainWindow = getMainWindow();
             const ytDlpWrap = getYtDlpWrap();
 
+            // TikTok tracking params (is_from_webapp, sender_device) can break
+            // yt-dlp's webpage request — strip them here too so downloads are
+            // safe even if the URL came straight from the clipboard.
+            if (typeof url === 'string' && url.includes('tiktok.com') && /\/video\/\d+/.test(url)) {
+                url = url.split('?')[0];
+            }
+
             // Detect platform and content type from URL if not provided
             const isFbcdnUrl = url.includes('fbcdn.net');
             const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com') || (isFbcdnUrl && platform === 'facebook');

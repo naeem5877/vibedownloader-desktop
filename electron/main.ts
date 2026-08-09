@@ -3,12 +3,13 @@ import { app, BrowserWindow, shell, Tray, Menu } from 'electron';
 import path from 'path';
 import { initPaths, ensureYtDlp, checkFFmpegOnStartup, checkForYtDlpUpdate } from './utils/binaries';
 import { setMainWindow } from './utils/windowManager';
-import { loadSettings } from './utils/paths';
 import { registerDownloadHandlers } from './handlers/downloadHandler';
 import { registerInfoHandlers } from './handlers/infoHandler';
 import { registerCookieHandlers } from './handlers/cookieHandler';
 import { registerGeneralHandlers } from './handlers/generalHandler';
 import { setupAutoUpdater, registerUpdaterHandlers } from './utils/updater';
+import { startWebSocketServer, stopWebSocketServer } from './utils/websocketServer';
+import { registerNativeHost } from './utils/nativeHost';
 import './utils/env'; // Load env vars
 
 // Initialize paths and binaries state
@@ -64,10 +65,9 @@ function createWindow() {
 
     mainWindow.setMenu(null);
 
-    // Minimize to Tray logic
+    // Always minimize to tray on close (tray is required for extension support)
     mainWindow.on('close', (event) => {
-        const settings = loadSettings();
-        if (!isQuitting && settings.minimizeToTray) {
+        if (!isQuitting) {
             event.preventDefault();
             mainWindow?.hide();
             return false;
@@ -152,10 +152,25 @@ if (!gotTheLock) {
     app.quit();
 } else {
     app.on('second-instance', (event, commandLine, workingDirectory) => {
+        // Check if launched with --download-url
+        const urlArg = commandLine.find(arg => arg.startsWith('--download-url='));
+        const downloadUrl = urlArg ? urlArg.split('=').slice(1).join('=') : null;
+
         if (mainWindow) {
             if (mainWindow.isMinimized()) mainWindow.restore();
             if (!mainWindow.isVisible()) mainWindow.show();
             mainWindow.focus();
+
+            // If URL was passed, send it to renderer
+            if (downloadUrl) {
+                setTimeout(() => {
+                    mainWindow?.webContents.send('external-download-url', {
+                        url: downloadUrl,
+                        title: '',
+                        thumbnail: ''
+                    });
+                }, 500);
+            }
         }
     });
 
@@ -171,21 +186,31 @@ if (!gotTheLock) {
 
         createWindow();
         
-        const settings = loadSettings();
-        if (settings.minimizeToTray) {
-            createTray();
+        // Always create tray for WebSocket server and extension support
+        createTray();
+
+        // Start WebSocket server for browser extension
+        startWebSocketServer();
+
+        // Register native messaging host for Chrome/Edge (auto-launch when app is closed)
+        registerNativeHost();
+
+        // Handle --download-url CLI argument on first launch
+        const cliUrlArg = process.argv.find(arg => arg.startsWith('--download-url='));
+        if (cliUrlArg) {
+            const cliUrl = cliUrlArg.split('=').slice(1).join('=');
+            setTimeout(() => {
+                mainWindow?.webContents.send('external-download-url', {
+                    url: cliUrl,
+                    title: '',
+                    thumbnail: ''
+                });
+            }, 1000);
         }
 
         // @ts-ignore - custom event
         app.on('settings-changed', (newSettings: any) => {
-            if (newSettings.minimizeToTray) {
-                if (!tray) createTray();
-            } else {
-                if (tray) {
-                    tray.destroy();
-                    tray = null;
-                }
-            }
+            // Tray is always active for extension support
         });
 
         // Register all IPC handlers
@@ -202,11 +227,21 @@ if (!gotTheLock) {
     });
 
     app.on('window-all-closed', () => {
-        if (process.platform !== 'darwin') app.quit();
+        // Don't quit - tray keeps the app alive for extension
+        // Only quit if platform is not darwin
+        if (process.platform !== 'darwin') {
+            // Keep app running for tray/extension - don't quit
+        }
     });
 }
 
 app.on('activate', () => {
     if (mainWindow === null) createWindow();
     else mainWindow.show();
+});
+
+// Cleanup WebSocket server on quit
+app.on('before-quit', () => {
+    isQuitting = true;
+    stopWebSocketServer();
 });

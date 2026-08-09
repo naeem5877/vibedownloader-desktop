@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            width: 300px;
+            padding: 20px;
+            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+            background: #0a0a0b;
+            color: #e0e0e0;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .header img { width: 32px; height: 32px; }
+        .header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+        .status.connected {
+            background: #0d2818;
+            border: 1px solid #1b4332;
+            color: #95d5b2;
+        }
+        .status.disconnected {
+            background: #2d0000;
+            border: 1px solid #660000;
+            color: #ff6b6b;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .connected .status-dot { background: #40c057; }
+        .disconnected .status-dot { background: #ff4444; }
+        .info {
+            font-size: 12px;
+            color: #888;
+            line-height: 1.5;
+        }
+        .info strong { color: #aaa; }
+        .footer {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #222;
+            font-size: 11px;
+            color: #555;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#e0e0e0" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <h1>VibeDownloader</h1>
+    </div>
+
+    <div id="status" class="status disconnected">
+        <span class="status-dot"></span>
+        <span id="status-text">Checking connection...</span>
+    </div>
+
+    <div class="info">
+        <strong>How to use:</strong><br>
+        1. Open any YouTube video<br>
+        2. Click the <strong>"Download"</strong> button below the video<br>
+        3. VibeDownloader will open and start fetching
+    </div>
+
+    <div class="footer">
+        VibeDownloader Browser Extension v1.0
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

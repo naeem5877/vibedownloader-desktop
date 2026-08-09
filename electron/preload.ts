@@ -69,4 +69,29 @@ contextBridge.exposeInMainWorld('electron', {
     // Settings
     getSettings: () => ipcRenderer.invoke('get-settings'),
     saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
+
+    // External URL from browser extension
+    onExternalDownloadUrl: (callback: (data: { url: string, title: string, thumbnail: string }) => void) => {
+        const handler = (_: any, data: any) => callback(data);
+        ipcRenderer.on('external-download-url', handler);
+        (window as any)._externalUrlHandler = handler;
+    },
+    offExternalDownloadUrl: () => {
+        const handler = (window as any)._externalUrlHandler;
+        if (handler) {
+            ipcRenderer.removeListener('external-download-url', handler);
+        }
+    },
+
+    onExternalSpotifyDownload: (callback: (data: { searchQuery: string, title: string, artist: string, thumbnail: string }) => void) => {
+        const handler = (_: any, data: any) => callback(data);
+        ipcRenderer.on('external-download-spotify', handler);
+        (window as any)._externalSpotifyHandler = handler;
+    },
+    offExternalSpotifyDownload: () => {
+        const handler = (window as any)._externalSpotifyHandler;
+        if (handler) {
+            ipcRenderer.removeListener('external-download-spotify', handler);
+        }
+    },
 });
