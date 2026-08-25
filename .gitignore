@@ -6,13 +6,14 @@
 /release2
 /build-dir
 /native-host
+/*.blockmap
+/*.exe
 
 # Vite temp files
 *.timestamp-*.mjs
 vite.config.ts.timestamp-*.mjs
 
 # Environment files
-.DS_Store
 .env
 .env.local
 .env.development.local
@@ -39,11 +40,6 @@ pnpm-debug.log*
 Thumbs.db
 Desktop.ini
 
-# Knowledge Base
-LossLessKnowlageBase/
-
 # OS generated files
-*.DS_Store
+.DS_Store
 ._*
-
-# LossLess Audio Knowlage Base
