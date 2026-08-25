@@ -80,3 +80,86 @@
 
     injectButton();
 })();
+
+// VibeDownloader — YouTube Music PLAYLIST page button
+// Handles: music.youtube.com/playlist?list=...
+// The playlist URL itself is the correct link — no per-track resolution
+// needed, same pattern as the Spotify playlist button.
+//
+// #action-buttons here is a plain custom-element row (Polymer "shady DOM",
+// not real Shadow DOM), so it's fully accessible via normal querySelector.
+// We anchor the insertion on the "Action menu" (•••) button's aria-label,
+// which is the most semantically stable element in the row.
+(function() {
+    'use strict';
+
+    const BTN_ID = 'vibedownloader-ytm-playlist-btn';
+
+    function getPlaylistTitle() {
+        // Prefer the header's title text; fall back to document.title
+        const titleEl = document.querySelector('ytmusic-responsive-header-renderer yt-formatted-string.title')
+            || document.querySelector('ytmusic-responsive-header-renderer h1')
+            || document.querySelector('h1.title, yt-formatted-string.title');
+        if (titleEl && titleEl.textContent.trim()) return titleEl.textContent.trim();
+        return document.title.replace(' - YouTube Music', '').trim();
+    }
+
+    function getPlaylistThumbnail() {
+        const ogImage = document.querySelector('meta[property="og:image"]');
+        if (ogImage) return ogImage.getAttribute('content') || '';
+        const img = document.querySelector('ytmusic-responsive-header-renderer img');
+        return img ? img.src : '';
+    }
+
+    function buildButton() {
+        const btn = document.createElement('button');
+        btn.id = BTN_ID;
+        btn.className = 'vibedownloader-ytm-playlist-btn';
+        btn.title = 'Download playlist with VibeDownloader';
+        btn.setAttribute('aria-label', 'Download playlist with VibeDownloader');
+        btn.appendChild(VibeExt.createSvgIcon(20));
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const url = window.location.href.split('&')[0]; // strip extra query params, keep ?list=
+            const title = getPlaylistTitle();
+            const thumbnail = getPlaylistThumbnail();
+
+            VibeExt.sendDownload(url, title, thumbnail, btn);
+        });
+
+        return btn;
+    }
+
+    function injectButton() {
+        // Only on actual playlist pages
+        if (!/\/playlist\?/.test(window.location.pathname + window.location.search)) return;
+
+        const actionBar = document.querySelector('#action-buttons.ytmusic-responsive-header-renderer');
+        if (!actionBar) return;
+
+        let btn = actionBar.querySelector(`#${BTN_ID}`);
+        if (!btn) {
+            btn = buildButton();
+
+            // Insert right before the "Action menu" (•••) button — stable
+            // aria-label anchor.
+            const menuBtn = actionBar.querySelector('[aria-label="Action menu"]')?.closest('ytmusic-menu-renderer');
+            if (menuBtn) {
+                menuBtn.insertAdjacentElement('beforebegin', btn);
+            } else {
+                actionBar.appendChild(btn);
+            }
+        }
+    }
+
+    const observer = VibeExt.createThrottledObserver(injectButton);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // YT Music is an SPA — also re-check on navigation events
+    window.addEventListener('yt-navigate-finish', injectButton);
+
+    injectButton();
+})();

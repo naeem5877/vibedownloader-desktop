@@ -8,6 +8,9 @@
    Shape:  36px tall pill, 18px radius-full, 16px horizontal padding
 */
 
+/* VibeDownloader — YouTube watch-page Download button (sits inline in
+   #top-level-buttons-computed next to Like / Share / Download). */
+
 .vibedownloader-btn {
     --vibe-accent-1: #a855f7;
     --vibe-accent-2: #22d3ee;
@@ -34,13 +37,17 @@
     transition: filter 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
 }
 
-.vibedownloader-btn:hover,
-.vibedownloader-btn:focus-visible {
+/* Use :where() so specificity stays at 0-1-0 — same as base rule —
+   which prevents YouTube's higher-specificity selectors from winning.
+   :focus-visible is scoped to the button itself only (not ancestors). */
+.vibedownloader-btn:where(:hover) {
     filter: brightness(1.15);
     box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
 }
 
 .vibedownloader-btn:focus-visible {
+    filter: brightness(1.15);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
     outline: 2px solid var(--vibe-accent-2);
     outline-offset: 2px;
 }
@@ -53,10 +60,13 @@
     width: 16px;
     height: 16px;
     flex-shrink: 0;
+    /* Prevent SVG transitions from being triggered by YouTube's own
+       style recalculations on parent element state changes */
     transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    pointer-events: none;
 }
 
-.vibedownloader-btn:hover svg {
+.vibedownloader-btn:where(:hover) svg {
     transform: translateY(1px);
 }
 
@@ -463,6 +473,217 @@
 .vibedownloader-spotify-playlist-btn.vibedownloader-error {
     background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
                 linear-gradient(135deg, #ff5c5c, #ff8f8f) border-box;
+}
+
+/* VibeDownloader — YouTube Music playlist/album page button (40px icon-only
+   circle in the header action-bar row, same shape as the Spotify one). */
+.vibedownloader-ytm-playlist-btn {
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin-right: 8px;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #a855f7, #22d3ee) border-box;
+    color: #fff;
+    cursor: pointer;
+    transition: filter 0.18s ease, transform 0.15s ease;
+}
+
+.vibedownloader-ytm-playlist-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+.vibedownloader-ytm-playlist-btn:hover {
+    filter: brightness(1.2);
+}
+
+.vibedownloader-ytm-playlist-btn:active {
+    transform: scale(0.92);
+}
+
+.vibedownloader-ytm-playlist-btn.vibedownloader-sending {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.vibedownloader-ytm-playlist-btn.vibedownloader-sent {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #3ddc84, #22d3ee) border-box;
+}
+
+.vibedownloader-ytm-playlist-btn.vibedownloader-error {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #ff5c5c, #ff8f8f) border-box;
+}
+
+/* VibeDownloader — X/Twitter tweet action-bar button (34px icon-only circle,
+   appended at the end of the reply/retweet/like/bookmark/share row). */
+.vibedownloader-x-btn {
+    --vibe-accent-1: #a855f7;
+    --vibe-accent-2: #22d3ee;
+
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin: auto 0;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, var(--vibe-accent-1), var(--vibe-accent-2)) border-box;
+    color: #fff;
+    cursor: pointer;
+    transition: filter 0.18s ease, transform 0.15s ease;
+}
+
+.vibedownloader-x-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.vibedownloader-x-btn:hover,
+.vibedownloader-x-btn:focus-visible {
+    filter: brightness(1.2);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+}
+
+.vibedownloader-x-btn:active {
+    transform: scale(0.92);
+}
+
+.vibedownloader-x-btn.vibedownloader-sending {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.vibedownloader-x-btn.vibedownloader-sent {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #3ddc84, #22d3ee) border-box;
+    animation: vibe-pop 0.25s ease;
+}
+
+.vibedownloader-x-btn.vibedownloader-error {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #ff5c5c, #ff8f8f) border-box;
+    animation: vibe-pop 0.25s ease;
+}
+
+/* VibeDownloader — SoundCloud player-bar sound-badge button (28px icon-only
+   circle, sits inline with the Like/Follow/Queue action buttons). */
+.vibedownloader-sc-btn {
+    --vibe-accent-1: #a855f7;
+    --vibe-accent-2: #22d3ee;
+
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin-left: 6px;
+    vertical-align: middle;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, var(--vibe-accent-1), var(--vibe-accent-2)) border-box;
+    color: #fff;
+    cursor: pointer;
+    transition: filter 0.18s ease, transform 0.15s ease;
+}
+
+.vibedownloader-sc-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.vibedownloader-sc-btn:hover,
+.vibedownloader-sc-btn:focus-visible {
+    filter: brightness(1.2);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+}
+
+.vibedownloader-sc-btn:active {
+    transform: scale(0.92);
+}
+
+.vibedownloader-sc-btn.vibedownloader-sending {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.vibedownloader-sc-btn.vibedownloader-sent {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #3ddc84, #22d3ee) border-box;
+    animation: vibe-pop 0.25s ease;
+}
+
+.vibedownloader-sc-btn.vibedownloader-error {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #ff5c5c, #ff8f8f) border-box;
+    animation: vibe-pop 0.25s ease;
+}
+
+/* VibeDownloader — SoundCloud set/album/playlist page button (32px icon-only
+   circle, sits right after the Like/Repost/Share toolbar group). */
+.vibedownloader-sc-album-btn {
+    --vibe-accent-1: #a855f7;
+    --vibe-accent-2: #22d3ee;
+
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin-left: 8px;
+    vertical-align: middle;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, var(--vibe-accent-1), var(--vibe-accent-2)) border-box;
+    color: #fff;
+    cursor: pointer;
+    transition: filter 0.18s ease, transform 0.15s ease;
+}
+
+.vibedownloader-sc-album-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.vibedownloader-sc-album-btn:hover,
+.vibedownloader-sc-album-btn:focus-visible {
+    filter: brightness(1.2);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+}
+
+.vibedownloader-sc-album-btn:active {
+    transform: scale(0.92);
+}
+
+.vibedownloader-sc-album-btn.vibedownloader-sending {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.vibedownloader-sc-album-btn.vibedownloader-sent {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #3ddc84, #22d3ee) border-box;
+    animation: vibe-pop 0.25s ease;
+}
+
+.vibedownloader-sc-album-btn.vibedownloader-error {
+    background: linear-gradient(rgba(24, 24, 24, 0.95), rgba(24, 24, 24, 0.95)) padding-box,
+                linear-gradient(135deg, #ff5c5c, #ff8f8f) border-box;
+    animation: vibe-pop 0.25s ease;
 }
 
 /* VibeDownloader — toast (fixed top-center, used for extension messages) */

@@ -151,7 +151,14 @@ export function registerGeneralHandlers() {
 
     ipcMain.handle('open-in-folder', async (event: any, filePath: string) => {
         try {
-            shell.showItemInFolder(filePath);
+            const fs = require('fs');
+            if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+                // Opening a folder directly (e.g. a playlist folder) — show the
+                // folder contents instead of highlighting it in its parent.
+                await shell.openPath(filePath);
+            } else {
+                shell.showItemInFolder(filePath);
+            }
             return { success: true };
         } catch (e: any) {
             return { success: false, error: e.message };

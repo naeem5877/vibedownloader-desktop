@@ -3,7 +3,9 @@
 /dist
 /dist-electron
 /release
+/release2
 /build-dir
+/native-host
 
 # Vite temp files
 *.timestamp-*.mjs

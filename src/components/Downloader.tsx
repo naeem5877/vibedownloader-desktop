@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaSnapchat, FaDiscord } from 'react-icons/fa6';
 import { Settings } from './Settings';
+import { TutorialModal } from './TutorialModal';
 import ShinyText from './ui/ShinyText';
 import EmptyState from './ui/EmptyState';
 
@@ -445,6 +446,7 @@ export function Downloader() {
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
     const [showDiscordModal, setShowDiscordModal] = useState(false);
+    const [showTutorial, setShowTutorial] = useState(false);
 
     // Batch download features
     const [batchMode, setBatchMode] = useState(false);
@@ -1265,6 +1267,15 @@ export function Downloader() {
                     title="Join Discord"
                 >
                     <FaDiscord className="w-5 h-5 text-[#5865F2] group-hover:scale-110 transition-transform" />
+                </button>
+
+                {/* Extension Button */}
+                <button
+                    onClick={() => setShowTutorial(true)}
+                    className="w-10 h-10 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 hover:border-purple-500/30 flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm group"
+                    title="Install Extension"
+                >
+                    <Puzzle className="w-5 h-5 text-purple-400 group-hover:scale-110 transition-transform" />
                 </button>
 
                 {/* Settings Button */}
@@ -2146,6 +2157,25 @@ export function Downloader() {
 
                                     {!hasCookies ? (
                                         <div className="space-y-6">
+                                            {/* Easier with Extension Card */}
+                                            <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 to-violet-500/10 border border-purple-500/20">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
+                                                        <Puzzle className="w-4 h-4 text-purple-400" />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <h4 className="text-sm font-bold text-white">Easier with the Extension</h4>
+                                                        <p className="text-[11px] text-white/40">Sync your session automatically — no copy-paste needed.</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => { setShowCookieModal(false); setShowTutorial(true); }}
+                                                    className="w-full h-10 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-xs font-bold text-purple-300 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98]"
+                                                >
+                                                    <Puzzle className="w-3.5 h-3.5" /> Get VibeDownloader Extension
+                                                </button>
+                                            </div>
+
                                             <div className="grid grid-cols-1 gap-4">
                                                 {/* Step 1 */}
                                                 <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition-colors group">
@@ -2371,6 +2401,12 @@ export function Downloader() {
             < Settings
                 isOpen={showSettings}
                 onClose={() => setShowSettings(false)}
+            />
+
+            {/* Extension Tutorial Modal */}
+            <TutorialModal
+                isOpen={showTutorial}
+                onClose={() => setShowTutorial(false)}
             />
 
         </div >

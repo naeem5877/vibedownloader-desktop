@@ -3,15 +3,158 @@ import { ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { app } from 'electron';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+const execFileAsync = promisify(execFile);
 // @ts-ignore
 import NodeID3 from 'node-id3';
 import { getYtDlpWrap, ensureFFmpeg, getFfmpegBinaryPath, isFfmpegAvailable } from '../utils/binaries';
-import { getOrganizedPath, getCookiePath } from '../utils/paths';
+import { getOrganizedPath, getCookiePath, loadSettings } from '../utils/paths';
 import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
+import { fetchYouTubeMusicAlbumArt, extractYouTubeVideoId } from '../utils/youtubeMusic';
+
+// Download an image URL to a unique temp file (used for MP3 cover embedding
+// and the Windows completion notification).
+async function saveThumbnailTemp(url: string): Promise<{ path: string; mime: string } | null> {
+    try {
+        const response = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+        if (!response.ok) {
+            console.error('Failed to fetch thumbnail:', response.statusText);
+            return null;
+        }
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const ext = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
+        const thumbPath = path.join(app.getPath('temp'), `vibe_thumb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`);
+        fs.writeFileSync(thumbPath, buffer);
+        return { path: thumbPath, mime: contentType };
+    } catch (e) {
+        console.error("Failed to save thumbnail:", e);
+        return null;
+    }
+}
+
+// Some platforms (notably Instagram) deliver VP9/AV1 video with HE-AAC audio
+// inside an .mp4 container. That plays in a few apps but breaks in editors,
+// messaging apps and many hardware players. Probe the finished file and, when
+// the video codec isn't H.264 (or the audio is HE-AAC/Vorbis/Opus), re-encode
+// to the universally compatible H.264 + AAC-LC using the integrated FFmpeg.
+async function recodeVideoToH264(filePath: string): Promise<void> {
+    if (!fs.existsSync(filePath)) return;
+    const ffmpegDir = path.dirname(getFfmpegBinaryPath());
+    const ffprobe = path.join(ffmpegDir, 'ffprobe.exe');
+    const ffmpeg = path.join(ffmpegDir, 'ffmpeg.exe');
+    if (!fs.existsSync(ffprobe) || !fs.existsSync(ffmpeg)) return;
+
+    let probe: any;
+    try {
+        const { stdout } = await execFileAsync(ffprobe, [
+            '-hide_banner', '-v', 'error',
+            '-show_entries', 'stream=codec_type,codec_name,profile',
+            '-of', 'json',
+            filePath
+        ]);
+        probe = JSON.parse(stdout);
+    } catch (e) {
+        console.error('Failed to probe codecs:', e);
+        return;
+    }
+
+    const streams = probe?.streams || [];
+    const video = streams.find((s: any) => s.codec_type === 'video');
+    const audio = streams.find((s: any) => s.codec_type === 'audio');
+    if (!video) return;
+
+    const videoOk = /h264|avc/i.test(video.codec_name || '');
+    const audioCodec = (audio?.codec_name || '').toLowerCase();
+    const audioProfile = (audio?.profile || '').toLowerCase();
+    const heAac = audioCodec === 'aac' && (audioProfile.includes('he') || audioProfile.includes('latm'));
+    const audioOk = !audio || ['mp3', 'ac3', 'eac3'].includes(audioCodec) || (audioCodec === 'aac' && !heAac);
+    if (videoOk && audioOk) return;
+
+    const ext = path.extname(filePath);
+    const tmpPath = filePath.replace(ext, `_recode${ext}`);
+    const reason = videoOk ? `HE-AAC audio` : `${video.codec_name} video`;
+    console.log(`Re-encoding ${reason} for compatibility:`, path.basename(filePath));
+    try {
+        await execFileAsync(ffmpeg, [
+            '-hide_banner', '-loglevel', 'error', '-y',
+            '-i', filePath,
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',
+            '-pix_fmt', 'yuv420p',
+            tmpPath
+        ]);
+        fs.renameSync(tmpPath, filePath);
+    } catch (e) {
+        console.error('Failed to re-encode video to H.264:', e);
+        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+    }
+}
+
+let activeDownloads = 0;
+
+function registerDownloadStart() {
+    activeDownloads++;
+}
+
+function registerDownloadEnd() {
+    activeDownloads = Math.max(0, activeDownloads - 1);
+}
+
+export function getActiveDownloadCount() {
+    return activeDownloads;
+}
+
+// Resolves when no downloads are running. Used to delay app quit until the
+// current downloads finish instead of killing yt-dlp mid-file.
+export function waitForDownloadsToFinish(timeoutMs: number = 30 * 60 * 1000): Promise<void> {
+    return new Promise<void>((resolve) => {
+        const start = Date.now();
+        const poll = () => {
+            if (activeDownloads <= 0 || Date.now() - start >= timeoutMs) return resolve();
+            setTimeout(poll, 1000);
+        };
+        poll();
+    });
+}
+
+// yt-dlp leaves *.part / *.ytdl files behind when a download is interrupted
+// (crash or forced kill). Nothing can be downloading on a fresh launch, so
+// sweep the whole download tree and remove the stale fragments.
+export function cleanupDownloadArtifacts(): number {
+    const base = path.join(loadSettings().downloadBasePath, 'VibeDownloader');
+    if (!fs.existsSync(base)) return 0;
+    const walk = (dir: string): number => {
+        let removed = 0;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                removed += walk(full);
+            } else if (/\.(part|ytdl|temp|tmp)$/i.test(entry.name)) {
+                try {
+                    fs.unlinkSync(full);
+                    removed++;
+                } catch (e) {
+                    console.error('Failed to remove stale artifact:', full, e);
+                }
+            }
+        }
+        return removed;
+    };
+    const n = walk(base);
+    if (n > 0) console.log(`Cleaned up ${n} incomplete download artifact(s)`);
+    return n;
+}
 
 export function registerDownloadHandlers() {
-    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean }) => {
+    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string }) => {
+        registerDownloadStart();
         try {
             const mainWindow = getMainWindow();
             const ytDlpWrap = getYtDlpWrap();
@@ -33,7 +176,6 @@ export function registerDownloadHandlers() {
             const isPinterest = url.includes('pinterest.com') || url.includes('pin.it');
             const isSoundcloud = url.includes('soundcloud.com');
             const isX = url.includes('twitter.com') || url.includes('x.com');
-            const isSnapchat = url.includes('snapchat.com');
 
             // Determine platform
             let detectedPlatform = platform || 'youtube';
@@ -47,7 +189,6 @@ export function registerDownloadHandlers() {
                 else if (isPinterest) detectedPlatform = 'pinterest';
                 else if (isSoundcloud) detectedPlatform = 'soundcloud';
                 else if (isX) detectedPlatform = 'x';
-                else if (isSnapchat) detectedPlatform = 'snapchat';
             }
 
             // Determine content type from URL patterns
@@ -100,10 +241,10 @@ export function registerDownloadHandlers() {
                 const fbVideoMatch = url.match(/\/videos\/(\d+)/);
                 const fbWatchMatch = url.match(/[?&]v=(\d+)/);
                 uniqueId = fbVideoMatch?.[1] || fbWatchMatch?.[1] || '';
-            } else if (isSnapchat) {
-                // Snapchat URLs: /add/user/snap/ABC123
-                const snapMatch = url.match(/\/snap\/([A-Za-z0-9_-]+)/);
-                uniqueId = snapMatch?.[1] || '';
+            } else if (isYoutube) {
+                // YouTube / YouTube Music: use the stable video ID so re-downloading
+                // the same song overwrites the old file instead of cloning a new one.
+                uniqueId = extractYouTubeVideoId(url) || '';
             }
 
             // If no unique ID found from URL, generate a short timestamp-based ID
@@ -131,7 +272,7 @@ export function registerDownloadHandlers() {
             // ==========================================
             if (url.includes('fbcdn.net')) {
                 console.log('Using FAST PATH for direct CDN URL:', url.substring(0, 50));
-                mainWindow?.webContents.send('download-progress', { percent: 10, currentSpeed: 'Downloading...' });
+                mainWindow?.webContents.send('download-progress', { percent: 10, currentSpeed: 'Downloading...', jobId });
 
                 const resp = await fetch(url, {
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -161,7 +302,8 @@ export function registerDownloadHandlers() {
                         percent: Math.min(percent, 99),
                         currentSpeed: `${speed.toFixed(1)} MB/s`,
                         downloaded: `${(downloadedBytes / 1024 / 1024).toFixed(1)} MB`,
-                        totalSize: totalBytes > 0 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB` : '...'
+                        totalSize: totalBytes > 0 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB` : '...',
+                        jobId
                     });
                 }
 
@@ -169,11 +311,16 @@ export function registerDownloadHandlers() {
                 const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
                 fs.writeFileSync(finalFilePath, fileBuffer);
 
-                mainWindow?.webContents.send('download-progress', {
-                    complete: true,
-                    title: safeTitle,
-                    path: finalFilePath
-                });
+                if (finalExt === 'mp4') {
+                    await recodeVideoToH264(finalFilePath);
+                }
+
+                    mainWindow?.webContents.send('download-progress', {
+                        complete: true,
+                        title: safeTitle,
+                        path: finalFilePath,
+                        jobId
+                    });
 
                 if (!suppressNotifications) {
                     showNotification('Download Complete! ✅', `${safeTitle} saved`, undefined, finalFilePath);
@@ -200,8 +347,6 @@ export function registerDownloadHandlers() {
                 cookiePath = getCookiePath('youtube');
             } else if (isTiktok) {
                 cookiePath = getCookiePath('tiktok');
-            } else if (isSnapchat) {
-                cookiePath = getCookiePath('snapchat');
             }
 
             // Add User-Agent to help with Facebook/Instagram/YouTube
@@ -218,7 +363,7 @@ export function registerDownloadHandlers() {
 
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
-                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : isSnapchat ? 'Snapchat' : 'Platform';
+                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : 'Platform';
                 console.log(`Using custom cookies for ${platformName}`);
             } else if (!cookiePath && fs.existsSync(path.join(app.getPath('userData'), 'cookies.txt'))) {
                 args.push('--cookies', path.join(app.getPath('userData'), 'cookies.txt'));
@@ -233,8 +378,10 @@ export function registerDownloadHandlers() {
                 if (formatId === 'audio_low') quality = '9';
 
                 args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality);
-                // We will handle thumbnail embedding manually using node-id3
-                console.log('Using node-id3 for thumbnail embedding');
+                // Let yt-dlp write + embed the best thumbnail (for music /
+                // "Topic" videos this is the square album cover). node-id3 is
+                // no longer used for the YouTube path.
+                args.push('--write-thumbnail', '--convert-thumbnails', 'jpg', '--embed-thumbnail');
             } else {
                 // Ensure FFmpeg is available for merging video/audio
                 await ensureFFmpeg();
@@ -245,7 +392,7 @@ export function registerDownloadHandlers() {
                 if (formatId && formatId !== 'best') {
                     args.push('-f', `${formatId}+bestaudio/best`);
                 } else {
-                    args.push('-S', 'res,ext:mp4:m4a');
+                    args.push('-S', 'res,ext:mp4:m4a,vcodec:h264,acodec:aac');
                 }
             }
 
@@ -263,32 +410,23 @@ export function registerDownloadHandlers() {
                 }
             }
 
-            // Save thumbnail for notification/embedding
+            // Thumbnail for the completion notification. yt-dlp embeds its own
+            // thumbnail into audio files; we ALSO kick off a parallel YouTube
+            // Music album-art lookup and, when it resolves, override the cover
+            // with the true square album art via node-id3.
             let thumbPath: string | undefined;
-            let thumbMime = 'image/jpeg';
-            if (thumbnail) {
-                try {
-                    console.log('Fetching thumbnail for embedding/notification:', thumbnail.substring(0, 50) + '...');
-                    const response = await fetch(thumbnail, {
-                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                    });
-                    if (response.ok) {
-                        const contentType = response.headers.get('content-type');
-                        if (contentType) thumbMime = contentType;
-
-                        const arrayBuffer = await response.arrayBuffer();
-                        const buffer = Buffer.from(arrayBuffer);
-
-                        const ext = thumbMime.includes('webp') ? 'webp' : thumbMime.includes('png') ? 'png' : 'jpg';
-                        thumbPath = path.join(app.getPath('temp'), `vibe_thumb_${Date.now()}.${ext}`);
-                        fs.writeFileSync(thumbPath, buffer);
-                        console.log(`Saved temporary thumbnail (${thumbMime}) to:`, thumbPath);
-                    } else {
-                        console.error('Failed to fetch thumbnail:', response.statusText);
-                    }
-                } catch (e) {
-                    console.error("Failed to save notification thumbnail:", e);
+            let artPromise: Promise<string | null> | null = null;
+            const isYoutubeAudio = isYoutube && formatId && formatId.startsWith('audio_');
+            if (isYoutubeAudio) {
+                const videoId = extractYouTubeVideoId(url);
+                if (videoId) {
+                    artPromise = fetchYouTubeMusicAlbumArt(videoId).catch(() => null);
                 }
+            }
+
+            if (thumbnail) {
+                const info = await saveThumbnailTemp(thumbnail);
+                if (info) { thumbPath = info.path; }
             }
 
             // Speed up downloads with parallel fragments
@@ -309,70 +447,134 @@ export function registerDownloadHandlers() {
                     totalSize: progress.totalSize || '...',
                     currentSpeed: progress.currentSpeed || '...',
                     eta: progress.eta || '...',
-                    downloaded: progress.downloadedSize || '...'
+                    downloaded: progress.downloadedSize || '...',
+                    jobId
                 });
             });
 
-            ytDlpEventEmitter.on('error', (error: any) => {
-                console.error("Download Error", error);
-                mainWindow?.webContents.send('download-progress', { error: error.message });
-                // Show error notification
-                showNotification('Download Failed', `Failed to download: ${safeTitle}`);
-            });
+            // Resolve only after yt-dlp actually finishes, so callers (e.g.
+            // playlist bulk download) know when the file is really done.
+            return await new Promise<{ success: boolean; path?: string }>((resolve, reject) => {
+                let settled = false;
+                let failed = false;
 
-            ytDlpEventEmitter.on('close', async () => {
-                console.log("Download complete event for:", safeTitle);
+                ytDlpEventEmitter.on('error', (error: any) => {
+                    console.error("Download Error", error);
+                    failed = true;
+                    mainWindow?.webContents.send('download-progress', { error: error.message, jobId });
+                    if (!settled) { settled = true; reject(new Error(error.message)); }
+                });
 
-                // Wait a tiny bit for file to be released
-                await new Promise(r => setTimeout(r, 500));
+                ytDlpEventEmitter.on('close', async (code?: number | null) => {
+                    if (failed) return;
 
-                // Embed thumbnail if it's an audio file and we have a thumbnail
-                const isAudioDownload = formatId && (formatId.startsWith('audio_') || formatId === 'audio');
-                if (isAudioDownload && thumbPath && fs.existsSync(thumbPath) && fs.existsSync(finalFilePath)) {
-                    try {
-                        console.log("Attempting to embed thumbnail in:", finalFilePath);
-                        const imageBuffer = fs.readFileSync(thumbPath);
-                        const tags = {
-                            title: safeTitle,
-                            image: {
-                                mime: thumbMime,
-                                type: { id: 3, name: "front cover" },
-                                description: "Cover",
-                                imageBuffer: imageBuffer
-                            }
-                        };
-                        const success = NodeID3.update(tags, finalFilePath);
-                        console.log("Thumbnail embedding result:", success);
-                    } catch (e) {
-                        console.error("Failed to write ID3 tags (node-id3):", e);
+                    // Non-zero exit without an error event: treat as a failure
+                    if (typeof code === 'number' && code !== 0) {
+                        console.error(`Download exited with code ${code}:`, safeTitle);
+                        if (!settled) { settled = true; reject(new Error(`yt-dlp exited with code ${code}`)); }
+                        return;
                     }
-                }
 
-                mainWindow?.webContents.send('download-progress', {
-                    complete: true,
-                    title: safeTitle,
-                    path: finalFilePath
+                    console.log("Download complete event for:", safeTitle);
+
+                    // Wait a tiny bit for file to be released
+                    await new Promise(r => setTimeout(r, 500));
+
+                    // yt-dlp may write a different extension than finalExt (e.g.
+                    // webm/mkv when no mp4 format exists) — locate the real file.
+                    let actualFilePath = finalFilePath;
+                    if (!fs.existsSync(actualFilePath)) {
+                        try {
+                            const mediaFiles = fs.readdirSync(downloadPath).filter(f =>
+                                f.startsWith(`${uniqueFilename}.`) && /\.(mp4|webm|mkv|mov|m4v)$/i.test(f)
+                            );
+                            if (mediaFiles.length) actualFilePath = path.join(downloadPath, mediaFiles[0]);
+                        } catch (e) {
+                            console.error('Failed to locate output media file:', e);
+                        }
+                    }
+                    const isVideoDownload = !(formatId && (formatId.startsWith('audio_') || formatId === 'audio'));
+                    if (isVideoDownload && fs.existsSync(actualFilePath)) {
+                        await recodeVideoToH264(actualFilePath);
+                    }
+
+                    // yt-dlp can leave the converted thumbnail file behind after
+                    // embedding — remove any leftover image files for this download.
+                    try {
+                        for (const f of fs.readdirSync(downloadPath)) {
+                            if (f.startsWith(`${uniqueFilename}.`) && /\.(jpe?g|png|webp)$/i.test(f)) {
+                                try {
+                                    fs.unlinkSync(path.join(downloadPath, f));
+                                    console.log('Removed leftover thumbnail:', f);
+                                } catch (e) {
+                                    console.error('Failed to remove leftover thumbnail:', e);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Failed to scan download folder for leftover thumbnails:', e);
+                    }
+
+                    // Upgrade the embedded cover to the true square YouTube Music
+                    // album art when the parallel lookup succeeded.
+                    const isAudioDownload = formatId && (formatId.startsWith('audio_') || formatId === 'audio');
+                    if (isAudioDownload && artPromise && fs.existsSync(finalFilePath)) {
+                        const art = await artPromise;
+                        if (art) {
+                            console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
+                            const info = await saveThumbnailTemp(art);
+                            if (info) {
+                                thumbPath = info.path;
+                                try {
+                                    const tags = {
+                                        title: safeTitle,
+                                        image: {
+                                            mime: info.mime,
+                                            type: { id: 3, name: "front cover" },
+                                            description: "Cover",
+                                            imageBuffer: fs.readFileSync(info.path)
+                                        }
+                                    };
+                                    console.log("Embedding YouTube Music album art:", NodeID3.update(tags, finalFilePath));
+                                } catch (e) {
+                                    console.error("Failed to write album art tags (non-fatal):", e);
+                                }
+                            }
+                        }
+                    }
+
+                    mainWindow?.webContents.send('download-progress', {
+                        complete: true,
+                        title: safeTitle,
+                        path: actualFilePath,
+                        jobId
+                    });
+
+                    if (!suppressNotifications) {
+                        showNotification(
+                            'Download Complete! ✅',
+                            `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
+                            thumbPath,
+                            actualFilePath
+                        );
+                    }
+
+                    if (!settled) { settled = true; resolve({ success: true, path: actualFilePath }); }
                 });
-
-                if (!suppressNotifications) {
-                    showNotification(
-                        'Download Complete! ✅',
-                        `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
-                        thumbPath,
-                        finalFilePath
-                    );
-                }
             });
-
-            return { success: true };
         } catch (e: any) {
             console.error("Main Error", e);
-            showNotification('Download Failed', e.message);
+            if (!suppressNotifications) {
+                showNotification('Download Failed', e.message);
+            }
             return { success: false, error: e.message };
+        } finally {
+            registerDownloadEnd();
         }
     });
 
-    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications }) => {
+    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications, jobId }) => {
+        registerDownloadStart();
         try {
             // Ensure FFmpeg is available for conversion
             await ensureFFmpeg();
@@ -383,7 +585,10 @@ export function registerDownloadHandlers() {
             // Search top 3 results so yt-dlp picks the best relevance match
             const ytSearchUrl = `ytsearch3:${searchQuery}`;
 
-            const downloadPath = getOrganizedPath('spotify', 'track', playlistTitle);
+            // Playlist tracks go in Spotify/Playlists/<playlist name>/, single
+            // tracks go in Spotify/Tracks/.
+            const isPlaylist = !!playlistTitle;
+            const downloadPath = getOrganizedPath('spotify', isPlaylist ? 'playlist' : 'track', playlistTitle);
             const safeTitle = `${artist} - ${title}`.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const outputTemplate = path.join(downloadPath, `${safeTitle}.%(ext)s`);
 
@@ -417,86 +622,110 @@ export function registerDownloadHandlers() {
                     totalSize: progress.totalSize || '...',
                     currentSpeed: progress.currentSpeed || '...',
                     eta: progress.eta || '...',
-                    downloaded: progress.downloadedSize || '...'
+                    downloaded: progress.downloadedSize || '...',
+                    jobId
                 });
             });
 
-            ytDlpEventEmitter.on('error', (error: any) => {
-                console.error("Spotify Download Error", error);
-                mainWindow?.webContents.send('download-progress', { error: error.message });
-                showNotification('Download Failed', `Failed to download: ${safeTitle}`);
-            });
+            // Resolve only after yt-dlp actually finishes, so callers (e.g.
+            // playlist bulk download) know when the file is really done.
+            return await new Promise<{ success: boolean; path?: string }>((resolve, reject) => {
+                let settled = false;
+                let failed = false;
 
-            ytDlpEventEmitter.on('close', async () => {
-                const finalFilePath = path.join(downloadPath, `${safeTitle}.mp3`);
-                console.log("Spotify download process closed, finalizing:", finalFilePath);
+                ytDlpEventEmitter.on('error', (error: any) => {
+                    console.error("Spotify Download Error", error);
+                    failed = true;
+                    mainWindow?.webContents.send('download-progress', { error: error.message, jobId });
+                    if (!settled) { settled = true; reject(new Error(error.message)); }
+                });
 
-                // Wait a tiny bit for file to be released
-                await new Promise(r => setTimeout(r, 500));
+                ytDlpEventEmitter.on('close', async (code?: number | null) => {
+                    if (failed) return;
 
-                let notificationThumbPath: string | undefined;
-
-                // Embed thumbnail logic with retry and longer timeout
-                try {
-                    if (thumbnail) {
-                        console.log('Fetching Spotify thumbnail (with retry):', thumbnail.slice(0, 60));
-
-                        const axios = require('axios');
-                        try {
-                            const response = await axios.get(thumbnail, {
-                                responseType: 'arraybuffer',
-                                timeout: 3000,
-                                headers: {
-                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                                    'Referer': 'https://open.spotify.com/',
-                                    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
-                                }
-                            });
-
-                            if (response.status === 200) {
-                                const contentType = response.headers['content-type'] || 'image/jpeg';
-                                const imageBuffer = Buffer.from(response.data);
-
-                                // Save temp for notification
-                                const imgExt = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
-                                notificationThumbPath = path.join(app.getPath('temp'), `spotify_thumb_${Date.now()}.${imgExt}`);
-                                fs.writeFileSync(notificationThumbPath, imageBuffer);
-
-                                const tags = {
-                                    title, artist,
-                                    image: {
-                                        mime: contentType,
-                                        type: { id: 3, name: "front cover" },
-                                        description: "Cover",
-                                        imageBuffer
-                                    }
-                                };
-                                const embedResult = NodeID3.update(tags, finalFilePath);
-                                console.log("Spotify thumbnail embedding result:", embedResult);
-                            }
-                        } catch (e: any) {
-                            console.warn('Skipping thumbnail due to slow connection or block:', e.message);
-                        }
+                    // Non-zero exit without an error event: treat as a failure
+                    if (typeof code === 'number' && code !== 0) {
+                        console.error(`Spotify download exited with code ${code}:`, safeTitle);
+                        if (!settled) { settled = true; reject(new Error(`yt-dlp exited with code ${code}`)); }
+                        return;
                     }
-                } catch (e: any) {
-                    console.warn('Failed to embed Spotify thumbnail (non-fatal):', e.message || e);
-                }
 
-                mainWindow?.webContents.send('download-progress', {
-                    complete: true,
-                    title: safeTitle,
-                    path: finalFilePath
+                    const finalFilePath = path.join(downloadPath, `${safeTitle}.mp3`);
+                    console.log("Spotify download process closed, finalizing:", finalFilePath);
+
+                    // Wait a tiny bit for file to be released
+                    await new Promise(r => setTimeout(r, 500));
+
+                    let notificationThumbPath: string | undefined;
+
+                    // Embed thumbnail logic with retry and longer timeout
+                    try {
+                        if (thumbnail) {
+                            console.log('Fetching Spotify thumbnail (with retry):', thumbnail.slice(0, 60));
+
+                            const axios = require('axios');
+                            try {
+                                const response = await axios.get(thumbnail, {
+                                    responseType: 'arraybuffer',
+                                    timeout: 3000,
+                                    headers: {
+                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                                        'Referer': 'https://open.spotify.com/',
+                                        'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
+                                    }
+                                });
+
+                                if (response.status === 200) {
+                                    const contentType = response.headers['content-type'] || 'image/jpeg';
+                                    const imageBuffer = Buffer.from(response.data);
+
+                                    // Save temp for notification
+                                    const imgExt = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
+                                    notificationThumbPath = path.join(app.getPath('temp'), `spotify_thumb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${imgExt}`);
+                                    fs.writeFileSync(notificationThumbPath, imageBuffer);
+
+                                    const tags = {
+                                        title, artist,
+                                        image: {
+                                            mime: contentType,
+                                            type: { id: 3, name: "front cover" },
+                                            description: "Cover",
+                                            imageBuffer
+                                        }
+                                    };
+                                    const embedResult = NodeID3.update(tags, finalFilePath);
+                                    console.log("Spotify thumbnail embedding result:", embedResult);
+                                }
+                            } catch (e: any) {
+                                console.warn('Skipping thumbnail due to slow connection or block:', e.message);
+                            }
+                        }
+                    } catch (e: any) {
+                        console.warn('Failed to embed Spotify thumbnail (non-fatal):', e.message || e);
+                    }
+
+                    mainWindow?.webContents.send('download-progress', {
+                        complete: true,
+                        title: safeTitle,
+                        path: finalFilePath,
+                        jobId
+                    });
+                    if (!suppressNotifications) {
+                        const folderLabel = isPlaylist ? `Spotify/Playlists/${playlistTitle}` : 'Spotify/Tracks';
+                        showNotification('Download Complete! ✅', `${safeTitle} saved to ${folderLabel}`, notificationThumbPath, finalFilePath);
+                    }
+
+                    if (!settled) { settled = true; resolve({ success: true, path: finalFilePath }); }
                 });
-                if (!suppressNotifications) {
-                    showNotification('Download Complete! ✅', `${safeTitle} saved to Spotify/Tracks`, notificationThumbPath, finalFilePath);
-                }
             });
-
-            return { success: true };
         } catch (e: any) {
             console.error("Spotify download error:", e);
-            showNotification('Download Failed', e.message);
+            if (!suppressNotifications) {
+                showNotification('Download Failed', e.message);
+            }
             return { success: false, error: e.message };
+        } finally {
+            registerDownloadEnd();
         }
     });
 

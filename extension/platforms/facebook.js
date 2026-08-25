@@ -17,7 +17,7 @@
         if (!clickable) return null;
 
         let current = clickable.parentElement;
-        for (let i = 0; i < 6 && current; i++) {
+        for (let i = 0; i < 8 && current; i++) {
             const likeBtn = current.querySelector('[aria-label="Like"]');
             const commentBtn = current.querySelector('[aria-label*="omment" i]');
             if (likeBtn && commentBtn && current.contains(clickable)) {
@@ -32,10 +32,12 @@
 
     function findPostCard(scope) {
         let current = scope;
-        for (let i = 0; i < 8 && current && current.parentElement; i++) {
+        for (let i = 0; i < 10 && current && current.parentElement; i++) {
             current = current.parentElement;
             const video = current.querySelector('video');
-            const followLink = current.querySelector('a[href^="/"]');
+            // Author links may be relative (/user) OR absolute
+            // (https://www.facebook.com/user) depending on render path.
+            const followLink = current.querySelector('a[href^="/"], a[href^="https://www.facebook.com/"]');
             if (video && followLink) {
                 return current;
             }
@@ -125,10 +127,23 @@
         const found = findRowOrRail(shareRoleDiv);
         if (!found) return;
 
-        if (found.container.hasAttribute(DONE_ATTR)) return;
-        found.container.setAttribute(DONE_ATTR, 'true');
+        const container = found.container;
+        if (container.hasAttribute(DONE_ATTR)) return;
 
-        if (!hasVideo(found.container)) return;
+        // Facebook lazy-loads <video> AFTER the post shell renders, so on the
+        // first pass a real video post can look video-less. Retry on later
+        // observer passes for a few seconds before giving up, so slow-loading
+        // videos still get their download button.
+        if (!hasVideo(container)) {
+            const tries = Number(container.dataset.vibeRetries || 0) + 1;
+            container.dataset.vibeRetries = String(tries);
+            if (tries < 12) return;
+            // No video appeared within the window — it's an image post.
+            container.setAttribute(DONE_ATTR, 'true');
+            return;
+        }
+
+        container.setAttribute(DONE_ATTR, 'true');
 
         // Bare wrapper — NOT a clone of FB's heavy item class (that class
         // reserves icon+count width and was pushing the row to wrap).

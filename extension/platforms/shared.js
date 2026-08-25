@@ -62,8 +62,20 @@ const VibeExt = {
     sendToApp(payload, btn) {
         btn.classList.add('vibedownloader-sending');
         const finish = () => btn.classList.remove('vibedownloader-sending');
+        const flashSent = () => {
+            btn.classList.add('vibedownloader-sent');
+            setTimeout(() => btn.classList.remove('vibedownloader-sent'), 2000);
+        };
+        const flashError = () => {
+            btn.classList.add('vibedownloader-error');
+            setTimeout(() => btn.classList.remove('vibedownloader-error'), 2000);
+        };
 
-        return this.connectWebSocket()
+        // Safety: always re-enable the button after 15 s no matter what,
+        // so a dropped WebSocket can never leave it permanently unclickable.
+        const safetyTimer = setTimeout(() => { finish(); }, 15000);
+
+        const doSend = () => this.connectWebSocket()
             .then(() => {
                 return new Promise((resolve, reject) => {
                     this._pending = { resolve, reject };
@@ -76,21 +88,84 @@ const VibeExt = {
                 });
             })
             .then((ack) => {
+                clearTimeout(safetyTimer);
                 finish();
-                if (ack && ack.success) {
-                    btn.classList.add('vibedownloader-sent');
-                    setTimeout(() => btn.classList.remove('vibedownloader-sent'), 2000);
-                } else {
-                    btn.classList.add('vibedownloader-error');
-                    setTimeout(() => btn.classList.remove('vibedownloader-error'), 2000);
-                }
-            })
-            .catch(() => {
-                finish();
-                btn.classList.add('vibedownloader-error');
-                this.showToast('VibeDownloader app is not running — open it first');
-                setTimeout(() => btn.classList.remove('vibedownloader-error'), 2000);
+                if (ack && ack.success) flashSent();
+                else flashError();
             });
+
+        return doSend().catch(() => {
+            // App isn't running. Ask the background SW to launch it through the
+            // native host, wait for its WebSocket to come up, then resend.
+            this._pending = null;
+            return this.launchAppAndWait()
+                .then(() => doSend())
+                .catch(() => {
+                    clearTimeout(safetyTimer);
+                    finish();
+                    flashError();
+                    this.showToast('VibeDownloader app is not running — open it first');
+                });
+        });
+    },
+
+    // Ask the MV3 background worker to start the desktop app via Native
+    // Messaging (content scripts can't call chrome.runtime.connectNative).
+    // If that fails (host forbidden/not found, SW asleep), fall back to firing
+    // the vibedownloader:// protocol, which Windows resolves to the app exe.
+    launchApp() {
+        return new Promise((resolve) => {
+            let settled = false;
+            const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+            const tryProtocol = () => done(this.launchViaProtocol());
+            try {
+                chrome.runtime.sendMessage({ type: 'launch-app' }, (res) => {
+                    if (res && res.launched) return done(true);
+                    tryProtocol();
+                });
+            } catch (e) {
+                tryProtocol();
+            }
+            // SW can be suspended/restarting and never answer — fire the
+            // protocol anyway after a short grace period.
+            setTimeout(tryProtocol, 1500);
+        });
+    },
+
+    launchViaProtocol() {
+        try {
+            const f = document.createElement('iframe');
+            f.style.display = 'none';
+            f.setAttribute('aria-hidden', 'true');
+            f.src = 'vibedownloader://launch';
+            document.documentElement.appendChild(f);
+            setTimeout(() => f.remove(), 5000);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    },
+
+    // Fire the launch request, then poll the WebSocket until the app boots.
+    // If the launch itself failed (app not installed) reject right away.
+    // Falls back to rejecting after maxAttempts so we don't spin forever.
+    launchAppAndWait(maxAttempts = 14, delayMs = 1200) {
+        return new Promise((resolve, reject) => {
+            this.launchApp().then((launched) => {
+                if (!launched) return reject(new Error('app-not-running'));
+                let attempts = 0;
+                const attempt = () => {
+                    attempts++;
+                    this.connectWebSocket()
+                        .then(() => resolve())
+                        .catch(() => {
+                            if (attempts >= maxAttempts) reject(new Error('app-not-running'));
+                            else setTimeout(attempt, delayMs);
+                        });
+                };
+                attempt();
+            });
+        });
     },
 
     sendDownload(url, title, thumbnail, btn) {

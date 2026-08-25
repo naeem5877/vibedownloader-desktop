@@ -3,9 +3,16 @@
     "name": "VibeDownloader",
     "version": "1.0.0",
     "description": "Download YouTube videos directly from the page with VibeDownloader",
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "vibedownloader@vibedownloader.me"
+        }
+    },
     "permissions": [
         "activeTab",
-        "scripting"
+        "cookies",
+        "scripting",
+        "nativeMessaging"
     ],
     "host_permissions": [
         "https://www.youtube.com/*",
@@ -13,11 +20,16 @@
         "https://m.youtube.com/*",
         "https://music.youtube.com/*",
         "https://www.instagram.com/*",
+        "https://instagram.com/*",
         "https://www.tiktok.com/*",
+        "https://tiktok.com/*",
         "https://www.facebook.com/*",
         "https://facebook.com/*",
         "https://m.facebook.com/*",
-        "https://open.spotify.com/*"
+        "https://open.spotify.com/*",
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://soundcloud.com/*"
     ],
     "background": {
         "service_worker": "background.js"
@@ -25,12 +37,9 @@
     "content_scripts": [
         {
             "matches": [
-                "https://www.youtube.com/watch*",
-                "https://youtube.com/watch*",
-                "https://m.youtube.com/watch*",
-                "https://www.youtube.com/shorts/*",
-                "https://youtube.com/shorts/*",
-                "https://m.youtube.com/shorts/*"
+                "https://www.youtube.com/*",
+                "https://youtube.com/*",
+                "https://m.youtube.com/*"
             ],
             "js": ["platforms/shared.js", "platforms/youtube.js"],
             "css": ["styles.css"],
@@ -82,6 +91,23 @@
                 "https://open.spotify.com/*"
             ],
             "js": ["platforms/shared.js", "platforms/spotify-dom-watcher.js", "platforms/spotify.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://x.com/*",
+                "https://twitter.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/x.js"],
+            "css": ["styles.css"],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://soundcloud.com/*"
+            ],
+            "js": ["platforms/shared.js", "platforms/soundcloud.js"],
             "css": ["styles.css"],
             "run_at": "document_idle"
         }

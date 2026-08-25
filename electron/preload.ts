@@ -70,6 +70,13 @@ contextBridge.exposeInMainWorld('electron', {
     getSettings: () => ipcRenderer.invoke('get-settings'),
     saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
 
+    // Extension install
+    installExtension: () => ipcRenderer.invoke('install-extension'),
+    getExtensionStatus: () => ipcRenderer.invoke('get-extension-status'),
+    getInstalledBrowsers: () => ipcRenderer.invoke('get-installed-browsers'),
+    openBrowserExtensionsPage: (browserId: string) => ipcRenderer.invoke('open-browser-extensions-page', browserId),
+    revealExtensionFolder: () => ipcRenderer.invoke('reveal-extension-folder'),
+
     // External URL from browser extension
     onExternalDownloadUrl: (callback: (data: { url: string, title: string, thumbnail: string }) => void) => {
         const handler = (_: any, data: any) => callback(data);
@@ -92,6 +99,19 @@ contextBridge.exposeInMainWorld('electron', {
         const handler = (window as any)._externalSpotifyHandler;
         if (handler) {
             ipcRenderer.removeListener('external-download-spotify', handler);
+        }
+    },
+
+    // Cookies updated from the browser extension (e.g. YouTube account added)
+    onCookiesUpdated: (callback: (data: { platform: string }) => void) => {
+        const handler = (_: any, data: any) => callback(data);
+        ipcRenderer.on('cookies-updated', handler);
+        (window as any)._cookiesUpdatedHandler = handler;
+    },
+    offCookiesUpdated: () => {
+        const handler = (window as any)._cookiesUpdatedHandler;
+        if (handler) {
+            ipcRenderer.removeListener('cookies-updated', handler);
         }
     },
 });

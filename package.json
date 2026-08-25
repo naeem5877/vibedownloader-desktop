@@ -1,6 +1,6 @@
 {
   "name": "vibe-downloader",
-  "version": "1.7.1",
+  "version": "2.0.0",
   "description": "Premium Multi-Platform Downloader with Lossless Spotify & Hi-Res Audio support",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -34,6 +34,7 @@
     "adm-zip": "^0.6.0",
     "album-art": "^4.0.0",
     "axios": "^1.15.0",
+    "crx3": "^2.0.0",
     "dotenv": "^17.2.3",
     "electron-updater": "^6.6.2",
     "framer-motion": "^12.23.25",
@@ -89,6 +90,20 @@
         "to": "build",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "extension",
+        "to": "extension",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "native-host",
+        "to": "native-host",
+        "filter": [
+          "com.vibedownloader.host.exe"
         ]
       },
       {

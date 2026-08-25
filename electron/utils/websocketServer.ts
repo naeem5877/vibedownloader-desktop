@@ -2,6 +2,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { getMainWindow } from './windowManager';
 import { app } from 'electron';
 import path from 'path';
+import fs from 'fs';
+import { getCookiePath } from './paths';
 
 const PORT = 13579;
 let wss: WebSocketServer | null = null;
@@ -39,6 +41,12 @@ function sendUrlToRenderer(url: string, title: string, thumbnail: string) {
     });
 }
 
+function sendCookiesUpdatedToRenderer(platform: string) {
+    ensureWindowReady((mainWindow) => {
+        mainWindow?.webContents.send('cookies-updated', { platform });
+    });
+}
+
 function sendSpotifyToRenderer(searchQuery: string, title: string, artist: string, thumbnail: string) {
     ensureWindowReady((mainWindow) => {
         mainWindow?.webContents.send('external-download-spotify', { searchQuery, title, artist, thumbnail });
@@ -71,6 +79,28 @@ export function startWebSocketServer() {
                     console.log('Received Spotify search from extension:', message.searchQuery);
                     sendSpotifyToRenderer(message.searchQuery, message.title || '', message.artist || '', message.thumbnail || '');
                     ws.send(JSON.stringify({ type: 'ack', success: true }));
+                }
+
+                if (message.type === 'save-cookies' && message.platform) {
+                    // Extension popup hands us cookies (e.g. YouTube session)
+                    // extracted from the browser. Persist to the same file the
+                    // renderer's Settings UI uses, so yt-dlp picks it up.
+                    try {
+                        if (!message.content || !message.content.trim()) {
+                            ws.send(JSON.stringify({ type: 'ack', id: message.id, success: false, error: 'Empty cookie content' }));
+                        } else {
+                            const targetPath = getCookiePath(String(message.platform).toLowerCase());
+                            const dir = path.dirname(targetPath);
+                            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                            fs.writeFileSync(targetPath, String(message.content).trim(), 'utf-8');
+                            console.log(`Cookies saved to ${targetPath} for ${message.platform} (from extension)`);
+                            sendCookiesUpdatedToRenderer(String(message.platform).toLowerCase());
+                            ws.send(JSON.stringify({ type: 'ack', id: message.id, success: true }));
+                        }
+                    } catch (e: any) {
+                        console.error('Failed to save cookies from extension:', e);
+                        ws.send(JSON.stringify({ type: 'ack', id: message.id, success: false, error: e.message || String(e) }));
+                    }
                 }
 
                 if (message.type === 'extension-info' && message.extensionId) {

@@ -107,13 +107,6 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
     }
 
     // For albums & playlists, fetch the track list too
-    let tracks: any[] = [];
-    try {
-        tracks = await module.getTracks(url);
-    } catch (e) {
-        console.warn("[Spotify] Failed to fetch track list, returning base metadata only.");
-    }
-
     let coverArt = data.coverArt?.sources?.sort((a: any, b: any) => (b.height || 0) - (a.height || 0))?.[0]?.url || '';
     const uploader = data.subtitle || data.authors?.map((a: any) => a.name).join(', ') || 'Spotify';
 
@@ -126,7 +119,21 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
         } catch {}
     }
 
-    const entries = tracks.map((track: any) => {
+    // Track list comes from the scraper (embed page). Its JSON doesn't
+    // expose per-track artwork, so we resolve each track's OWN album art via
+    // Spotify's public oEmbed endpoint — no auth, works server-side. The
+    // playlist cover is used as the fallback for any track that fails.
+    let entries: any[] = [];
+    let tracks: any[] = [];
+    try {
+        tracks = await module.getTracks(url);
+    } catch (e) {
+        console.warn("[Spotify] Failed to fetch track list, returning base metadata only.");
+    }
+
+    const artByUri = await attachTrackArt(tracks, coverArt);
+
+    entries = tracks.map((track: any) => {
         // Extract track ID from the uri: "spotify:track:XXXX"
         const trackId = track.uri?.split(':')[2] || '';
         const artistName = Array.isArray(track.artists)
@@ -136,7 +143,7 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
         return {
             id: trackId,
             title: track.name || track.title,
-            thumbnail: coverArt, // Playlist/album tracks share the cover
+            thumbnail: artByUri.get(track.uri) || coverArt,
             duration: Math.floor((track.duration || 0) / 1000),
             url: trackId ? `https://open.spotify.com/track/${trackId}` : '',
             artist: artistName,
@@ -157,6 +164,51 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
         playlist_count: entries.length,
         entries
     };
+}
+
+/**
+ * Resolve per-track album art via Spotify's public oEmbed endpoint.
+ * Works server-side without any auth and is not affected by the bot
+ * checks that block the anonymous web-player token endpoints.
+ */
+let _trackArtCache = new Map<string, string>(); // trackId -> art url
+
+async function getTrackArt(trackId: string): Promise<string | null> {
+    if (_trackArtCache.has(trackId)) return _trackArtCache.get(trackId) || null;
+    try {
+        const axios = require('axios');
+        const res = await axios.get('https://open.spotify.com/oembed', {
+            params: { url: `https://open.spotify.com/track/${trackId}` },
+            timeout: 8000
+        });
+        const art = res.data?.thumbnail_url || null;
+        _trackArtCache.set(trackId, art || '');
+        return art;
+    } catch {
+        _trackArtCache.set(trackId, '');
+        return null;
+    }
+}
+
+/**
+ * Attach per-track album art to the scraper's track list. Runs the oEmbed
+ * lookups with bounded concurrency so a 50-track playlist resolves in a few
+ * seconds instead of serially.
+ */
+async function attachTrackArt(tracks: any[], fallbackCover: string): Promise<Map<string, string>> {
+    const artByUri = new Map<string, string>();
+    let index = 0;
+    const worker = async () => {
+        while (index < tracks.length) {
+            const track = tracks[index++];
+            const trackId = track.uri?.split(':')[2];
+            if (!trackId) continue;
+            const art = await getTrackArt(trackId);
+            if (art) artByUri.set(track.uri, art);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, tracks.length) }, worker));
+    return artByUri;
 }
 
 /**

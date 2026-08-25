@@ -3,89 +3,335 @@
 <head>
     <meta charset="utf-8">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            width: 300px;
-            padding: 20px;
-            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
-            background: #0a0a0b;
-            color: #e0e0e0;
+        :root {
+            --bg: #0a0a0a;
+            --card: #131313;
+            --line: #232323;
+            --red: #ff1a1a;
+            --ink: #ffffff;
+            --dim: #8b8b8b;
+            --dim2: #5c5c5c;
+            --ok: #2ecc71;
         }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            width: 320px;
+            font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+        }
+
+        .frame { padding: 16px; }
+
         .header {
             display: flex;
             align-items: center;
             gap: 10px;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
-        .header img { width: 32px; height: 32px; }
-        .header h1 { font-size: 16px; font-weight: 600; color: #fff; }
-        .status {
+        .mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: var(--red);
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 10px 12px;
-            border-radius: 8px;
-            font-size: 13px;
-            margin-bottom: 12px;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 0 14px rgba(255,26,26,0.35);
         }
-        .status.connected {
-            background: #0d2818;
-            border: 1px solid #1b4332;
-            color: #95d5b2;
+        .header-text h1 {
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            color: #fff;
         }
-        .status.disconnected {
-            background: #2d0000;
-            border: 1px solid #660000;
-            color: #ff6b6b;
+        .header-text .sub {
+            font-size: 10.5px;
+            color: var(--dim);
+            margin-top: 1px;
         }
-        .status-dot {
+
+        .login-badge {
+            display: none;
+            align-items: center;
+            gap: 7px;
+            padding: 9px 13px;
+            border-radius: 12px;
+            border: 1px solid rgba(46,204,113,0.25);
+            background: rgba(46,204,113,0.06);
+            margin-bottom: 10px;
+        }
+        .login-badge.visible { display: flex; }
+        .login-badge-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
+            background: var(--ok);
+            box-shadow: 0 0 8px rgba(46,204,113,0.7);
             flex-shrink: 0;
         }
-        .connected .status-dot { background: #40c057; }
-        .disconnected .status-dot { background: #ff4444; }
-        .info {
+        .login-badge-text {
             font-size: 12px;
-            color: #888;
+            font-weight: 600;
+            color: var(--ok);
+        }
+
+        .account {
+            display: none;
+            margin-bottom: 10px;
+            padding: 14px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            background: var(--card);
+        }
+        .account.visible { display: block; }
+
+        .account-title {
+            font-size: 12.5px;
+            font-weight: 800;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .account-desc {
+            font-size: 11.5px;
+            color: var(--dim);
             line-height: 1.5;
+            margin-bottom: 12px;
         }
-        .info strong { color: #aaa; }
-        .footer {
-            margin-top: 16px;
-            padding-top: 12px;
-            border-top: 1px solid #222;
-            font-size: 11px;
-            color: #555;
+
+        .account-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 11px;
+            border: none;
+            border-radius: 10px;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: #fff;
+            background: var(--red);
+            cursor: pointer;
+            transition: background 0.15s, transform 0.1s;
+        }
+        .account-btn:hover { background: #ff3333; }
+        .account-btn:active { transform: scale(0.98); }
+        .account-btn:disabled { opacity: 0.5; cursor: default; }
+        .account-btn .spinner {
+            display: none;
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        .account-btn.loading .spinner { display: block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .account-status {
+            margin-top: 9px;
+            font-size: 11.5px;
+            line-height: 1.4;
+            min-height: 14px;
+            font-weight: 600;
+        }
+        .account-status.ok { color: var(--ok); }
+        .account-status.err { color: #ff6b6b; }
+
+        .info-label {
+            font-size: 10px;
+            font-weight: 800;
+            color: var(--dim2);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
             text-align: center;
+            margin: 14px 0 10px;
         }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            padding: 11px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: var(--card);
+            margin-bottom: 8px;
+        }
+        .step:last-child { margin-bottom: 0; }
+
+        .step-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            background: #1c1c1c;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .step-icon.i-link { color: #6ea8ff; }
+        .step-icon.i-download { color: var(--ok); }
+        .step-icon.i-open { color: var(--red); }
+
+        .step-text { flex: 1; min-width: 0; }
+        .step-text strong {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .step-text span {
+            display: block;
+            font-size: 10.5px;
+            color: var(--dim);
+            margin-top: 1px;
+        }
+
+        .step-num {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #1c1c1c;
+            color: var(--dim);
+            font-size: 9.5px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .footer {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10px;
+            color: var(--dim2);
+        }
+        .footer .links { display: flex; align-items: center; gap: 10px; }
+        .footer .links a {
+            color: var(--dim);
+            text-decoration: none;
+            font-weight: 700;
+        }
+        .footer .links a:hover { color: #fff; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#e0e0e0" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-        </svg>
-        <h1>VibeDownloader</h1>
-    </div>
+    <div class="frame">
+        <div class="header">
+            <div class="mark">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+            </div>
+            <div class="header-text">
+                <h1>VibeDownloader</h1>
+                <div class="sub">Download from YouTube</div>
+            </div>
+        </div>
 
-    <div id="status" class="status disconnected">
-        <span class="status-dot"></span>
-        <span id="status-text">Checking connection...</span>
-    </div>
+        <div id="login-badge" class="login-badge">
+            <span class="login-badge-dot"></span>
+            <span id="login-badge-text" class="login-badge-text">Logged in to YouTube</span>
+        </div>
 
-    <div class="info">
-        <strong>How to use:</strong><br>
-        1. Open any YouTube video<br>
-        2. Click the <strong>"Download"</strong> button below the video<br>
-        3. VibeDownloader will open and start fetching
-    </div>
+        <div class="account" id="account-section">
+            <div class="account-title" id="account-title">YouTube account</div>
+            <div class="account-desc" id="account-desc">
+                Sign in to your YouTube session so VibeDownloader can download age-restricted and members-only videos.
+            </div>
+            <button id="add-account-btn" class="account-btn" type="button">
+                <span class="spinner"></span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span id="account-btn-label">Add account to VibeDownloader</span>
+            </button>
+            <div id="account-status" class="account-status"></div>
+        </div>
 
-    <div class="footer">
-        VibeDownloader Browser Extension v1.0
+        <div class="info-label">How to download</div>
+
+        <div class="step">
+            <div class="step-icon i-link">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+            </div>
+            <div class="step-text">
+                <strong>Install the app</strong>
+                <span>Download & open VibeDownloader once</span>
+            </div>
+            <span class="step-num">1</span>
+        </div>
+
+        <div class="step">
+            <div class="step-icon i-link" style="color:#a855f7">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="2" y1="12" x2="22" y2="12"/>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                </svg>
+            </div>
+            <div class="step-text">
+                <strong>Install this extension</strong>
+                <span>Add VibeDownloader to your browser</span>
+            </div>
+            <span class="step-num">2</span>
+        </div>
+
+        <div class="step">
+            <div class="step-icon i-download">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+            </div>
+            <div class="step-text">
+                <strong>Open a video</strong>
+                <span>Go to any YouTube, Instagram, TikTok video</span>
+            </div>
+            <span class="step-num">3</span>
+        </div>
+
+        <div class="step">
+            <div class="step-icon i-download">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+            </div>
+            <div class="step-text">
+                <strong>Click Download</strong>
+                <span>Use the button added by the extension</span>
+            </div>
+            <span class="step-num">4</span>
+        </div>
+
+        <div class="footer">
+            <span>VibeDownloader · Open source</span>
+            <span class="links">
+                <a class="js-open-tab" href="https://github.com/naeem5877/vibedownloader-desktop">Desktop</a>
+                <a class="js-open-tab" href="https://github.com/naeem5877/vibedownloader-android">Android</a>
+            </span>
+        </div>
     </div>
 
     <script src="popup.js"></script>

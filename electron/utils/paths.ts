@@ -8,6 +8,7 @@ export const settingsPath = () => path.join(app.getPath('userData'), 'settings.j
 export interface AppSettings {
     downloadBasePath: string;
     minimizeToTray: boolean;
+    onboardingCompleted?: boolean;
 }
 
 export function loadSettings(): AppSettings {
@@ -17,6 +18,7 @@ export function loadSettings(): AppSettings {
             return {
                 downloadBasePath: settings.downloadBasePath || app.getPath('downloads'),
                 minimizeToTray: settings.minimizeToTray ?? true, // Default to true for better UX
+                onboardingCompleted: settings.onboardingCompleted ?? false,
             };
         }
     } catch (e) {
@@ -25,6 +27,7 @@ export function loadSettings(): AppSettings {
     return {
         downloadBasePath: app.getPath('downloads'),
         minimizeToTray: true,
+        onboardingCompleted: false,
     };
 }
 
@@ -73,8 +76,7 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
         'spotify': 'Spotify',
         'x': 'X (Twitter)',
         'pinterest': 'Pinterest',
-        'soundcloud': 'SoundCloud',
-        'snapchat': 'Snapchat'
+        'soundcloud': 'SoundCloud'
     };
 
     const platformFolder = platformFolders[platform.toLowerCase()] || platform;

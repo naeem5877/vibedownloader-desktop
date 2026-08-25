@@ -6,19 +6,30 @@
 //
 // Shorts:      reel-action-bar-view-model > button-view-model
 //              — find visible bar, insert circular button after Share
+//
+// Navigation: yt-navigate-finish only, NO MutationObservers (they cause loops).
 
 (function() {
     'use strict';
 
-    const BTN_ID = 'vibedownloader-btn';
+    const BTN_ID           = 'vibedownloader-btn';
+    const SHORTS_CLASS     = 'vibedownloader-shorts-item';
     const SHORTS_BTN_CLASS = 'vibedownloader-shorts-btn';
+
+    let currentUrl       = window.location.href;
+    let _watchInjecting  = false;
+    let _shortsInjecting = false;
 
     // ─── Watch page ──────────────────────────────────────────────
 
     function getWatchVideoData() {
-        const url = window.location.href;
-        const titleEl = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, h1.title yt-formatted-string');
-        const title = titleEl ? titleEl.textContent.trim() : document.title.replace(' - YouTube', '').trim();
+        const url     = window.location.href;
+        const titleEl = document.querySelector(
+            'h1.ytd-watch-metadata yt-formatted-string, h1.title yt-formatted-string'
+        );
+        const title = titleEl
+            ? titleEl.textContent.trim()
+            : document.title.replace(' - YouTube', '').trim();
         return { url, title, thumbnail: VibeExt.getOGThumbnail() };
     }
 
@@ -27,26 +38,44 @@
     }
 
     function injectWatchButton() {
-        const container = getWatchActionsContainer();
-        if (!container || container.children.length === 0) return;
-        if (container.querySelector(`#${BTN_ID}`)) return;
+        if (_watchInjecting) return;
+        if (document.getElementById(BTN_ID)) return;
 
-        const btn = document.createElement('button');
-        btn.id = BTN_ID;
-        btn.className = 'vibedownloader-btn';
-        btn.appendChild(VibeExt.createSvgIcon());
-        const span = document.createElement('span');
-        span.textContent = 'Download';
-        btn.appendChild(span);
-        btn.title = 'Download with VibeDownloader';
+        _watchInjecting = true;
+        const targetUrl = window.location.href;
 
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            VibeExt.sendDownload(...Object.values(getWatchVideoData()), btn);
-        });
+        function tryInject(attemptsLeft) {
+            if (window.location.href !== targetUrl) { _watchInjecting = false; return; }
 
-        container.appendChild(btn);
+            const container = getWatchActionsContainer();
+            if (!container || container.children.length === 0) {
+                if (attemptsLeft > 0) setTimeout(() => tryInject(attemptsLeft - 1), 200);
+                else _watchInjecting = false;
+                return;
+            }
+
+            if (document.getElementById(BTN_ID)) { _watchInjecting = false; return; }
+
+            const btn = document.createElement('button');
+            btn.id        = BTN_ID;
+            btn.className = 'vibedownloader-btn';
+            btn.title     = 'Download with VibeDownloader';
+            btn.appendChild(VibeExt.createSvgIcon());
+            const span       = document.createElement('span');
+            span.textContent = 'Download';
+            btn.appendChild(span);
+
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                VibeExt.sendDownload(...Object.values(getWatchVideoData()), btn);
+            });
+
+            container.appendChild(btn);
+            _watchInjecting = false;
+        }
+
+        tryInject(20);
     }
 
     // ─── Shorts ──────────────────────────────────────────────────
@@ -67,46 +96,67 @@
     }
 
     function getShortsVideoData() {
-        const url = window.location.href;
+        const url   = window.location.href;
         const title = document.title.replace(' - YouTube', '').trim();
         return { url, title, thumbnail: VibeExt.getOGThumbnail() };
     }
 
     function injectShortsButton() {
-        const actionBar = getActiveActionBar();
-        if (!actionBar) return;
+        if (_shortsInjecting) return;
 
-        const shareItem = findButtonViewModelByAriaLabel(actionBar, 'Share');
-        if (!shareItem) return;
+        const existing = document.querySelector(`.${SHORTS_CLASS}`);
+        if (existing) return;
 
-        if (shareItem.nextElementSibling?.classList.contains('vibedownloader-shorts-item')) return;
+        _shortsInjecting = true;
+        const targetUrl = window.location.href;
 
-        document.querySelectorAll('.vibedownloader-shorts-item').forEach(el => el.remove());
+        function tryInject(attemptsLeft) {
+            if (window.location.href !== targetUrl) { _shortsInjecting = false; return; }
 
-        const item = document.createElement('div');
-        item.className = 'vibedownloader-shorts-item';
+            const actionBar = getActiveActionBar();
+            if (!actionBar) { retry(attemptsLeft); return; }
 
-        const btn = document.createElement('button');
-        btn.className = SHORTS_BTN_CLASS;
-        btn.title = 'Download with VibeDownloader';
-        btn.appendChild(VibeExt.createSvgIcon(24));
+            const shareItem = findButtonViewModelByAriaLabel(actionBar, 'Share');
+            if (!shareItem) { retry(attemptsLeft); return; }
 
-        const label = document.createElement('span');
-        label.className = 'vibedownloader-shorts-label';
-        label.textContent = 'Get';
+            if (shareItem.nextElementSibling?.classList.contains(SHORTS_CLASS)) {
+                _shortsInjecting = false;
+                return;
+            }
 
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            VibeExt.sendDownload(...Object.values(getShortsVideoData()), btn);
-        });
+            const item = document.createElement('div');
+            item.className = SHORTS_CLASS;
 
-        item.appendChild(btn);
-        item.appendChild(label);
-        shareItem.insertAdjacentElement('afterend', item);
+            const btn = document.createElement('button');
+            btn.className = SHORTS_BTN_CLASS;
+            btn.title     = 'Download with VibeDownloader';
+            btn.appendChild(VibeExt.createSvgIcon(24));
+
+            const label       = document.createElement('span');
+            label.className   = 'vibedownloader-shorts-label';
+            label.textContent = 'Get';
+
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                VibeExt.sendDownload(...Object.values(getShortsVideoData()), btn);
+            });
+
+            item.appendChild(btn);
+            item.appendChild(label);
+            shareItem.insertAdjacentElement('afterend', item);
+            _shortsInjecting = false;
+        }
+
+        function retry(attemptsLeft) {
+            if (attemptsLeft > 0) setTimeout(() => tryInject(attemptsLeft - 1), 200);
+            else _shortsInjecting = false;
+        }
+
+        tryInject(20);
     }
 
-    // ─── Router ──────────────────────────────────────────────────
+    // ─── Route & navigation ───────────────────────────────────────
 
     function route() {
         if (window.location.pathname === '/watch') {
@@ -116,8 +166,31 @@
         }
     }
 
-    const observer = VibeExt.createThrottledObserver(route);
-    observer.observe(document.body, { childList: true, subtree: true });
+    function onNavigate() {
+        _watchInjecting  = false;
+        _shortsInjecting = false;
+        currentUrl       = window.location.href;
+        route();
+    }
 
-    route();
+    // yt-navigate-finish: YouTube's SPA event, fires on every navigation AND
+    // same-page data refreshes.  We respond IMMEDIATELY (no debounce) so the
+    // gap between Polymer removing content and us re-injecting is < 1 frame.
+    window.addEventListener('yt-navigate-finish', () => {
+        if (window.location.href !== currentUrl) {
+            onNavigate();
+        } else {
+            // Same URL: data refresh or Polymer re-render — re-check idempotently.
+            _watchInjecting  = false;
+            _shortsInjecting = false;
+            route();
+        }
+    });
+
+    // Initial page load.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onNavigate);
+    } else {
+        onNavigate();
+    }
 })();

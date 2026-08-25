@@ -4,95 +4,8 @@ import path from 'path';
 import { getYtDlpWrap } from '../utils/binaries';
 import { getCookiePath } from '../utils/paths';
 import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
+import { fetchYouTubeMusicAlbumArt } from '../utils/youtubeMusic';
 import { igApi } from 'insta-fetcher';
-
-async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string | null> {
-    try {
-        console.log(`[YT Music] Fetching album art for ${videoId} via API...`);
-        // Method 1: Internal Next API
-        const endpoint = "https://music.youtube.com/youtubei/v1/next?prettyPrint=false";
-        const payload = {
-            "videoId": videoId,
-            "context": {
-                "client": {
-                    "clientName": "WEB_REMIX",
-                    "clientVersion": "1.20240101.01.00",
-                    "hl": "en",
-                    "gl": "US"
-                }
-            }
-        };
-        const headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Origin": "https://music.youtube.com",
-            "Referer": `https://music.youtube.com/watch?v=${videoId}`,
-            "X-YouTube-Client-Name": "67",
-            "X-YouTube-Client-Version": "1.20240101.01.00"
-        };
-
-        const resp = await fetch(endpoint, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: headers as any
-        });
-
-        if (resp.ok) {
-            const raw = await resp.text();
-            const lh3Urls = raw.match(/https:\/\/lh3\.googleusercontent\.com\/[^"\\]+/g);
-            if (lh3Urls && lh3Urls.length > 0) {
-                let bestUrl = lh3Urls[0];
-                let maxSize = 0;
-                for (const u of lh3Urls) {
-                    const match = u.match(/=w(\d+)/);
-                    const size = match ? parseInt(match[1], 10) : 0;
-                    if (size > maxSize) {
-                        maxSize = size;
-                        bestUrl = u;
-                    }
-                }
-                const finalUrl = bestUrl.replace(/=w\d+[^"]*$/, '=w2000-h2000-l90-rj');
-                return finalUrl;
-            }
-        }
-    } catch (e) {
-        console.error('[YT Music] API method failed:', e);
-    }
-
-    // Method 2: Page Scrape fallback
-    try {
-        console.log(`[YT Music] Trying page scrape for ${videoId}...`);
-        const resp = await fetch(`https://music.youtube.com/watch?v=${videoId}`, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Cookie": "CONSENT=YES+; SOCS=CAI"
-            }
-        });
-        if (resp.ok) {
-            const raw = await resp.text();
-            const lh3Urls = raw.match(/https:\/\/lh3\.googleusercontent\.com\/[^"\\]+/g);
-            if (lh3Urls && lh3Urls.length > 0) {
-                let bestUrl = lh3Urls[0];
-                let maxSize = 0;
-                for (const u of lh3Urls) {
-                    const match = u.match(/=w(\d+)/);
-                    const size = match ? parseInt(match[1], 10) : 0;
-                    if (size > maxSize) {
-                        maxSize = size;
-                        bestUrl = u;
-                    }
-                }
-                const finalUrl = bestUrl.replace(/=w\d+[^"]*$/, '=w2000-h2000-l90-rj');
-                return finalUrl;
-            }
-        }
-    } catch (e) {
-        console.error('[YT Music] Page scrape failed:', e);
-    }
-
-    return null;
-}
 
 export function registerInfoHandlers() {
     ipcMain.handle('get-video-info', async (event: any, url: any) => {
@@ -128,7 +41,6 @@ export function registerInfoHandlers() {
             const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com');
             const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
             const isTiktok = url.includes('tiktok.com');
-            const isSnapchat = url.includes('snapchat.com');
 
             if (isInstagram) {
                 cookiePath = getCookiePath('instagram');
@@ -138,8 +50,6 @@ export function registerInfoHandlers() {
                 cookiePath = getCookiePath('youtube');
             } else if (isTiktok) {
                 cookiePath = getCookiePath('tiktok');
-            } else if (isSnapchat) {
-                cookiePath = getCookiePath('snapchat');
             }
 
             // Insta-fetcher for Instagram Stories
@@ -309,7 +219,7 @@ export function registerInfoHandlers() {
             // STRICT SEPARATION: Only use cookies for the specific platform
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
-                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : isSnapchat ? 'Snapchat' : 'Platform';
+                const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : 'Platform';
                 console.log(`Using custom cookies for ${platformName} (Path: ${cookiePath})`);
             } else if (!cookiePath && fs.existsSync(path.join(app.getPath('userData'), 'cookies.txt'))) {
                 // Only fall back to legacy cookies.txt if strict platform cookies are NOT expected

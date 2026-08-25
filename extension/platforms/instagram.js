@@ -93,8 +93,7 @@
     function injectOne(shareSvg) {
         const row = findActionRow(shareSvg);
         if (row) {
-            if (row.el.hasAttribute(DONE_ATTR)) return;
-            row.el.setAttribute(DONE_ATTR, 'true');
+            if (row.el.querySelector(`.${IG_BTN_CLASS}`)) return;
             if (!hasVideo(row.el)) return;
             row.el.appendChild(buildButton(row.el, 'inline'));
             return;
@@ -102,18 +101,15 @@
 
         const found = findShareSaveContainer(shareSvg);
         if (found) {
-            if (found.el.hasAttribute(DONE_ATTR)) return;
-            found.el.setAttribute(DONE_ATTR, 'true');
+            if (found.el.querySelector(`.${IG_BTN_CLASS}`)) return;
             if (!hasVideo(found.el)) return;
 
             if (found.isColumn) {
-                // vertical rail — sit after Save, stacked, centered
                 const wrapper = document.createElement('div');
                 wrapper.className = found.saveWrapper.className;
                 wrapper.appendChild(buildButton(found.el, 'stacked'));
                 found.saveWrapper.insertAdjacentElement('afterend', wrapper);
             } else {
-                // horizontal row (post page) — sit right after Share
                 const wrapper = document.createElement('div');
                 wrapper.className = found.shareWrapper.className;
                 wrapper.appendChild(buildButton(found.el, 'inline'));

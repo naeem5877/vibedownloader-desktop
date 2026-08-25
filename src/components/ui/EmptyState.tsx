@@ -9,8 +9,7 @@ import {
     Instagram,
     Facebook,
     Twitter,
-    Pin,
-    Ghost
+    Pin
 } from 'lucide-react';
 import { FaSpotify, FaTiktok, FaSoundcloud } from 'react-icons/fa6';
 
@@ -81,13 +80,6 @@ const EmptyState: React.FC<EmptyStateProps> = memo(({ currentPlatform, hasCookie
             features: ['📌 Pins', '🎬 Videos', '🖼️ HD', '🎨 Save'],
             icon: <Pin className="w-12 h-12" />,
             color: '#E60023'
-        },
-        snapchat: {
-            title: 'Snapchat Downloader',
-            subtitle: 'Spotlights & Stories',
-            features: ['👻 Stories', '🎬 Spotlights', '🖼️ Photos', '📂 Media'],
-            icon: <Ghost className="w-12 h-12" />,
-            color: '#FFFC00'
         }
     }), []);
 

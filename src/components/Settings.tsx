@@ -35,10 +35,8 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
     const handleToggleTray = async () => {
         const newValue = !minimizeToTray;
         setMinimizeToTray(newValue);
-        await window.electron.saveSettings?.({
-            downloadBasePath: downloadPath,
-            minimizeToTray: newValue
-        });
+        const current = await window.electron.getSettings?.();
+        await window.electron.saveSettings?.({ ...(current || {}), minimizeToTray: newValue });
     };
 
     const handleUpdateYtdlp = async () => {

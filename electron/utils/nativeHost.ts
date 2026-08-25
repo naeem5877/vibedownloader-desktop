@@ -2,6 +2,8 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { execFileSync } from 'child_process';
+import { getNativeOrigins, FIREFOX_ADDON_ID } from './extensionInstaller';
 
 const HOST_NAME = 'com.vibedownloader.host';
 
@@ -33,59 +35,25 @@ function getEdgeNativeMessagingDir(): string | null {
     }
 }
 
-function findHostScript(): string | null {
-    const platform = os.platform();
-    const ext = platform === 'win32' ? '.bat' : '.sh';
-
-    // When packaged, the script is in resources
-    const packagedPath = app.isPackaged
-        ? path.join(process.resourcesPath, 'native-host', `com.vibedownloader.host${ext}`)
-        : path.join(__dirname, '..', 'scripts', 'native-host', `com.vibedownloader.host${ext}`);
-
-    if (fs.existsSync(packagedPath)) return packagedPath;
-
-    // Try to find the app executable path for the bat script
-    const appPath = app.isPackaged ? process.execPath : process.argv[0];
-
-    // Generate inline script pointing to the actual app
-    return null;
-}
-
-function generateBatContent(): string {
-    const appPath = app.isPackaged ? process.execPath : path.join(__dirname, '..', 'node_modules', '.bin', 'electron');
-    return `@echo off
-start "" "${appPath}" %*
-`;
+// Where the bundled Windows host exe lives inside the app.
+function getSourceHostExe(): string {
+    if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'native-host', `${HOST_NAME}.exe`);
+    }
+    return path.join(app.getAppPath(), 'native-host', `${HOST_NAME}.exe`);
 }
 
 function generateShContent(): string {
-    const appPath = app.isPackaged ? process.execPath : path.join(__dirname, '..', 'node_modules', '.bin', 'electron');
+    const appPath = app.isPackaged
+        ? `"${process.execPath}"`
+        : `"${process.execPath}" "${app.getAppPath()}"`;
     return `#!/bin/bash
-exec "${appPath}" "$@"
+${appPath} "$@" &
+while read -r line; do :; done
 `;
 }
 
-function writeManifest(dir: string, scriptPath: string) {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-
-    const manifest = {
-        name: HOST_NAME,
-        description: 'VibeDownloader Native Messaging Host',
-        path: scriptPath.replace(/\\/g, '\\\\'),
-        type: 'stdio' as const,
-        allowed_origins: [
-            'chrome-extension://PLACEHOLDER_EXT_ID/'
-        ]
-    };
-
-    const manifestPath = path.join(dir, `${HOST_NAME}.json`);
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    console.log('Registered native host:', manifestPath);
-}
-
-function writeScript(dir: string, content: string, filename: string): string {
+function writeShScript(dir: string, content: string, filename: string): string {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -94,37 +62,146 @@ function writeScript(dir: string, content: string, filename: string): string {
     return scriptPath;
 }
 
+function writeManifest(manifestPath: string, manifest: Record<string, unknown>) {
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    console.log('Registered native host:', manifestPath);
+}
+
+// Windows host: the bridge is a small .exe that (1) launches the desktop app
+// detached via ShellExecute and (2) holds the native-messaging stdin pipe open
+// so the browser sees the host as alive. The app runs in its own process tree,
+// so Chrome killing the bridge (it does, 2s after the port closes) never
+// touches an in-progress download.
+function setupWindowsHost(hostDir: string): string {
+    fs.mkdirSync(hostDir, { recursive: true });
+
+    const hostExe = path.join(hostDir, `${HOST_NAME}.exe`);
+    const sourceExe = getSourceHostExe();
+    if (fs.existsSync(sourceExe)) {
+        fs.copyFileSync(sourceExe, hostExe);
+    } else if (!fs.existsSync(hostExe)) {
+        throw new Error(`Native host exe not found at ${sourceExe}`);
+    }
+
+    // Config tells the bridge what to launch: line 1 = app exe, line 2 = args.
+    const appExe = process.execPath;
+    const appArgs = app.isPackaged ? '' : `"${app.getAppPath()}"`;
+    fs.writeFileSync(
+        path.join(hostDir, `${HOST_NAME}.config`),
+        `${appExe}\r\n${appArgs}\r\n`,
+        { encoding: 'utf8' }
+    );
+
+    // Remove the old .bat host so nothing points at the fragile cmd path.
+    const oldBat = path.join(hostDir, `${HOST_NAME}.bat`);
+    if (fs.existsSync(oldBat)) fs.rmSync(oldBat, { force: true });
+
+    return hostExe;
+}
+
+// Firefox reads native-messaging host manifests from the registry on Windows:
+// HKCU\Software\Mozilla\NativeMessagingHosts\<name> -> default value = path to
+// the JSON manifest. The manifest uses `allowed_extensions` (add-on IDs) rather
+// than `allowed_origins`.
+function registerFirefoxNativeHost(hostDir: string, hostPath: string) {
+    const home = os.homedir();
+    const isWin = os.platform() === 'win32';
+    if (!isWin) return;
+
+    const manifestDir = path.join(home, 'AppData', 'Roaming', 'Mozilla', 'NativeMessagingHosts');
+    if (!fs.existsSync(manifestDir)) fs.mkdirSync(manifestDir, { recursive: true });
+
+    const manifest = {
+        name: HOST_NAME,
+        description: 'VibeDownloader Native Messaging Host',
+        path: hostPath,
+        type: 'stdio',
+        allowed_extensions: [FIREFOX_ADDON_ID],
+    };
+
+    const manifestPath = path.join(manifestDir, `${HOST_NAME}.json`);
+    writeManifest(manifestPath, manifest);
+
+    try {
+        execFileSync('reg', ['add', `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`, '/f', '/t', 'REG_SZ', '/ve', '/d', manifestPath]);
+    } catch (e) {
+        console.error('Failed to register Firefox native host in registry:', e);
+    }
+}
+
+// Windows URL protocol fallback: the extension can launch the app with a
+// vibedownloader:// link even if native messaging is blocked/misconfigured in
+// the browser. `%1` is the full URL, which the app just ignores on boot.
+export function registerUrlProtocol() {
+    if (os.platform() !== 'win32') return;
+    const appExe = process.execPath;
+    try {
+        const base = 'HKCU\\Software\\Classes\\vibedownloader';
+        execFileSync('reg', ['add', base, '/f', '/ve', '/d', 'URL:vibedownloader Protocol']);
+        execFileSync('reg', ['add', base, '/f', '/v', 'URL Protocol', '/t', 'REG_SZ', '/d', '']);
+        execFileSync('reg', ['add', `${base}\\DefaultIcon`, '/f', '/ve', '/d', `"${appExe}",0`]);
+        execFileSync('reg', ['add', `${base}\\shell\\open\\command`, '/f', '/d', `"${appExe}" "%1"`]);
+        console.log('Registered vibedownloader:// URL protocol:', appExe);
+    } catch (e) {
+        console.error('Failed to register URL protocol:', e);
+    }
+}
+
 export function registerNativeHost() {
     try {
-        const chromeDir = getChromeNativeMessagingDir();
-        const edgeDir = getEdgeNativeMessagingDir();
         const isWin = os.platform() === 'win32';
-        const ext = isWin ? '.bat' : '.sh';
-        const scriptFilename = `${HOST_NAME}${ext}`;
-
-        // Check if host script already exists from a previous install
-        const existingScript = findHostScript();
-
-        if (existingScript) {
-            // Register with existing script
-            if (chromeDir) writeManifest(chromeDir, existingScript);
-            if (edgeDir) writeManifest(edgeDir, existingScript);
-            return;
-        }
-
-        // Generate and register the host script in a stable location
         const hostDir = path.join(app.getPath('userData'), 'native-host');
 
-        if (!fs.existsSync(hostDir)) {
-            fs.mkdirSync(hostDir, { recursive: true });
+        if (isWin) {
+            const hostExe = setupWindowsHost(hostDir);
+
+            const manifest = {
+                name: HOST_NAME,
+                description: 'VibeDownloader Native Messaging Host',
+                path: hostExe,
+                type: 'stdio' as const,
+                allowed_origins: getNativeOrigins()
+            };
+            const manifestPath = path.join(hostDir, `${HOST_NAME}.json`);
+            writeManifest(manifestPath, manifest);
+
+            // Chromium-family browsers on Windows discover native hosts ONLY via
+            // the registry (a NativeMessagingHosts directory is not read).
+            const registries: { base: string; name: string }[] = [
+                { base: 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts', name: 'Chrome' },
+                { base: 'HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts', name: 'Edge' },
+                { base: 'HKCU\\Software\\BraveSoftware\\Brave\\NativeMessagingHosts', name: 'Brave' },
+                { base: 'HKCU\\Software\\Vivaldi\\NativeMessagingHosts', name: 'Vivaldi' },
+                { base: 'HKCU\\Software\\Chromium\\NativeMessagingHosts', name: 'Chromium' },
+                { base: 'HKLM\\Software\\Google\\Chrome\\NativeMessagingHosts', name: 'Chrome (all users)' },
+                { base: 'HKLM\\Software\\Microsoft\\Edge\\NativeMessagingHosts', name: 'Edge (all users)' },
+                { base: 'HKLM\\Software\\BraveSoftware\\Brave\\NativeMessagingHosts', name: 'Brave (all users)' },
+            ];
+            for (const { base, name } of registries) {
+                try {
+                    execFileSync('reg', ['add', `${base}\\${HOST_NAME}`, '/f', '/t', 'REG_SZ', '/ve', '/d', manifestPath]);
+                    console.log(`Registered native host for ${name}: ${base}\\${HOST_NAME}`);
+                } catch (e) {
+                    // HKLM needs admin — HKCU (which browsers check first) is enough.
+                    console.error(`Failed to register native host for ${name}:`, e);
+                }
+            }
+            registerFirefoxNativeHost(hostDir, hostExe);
+        } else {
+            // macOS / Linux: hosts are discovered from these directories.
+            const scriptPath = writeShScript(hostDir, generateShContent(), `${HOST_NAME}.sh`);
+            const chromeDir = getChromeNativeMessagingDir();
+            const edgeDir = getEdgeNativeMessagingDir();
+            const manifest = {
+                name: HOST_NAME,
+                description: 'VibeDownloader Native Messaging Host',
+                path: scriptPath,
+                type: 'stdio' as const,
+                allowed_origins: getNativeOrigins()
+            };
+            if (chromeDir) writeManifest(path.join(chromeDir, `${HOST_NAME}.json`), manifest);
+            if (edgeDir) writeManifest(path.join(edgeDir, `${HOST_NAME}.json`), manifest);
         }
-
-        const scriptPath = isWin
-            ? writeScript(hostDir, generateBatContent(), scriptFilename)
-            : writeScript(hostDir, generateShContent(), scriptFilename);
-
-        if (chromeDir) writeManifest(chromeDir, scriptPath);
-        if (edgeDir) writeManifest(edgeDir, scriptPath);
 
     } catch (e) {
         console.error('Failed to register native messaging host:', e);
