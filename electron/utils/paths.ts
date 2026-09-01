@@ -64,7 +64,10 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
         'shorts': 'Shorts',
         'post': 'Posts',
         'track': 'Tracks',
-        'album': 'Albums'
+        'album': 'Albums',
+        'live': 'Live',
+        'vod': 'VODs',
+        'clip': 'Clips'
     };
 
     // Map platforms to folder names
@@ -76,7 +79,8 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
         'spotify': 'Spotify',
         'x': 'X (Twitter)',
         'pinterest': 'Pinterest',
-        'soundcloud': 'SoundCloud'
+        'soundcloud': 'SoundCloud',
+        'twitch': 'Twitch'
     };
 
     const platformFolder = platformFolders[platform.toLowerCase()] || platform;

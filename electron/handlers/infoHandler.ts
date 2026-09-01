@@ -210,10 +210,13 @@ export function registerInfoHandlers() {
             args.push('--user-agent', defaultUA);
 
             if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
-                // When using browser cookies, we must use the web client for age verification to work
-                args.push('--extractor-args', 'youtube:player_client=android_vr,web,tv,web_safari');
+                // tv_embedded returns the FULL DASH format list (up to 4K) AND
+                // handles age-gated videos. Other clients (web, tv, android_vr,
+                // web_safari) currently return a crippled response that only
+                // lists the combined 360p format.
+                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
             } else {
-                args.push('--extractor-args', 'youtube:player_client=android_vr,web,tv,web_safari');
+                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
             }
 
             // STRICT SEPARATION: Only use cookies for the specific platform
@@ -349,6 +352,7 @@ export function registerInfoHandlers() {
                 duration: raw.duration || 0,
                 description: raw.description?.slice(0, 300) || '',
                 formats: raw.formats || [],
+                isLive: !!raw.is_live,
                 webpage_url: raw.webpage_url || url,
                 contentType,
                 entries: sanitizedEntries,

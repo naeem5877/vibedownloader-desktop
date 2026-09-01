@@ -4,7 +4,8 @@ interface Window {
     electron: {
         getVideoInfo: (url: string) => Promise<any>;
         getSpotifyInfo: (url: string) => Promise<any>;
-        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string }) => Promise<any>;
+        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string; cutStart?: number; cutEnd?: number }) => Promise<any>;
+        cancelDownload: (jobId: string) => Promise<{ success: boolean; error?: string }>;
         downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string }) => Promise<any>;
         getProxyImage: (url: string) => Promise<string | null>;
 

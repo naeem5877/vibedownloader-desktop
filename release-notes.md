@@ -1,15 +1,20 @@
-## VibeDownloader v1.5.0 — The Reliability Update 🚀
+### 🧩 Browser Extension
+- **Download From the Page**: Overlaid one-click download buttons on YouTube, YouTube Music, Instagram, Facebook, TikTok, X (Twitter), Spotify, and SoundCloud.
+- **Native Messaging Bridge**: The extension connects to the desktop app over a secure local host and can auto-launch it.
+- **Simple Setup**: In-app extension center detects your browser, prepares the unpacked folder / CRX, and walks you through "Load unpacked" (Chrome, Edge, Brave, Vivaldi, Opera, Firefox).
 
-### 🎵 Enhanced Spotify Experience
-- **High-Reliability Metadata Scraper**: Replaced legacy scraping logic with a new, resilient engine that uses rotating User-Agents (Googlebot bypass) and multi-stage fallback.
-- **Improved Album Artwork**: Integrated the `album-art` library to ensure you always get high-quality cover art even when Spotify's CDNs are restricted.
-- **Fast-Fail Image Loading**: Implemented a strict 3-second timeout for artwork; no more "hanging" app while waiting for unresponsive image servers.
+### 🔴 Twitch Support
+- **Live Recording**: Paste a live Twitch channel, hit **Record live stream**, and it saves the broadcast until you press **Stop** — automatically finalized into a playable MP4.
+- **Live Detection**: A red LIVE badge shows when a stream is actually broadcasting, with a dedicated record button.
+- **VODs & Clips**: Twitch VODs (`/videos/...`) and clips (`/clip/...`) download like normal videos with full quality + Cut support.
+- **Smart Organization**: Downloads are sorted into `Twitch/Live`, `Twitch/VODs`, and `Twitch/Clips`.
 
-### 🎧 Lossless Audio (FLAC) Improvements
-- **Rate-Limit Bypass**: Added an automatic Deezer-based search fallback for lossless checks. If SongLink rate-limits your IP, the app now uses ISRC codes from Deezer to find the track on Tidal/Qobuz.
-- **Stable Downloads**: Upgraded the background download pipeline to use Axios with robust retry logic, preventing "Connect Timeout" errors on slow connections.
+### ✂️ Cut & Download Modal
+- **Cut Timeline Precision**: A sleek waveform editor with a compact dual-range slider to trim any video or song before you save it.
+- **Clip Summary**: Live feedback on how long your clip is (in words), start/end range, and % saved.
+- **Clean Output**: The full-length source is automatically deleted after a successful cut — only your trimmed file stays.
 
-### 🛠️ Core Stability & Fixes
-- **TypeScript Foundation**: Completely refactored the IPC bridge and global window types for better stability and faster future updates.
-- **Binary Reliability**: Fixed critical build errors where Spotify utility functions were accidentally removed during refactoring.
-- **Performance Optimization**: Drastically reduced the time spent "finalizing" Spotify downloads by skipping stuck thumbnail fetches.
+### 🛠️ Engine & Fixes
+- **YouTube Quality Fix**: Resolved videos capping at 320p by switching the downloader client (`tv_embedded`) — full DASH quality up to 4K restored.
+- **Compact Slider**: Cut timeline re-designed to a slim, premium grid with a lighter waveform.
+- **Snapchat Removed**: App is now curated strictly to stable, supported platforms.

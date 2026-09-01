@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio
 } from 'lucide-react';
-import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaSnapchat, FaDiscord } from 'react-icons/fa6';
+import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
 import { Settings } from './Settings';
 import { TutorialModal } from './TutorialModal';
+import { CutTimeline } from './CutTimeline';
 import ShinyText from './ui/ShinyText';
 import EmptyState from './ui/EmptyState';
 
@@ -40,14 +41,15 @@ interface VideoMetadata {
     duration: number;
     formats: Format[];
     webpage_url: string;
-    contentType: 'video' | 'playlist' | 'story';
+    contentType: 'video' | 'playlist' | 'story' | 'live' | 'vod' | 'clip';
     entries?: PlaylistEntry[];
     playlist_count?: number;
+    isLive?: boolean;
     searchQuery?: string; // For Spotify single tracks
     album?: string;
 }
 
-type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud' | 'snapchat';
+type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud' | 'twitch';
 
 interface Platform {
     id: PlatformId;
@@ -64,7 +66,7 @@ const platforms: Platform[] = [
     { id: 'facebook', name: 'Facebook', icon: <FaFacebook size={22} />, color: '#1877F2', bgClass: 'bg-blue-600' },
     { id: 'spotify', name: 'Spotify', icon: <FaSpotify size={22} />, color: '#1DB954', bgClass: 'bg-green-500' },
     { id: 'x', name: 'X', icon: <FaXTwitter size={22} />, color: '#FFFFFF', bgClass: 'bg-white' },
-    { id: 'snapchat', name: 'Snapchat', icon: <FaSnapchat size={22} />, color: '#FFFC00', bgClass: 'bg-yellow-400' },
+    { id: 'twitch', name: 'Twitch', icon: <FaTwitch size={22} />, color: '#9146FF', bgClass: 'bg-purple-500' },
     { id: 'pinterest', name: 'Pinterest', icon: <FaPinterest size={22} />, color: '#E60023', bgClass: 'bg-red-700' },
     { id: 'soundcloud', name: 'SoundCloud', icon: <FaSoundcloud size={22} />, color: '#FF5500', bgClass: 'bg-orange-600' }
 ];
@@ -78,7 +80,7 @@ const PLATFORM_DOMAINS: Record<string, string[]> = {
     'x': ['twitter.com', 'x.com'],
     'pinterest': ['pinterest.com', 'pin.it'],
     'soundcloud': ['soundcloud.com'],
-    'snapchat': ['snapchat.com']
+    'twitch': ['twitch.tv']
 };
 
 const formatNumber = (num: number) => {
@@ -94,6 +96,25 @@ const formatDuration = (s: number) => {
     const m = Math.floor((s % 3600) / 60);
     const sec = Math.floor(s % 60);
     return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}` : `${m}:${sec.toString().padStart(2, '0')}`;
+};
+
+const formatDurationWords = (s: number) => {
+    const sec = Math.round(s);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s2 = sec % 60;
+    const parts: string[] = [];
+    if (h > 0) parts.push(`${h} hour${h !== 1 ? 's' : ''}`);
+    if (m > 0) parts.push(`${m} minute${m !== 1 ? 's' : ''}`);
+    if (s2 > 0 || parts.length === 0) parts.push(`${s2} second${s2 !== 1 ? 's' : ''}`);
+    return parts.join(' ');
+};
+
+const formatBytes = (b?: number) => {
+    if (!b || b <= 0) return '';
+    const mb = b / (1024 * 1024);
+    if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+    return Math.round(mb) + ' MB';
 };
 
 // Circular Progress
@@ -397,6 +418,7 @@ export function Downloader() {
     const [complete, setComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [downloadedFilePath, setDownloadedFilePath] = useState<string | null>(null);
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
     // Cookie features
     const [showCookieModal, setShowCookieModal] = useState(false);
@@ -447,6 +469,12 @@ export function Downloader() {
     const [showSettings, setShowSettings] = useState(false);
     const [showDiscordModal, setShowDiscordModal] = useState(false);
     const [showTutorial, setShowTutorial] = useState(false);
+    const [showCutModal, setShowCutModal] = useState(false);
+    const [cutStart, setCutStart] = useState(0);
+    const [cutEnd, setCutEnd] = useState(0);
+    const [cutType, setCutType] = useState<'video' | 'audio'>('video');
+    const [cutVideoFormat, setCutVideoFormat] = useState<string>('best');
+    const [cutAudioFormat, setCutAudioFormat] = useState<string>('audio_best');
 
     // Batch download features
     const [batchMode, setBatchMode] = useState(false);
@@ -689,7 +717,7 @@ export function Downloader() {
     // Check cookies when platform changes
     useEffect(() => {
         setHasCookies(false);
-        if (['instagram', 'facebook', 'youtube', 'tiktok', 'snapchat'].includes(currentPlatform.id)) {
+        if (['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id)) {
             window.electron.getCookiesStatus?.(currentPlatform.id).then((res: any) => {
                 setHasCookies(!!res?.exists);
             });
@@ -727,6 +755,7 @@ export function Downloader() {
                     setDownloading(false);
                     setDownloadingId(null);
                     setProgress(null);
+                    setActiveJobId(null);
                 }
             } else if (data.complete) {
                 if (isBatchActive) {
@@ -744,6 +773,7 @@ export function Downloader() {
                     setDownloading(false);
                     setDownloadingId(null);
                     setProgress(null);
+                    setActiveJobId(null);
                     if (data.path) setDownloadedFilePath(data.path);
                 }
             } else if (data.status) {
@@ -924,10 +954,14 @@ export function Downloader() {
     };
 
     // Regular video download
-    const handleDownload = useCallback(async (formatId: string, videoUrl?: string, videoTitle?: string, itemId?: string, playlistTitle?: string) => {
+    const handleDownload = useCallback(async (formatId: string, videoUrl?: string, videoTitle?: string, itemId?: string, playlistTitle?: string, cut?: { start: number, end: number }) => {
         if (downloading) return;
         const targetUrl = videoUrl || metadata?.webpage_url || url;
         const targetTitle = videoTitle || metadata?.title || 'video';
+
+        const isLiveDownload = !!(metadata?.isLive);
+        const jobId = isLiveDownload ? `live-${Date.now()}` : undefined;
+        setActiveJobId(jobId || null);
 
         setDownloading(true);
         setDownloadingId(itemId || null);
@@ -940,15 +974,58 @@ export function Downloader() {
                 formatId,
                 title: targetTitle,
                 thumbnail: metadata?.thumbnail,
-                playlistTitle
+                playlistTitle,
+                jobId: jobId || undefined,
+                cutStart: cut?.start,
+                cutEnd: cut?.end
             });
         } catch (err: any) {
             setError(err.message);
             setDownloading(false);
             setDownloadingId(null);
             setProgress(null);
+            setActiveJobId(null);
         }
     }, [metadata, downloading, url]);
+
+    const handleStopLiveRecording = useCallback(async () => {
+        if (!activeJobId) return;
+        await window.electron.cancelDownload(activeJobId);
+        setActiveJobId(null);
+    }, [activeJobId]);
+
+    const handleCoverDownload = useCallback(async () => {
+        if (!metadata?.thumbnail) return;
+        const result = await window.electron.saveThumbnail({
+            url: metadata.thumbnail,
+            title: metadata.title
+        });
+        if (result?.success) {
+            alert('Thumbnail saved to Downloads!');
+        } else {
+            alert('Failed to save thumbnail');
+        }
+    }, [metadata]);
+
+    const openCutModal = useCallback(() => {
+        if (!metadata?.duration || metadata.duration <= 0) return;
+        setCutStart(0);
+        setCutEnd(metadata.duration);
+        setCutType('video');
+        setCutVideoFormat('best');
+        setCutAudioFormat('audio_best');
+        setShowCutModal(true);
+    }, [metadata]);
+
+    const handleCutDownload = useCallback(async (formatId: string) => {
+        setShowCutModal(false);
+        await handleDownload(formatId, undefined, undefined, undefined, undefined, { start: cutStart, end: cutEnd });
+    }, [handleDownload, cutStart, cutEnd]);
+
+    const handleCutTimelineChange = useCallback((s: number, e: number) => {
+        setCutStart(s);
+        setCutEnd(e);
+    }, []);
 
     // Spotify track download (via YouTube)
     const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string, playlistTitle?: string, externalThumbnail?: string) => {
@@ -1153,6 +1230,7 @@ export function Downloader() {
     const hasEntries = metadata && metadata.entries && metadata.entries.length > 0;
     const isPlaylist = hasEntries && metadata?.contentType === 'playlist';
     const isStory = hasEntries && metadata?.contentType === 'story';
+    const isLive = !hasEntries && !!metadata?.isLive && metadata.duration === 0;
 
     // Bulk download (Playlist)
     const handleBulkDownload = async (type: 'video' | 'audio_best' | 'audio_standard' | 'audio_low') => {
@@ -1389,7 +1467,7 @@ export function Downloader() {
 
                                         {/* Action Group Inside Input */}
                                         <div className="absolute right-2 flex items-center gap-1.5">
-                                            {['instagram', 'facebook', 'youtube', 'tiktok', 'snapchat'].includes(currentPlatform.id) && (
+                                            {['instagram', 'facebook', 'youtube', 'tiktok'].includes(currentPlatform.id) && (
                                                 <button
                                                     type="button"
                                                     onClick={() => setShowCookieModal(true)}
@@ -1652,9 +1730,16 @@ export function Downloader() {
                                 )}
 
                                 {/* Resolution Badge */}
-                                {maxResolution && (
+                                {!isLive && maxResolution && (
                                     <div className="absolute top-3 left-3 px-2 py-1 bg-black/80 backdrop-blur rounded text-xs font-bold" style={{ color: currentPlatform.color }}>
                                         {maxResolution}
+                                    </div>
+                                )}
+
+                                {/* LIVE badge */}
+                                {isLive && (
+                                    <div className="absolute top-3 left-3 px-2 py-1 bg-red-500/95 rounded text-xs font-bold text-white flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> LIVE
                                     </div>
                                 )}
 
@@ -1673,16 +1758,36 @@ export function Downloader() {
 
                                 {downloading && !downloadingId && (
                                     <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
-                                        <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} />
-                                        <div className="mt-4 space-y-1">
-                                            <p className="text-white font-bold text-base">
-                                                {progress?.speed && progress.speed !== '...' ? progress.speed : 'Starting...'}
-                                            </p>
-                                            <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
-                                                {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
-                                                {progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
-                                            </div>
-                                        </div>
+                                        {isLive ? (
+                                            <>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                                    <p className="text-white font-bold text-base">Recording live...</p>
+                                                </div>
+                                                <p className="mt-2 text-white/50 text-xs text-center">
+                                                    Recording from the current stream position.
+                                                </p>
+                                                <button
+                                                    onClick={handleStopLiveRecording}
+                                                    className="mt-5 px-5 py-2 rounded-lg bg-red-500/90 hover:bg-red-500 text-white text-sm font-bold transition cursor-pointer flex items-center gap-2"
+                                                >
+                                                    <Pause className="w-4 h-4" /> Stop recording
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} />
+                                                <div className="mt-4 space-y-1">
+                                                    <p className="text-white font-bold text-base">
+                                                        {progress?.speed && progress.speed !== '...' ? progress.speed : 'Starting...'}
+                                                    </p>
+                                                    <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
+                                                        {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
+                                                        {progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1697,25 +1802,27 @@ export function Downloader() {
                                         {isSpotify && metadata.view_count > 0 && <span>Popularity: {metadata.view_count}</span>}
                                     </div>
                                 </div>
-                                {metadata.thumbnail && (
-                                    <button
-                                        onClick={async () => {
-                                            const result = await window.electron.saveThumbnail({
-                                                url: metadata.thumbnail,
-                                                title: metadata.title
-                                            });
-                                            if (result?.success) {
-                                                alert('Thumbnail saved to Downloads!');
-                                            } else {
-                                                alert('Failed to save thumbnail');
-                                            }
-                                        }}
-                                        className="shrink-0 w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
-                                        title="Save Thumbnail"
-                                    >
-                                        <ImageIcon className="w-5 h-5 text-white/60" />
-                                    </button>
-                                )}
+                                <div className="flex items-center gap-3 shrink-0 ml-4">
+                                    {metadata.thumbnail && (
+                                        <button
+                                            onClick={() => handleCoverDownload()}
+                                            className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
+                                            title="Save Thumbnail"
+                                        >
+                                            <ImageIcon className="w-5 h-5 text-white/60" />
+                                        </button>
+                                    )}
+                                    {!isSpotify && metadata.duration > 0 && (
+                                        <button
+                                            onClick={openCutModal}
+                                            disabled={downloading}
+                                            className="w-10 h-10 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 hover:border-purple-500/40 flex items-center justify-center transition cursor-pointer disabled:opacity-40"
+                                            title="Cut & Download"
+                                        >
+                                            <Scissors className="w-5 h-5 text-purple-400" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Download Options */}
@@ -1737,8 +1844,26 @@ export function Downloader() {
                                         </button>
                                     )}
 
+                                    {/* Live recording */}
+                                    {!isSpotify && isLive && (
+                                        <button
+                                            onClick={() => handleDownload('best')}
+                                            disabled={downloading}
+                                            className="w-full flex items-center justify-between p-3.5 bg-red-500/10 border border-red-500/25 rounded-xl cursor-pointer hover:bg-red-500/20 transition group disabled:opacity-40"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-lg bg-red-500/20 flex items-center justify-center"><Radio className="w-4 h-4 text-red-400" /></div>
+                                                <div className="text-left">
+                                                    <p className="font-medium text-sm text-red-400">Record live stream</p>
+                                                    <p className="text-xs text-white/40">Saves the ongoing broadcast until you stop it</p>
+                                                </div>
+                                            </div>
+                                            <Download className="w-4 h-4 text-red-400/60 group-hover:text-red-400" />
+                                        </button>
+                                    )}
+
                                     {/* Audio Options */}
-                                    {!isSpotify && (
+                                    {!isSpotify && !isLive && (
                                         <div className="mb-4">
                                             <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
                                                 <Music className="w-4 h-4" /> Audio Only
@@ -1771,7 +1896,7 @@ export function Downloader() {
 
 
                                     {/* Video Options */}
-                                    {!isSpotify && formats.length > 0 && (
+                                    {!isSpotify && !isLive && formats.length > 0 && (
                                         <div>
                                             <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
                                                 <Film className="w-4 h-4" /> Video Quality
@@ -2396,6 +2521,257 @@ export function Downloader() {
                     )
                 }
             </AnimatePresence >
+
+            {/* Cut & Download Modal */}
+            <AnimatePresence>
+                {showCutModal && metadata && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowCutModal(false)}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="relative w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-[#0f0f11] border border-white/10 rounded-2xl shadow-2xl"
+                        >
+                            {/* Header */}
+                            <div className="flex items-center gap-3 px-5 py-4 border-b border-white/[0.07] shrink-0">
+                                <div className="w-9 h-9 rounded-lg bg-purple-500/15 border border-purple-500/25 flex items-center justify-center shrink-0">
+                                    <Scissors className="w-4 h-4 text-purple-300" />
+                                </div>
+                                <div className="min-w-0">
+                                    <h2 className="font-black tracking-tight">Cut & Download</h2>
+                                    <p className="text-white/40 text-[11px]">Drag the handles, or click the track to trim</p>
+                                </div>
+                                <div className="ml-auto flex items-center gap-2 shrink-0">
+                                    <span className="px-3 h-8 rounded-lg bg-purple-500/10 border border-purple-500/25 text-purple-200 text-xs font-black flex items-center gap-1.5">
+                                        <Scissors className="w-3 h-3" /> {formatDuration(cutEnd - cutStart)}
+                                    </span>
+                                    <button onClick={() => setShowCutModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/10 hover:border-white/10 transition cursor-pointer">
+                                        <X className="w-4 h-4 text-white/60" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Body — horizontal split */}
+                            <div className="flex flex-col md:flex-row md:items-stretch overflow-y-auto custom-scrollbar">
+                                {/* Left: preview */}
+                                <div className="md:w-[38%] md:max-w-[340px] shrink-0 md:border-r border-white/[0.07] p-5 pb-4">
+                                    <div className="relative rounded-xl overflow-hidden">
+                                        {metadata.thumbnail ? (
+                                            <img src={metadata.thumbnail} alt="" onError={handleImgError} className="w-full aspect-video object-cover" referrerPolicy="no-referrer" />
+                                        ) : (
+                                            <div className="w-full aspect-video bg-gradient-to-br from-white/5 to-white/10 flex items-center justify-center">
+                                                <Film className="w-10 h-10 text-white/20" />
+                                            </div>
+                                        )}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                                        <div className="absolute top-2.5 right-2.5 px-2 py-1 bg-black/75 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5 border border-white/10">
+                                            <Timer className="w-3 h-3 text-purple-300" />
+                                            {formatDuration(metadata.duration)}
+                                        </div>
+                                    </div>
+                                    <p className="text-sm font-bold leading-snug mt-3 line-clamp-2">{metadata.title}</p>
+
+                                        {/* Channel / uploader */}
+                                        {!isSpotify && (
+                                            <p className="flex items-center gap-1.5 mt-1 text-xs text-white/40 truncate">
+                                                <User className="w-3.5 h-3.5 shrink-0" /> {metadata.uploader}
+                                            </p>
+                                        )}
+
+                                        {/* Clip summary card */}
+                                        <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/[0.07] p-3 space-y-2.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Clip</span>
+                                                <span className="text-right">
+                                                    <span className="block text-xs font-bold text-white">{formatDuration(cutEnd - cutStart)}</span>
+                                                    <span className="block text-[10px] font-medium text-white/40">{formatDurationWords(cutEnd - cutStart)}</span>
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Range</span>
+                                                <span className="text-[11px] font-mono font-bold text-purple-300/80">
+                                                    {formatDuration(cutStart)} → {formatDuration(cutEnd)}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Saved</span>
+                                                <span className="text-[11px] font-mono font-bold text-fuchsia-300/80">
+                                                    {(1 - (cutEnd - cutStart) / metadata.duration) >= 0 ? `${Math.round((1 - (cutEnd - cutStart) / metadata.duration) * 100)}%` : '0%'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Output hint */}
+                                        <div className="mt-3 flex items-start gap-2 text-[11px] text-white/40 leading-relaxed">
+                                            <Sparkles className="w-3.5 h-3.5 text-white/25 shrink-0 mt-0.5" />
+                                            <p>
+                                                Your clip will be saved as a separate {cutType === 'video' ? 'video' : 'audio'} file in your Downloads folder.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                {/* Right: controls */}
+                                <div className="flex-1 min-w-0 p-5 pt-4 md:pt-5">
+                                    {/* Timeline */}
+                                    <div className="mb-5">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Layers className="w-3.5 h-3.5 text-white/40" />
+                                            <span className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">Timeline</span>
+                                        </div>
+
+                                        {/* Custom editor-style dual slider */}
+                                        <CutTimeline
+                                            duration={metadata.duration}
+                                            start={cutStart}
+                                            end={cutEnd}
+                                            onChange={handleCutTimelineChange}
+                                        />
+
+                                        {/* Quick presets */}
+                                        <div className="grid grid-cols-4 gap-2 mb-5">
+                                            {[
+                                                { label: 'First 15s', calc: (d: number) => [0, Math.min(15, d)] },
+                                                { label: 'First 30s', calc: (d: number) => [0, Math.min(30, d)] },
+                                                { label: 'Last 15s', calc: (d: number) => [Math.max(0, d - 15), d] },
+                                                { label: 'Middle', calc: (d: number) => [d / 3, (d / 3) * 2] }
+                                            ].map(p => (
+                                                <button
+                                                    key={p.label}
+                                                    onClick={() => {
+                                                        const [s, e] = p.calc(metadata.duration);
+                                                        setCutStart(Math.max(0, Math.min(s, metadata.duration)));
+                                                        setCutEnd(Math.min(metadata.duration, Math.max(e, s + 0.1)));
+                                                    }}
+                                                    className="h-8 rounded-lg bg-white/[0.05] border border-white/10 text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/[0.1] hover:border-white/25 transition-all cursor-pointer active:scale-95"
+                                                >
+                                                    {p.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                            {/* Type toggle — segmented control */}
+                            <div className="flex p-1 bg-white/[0.04] border border-white/10 rounded-xl mb-4">
+                                <button
+                                    onClick={() => setCutType('video')}
+                                    className={`flex-1 h-9 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${cutType === 'video'
+                                        ? 'bg-gradient-to-r from-purple-500/30 to-fuchsia-500/30 text-white border border-purple-400/30'
+                                        : 'text-white/50 hover:text-white/80'
+                                    }`}
+                                >
+                                    <Film className="w-3.5 h-3.5" /> Video
+                                </button>
+                                <button
+                                    onClick={() => setCutType('audio')}
+                                    className={`flex-1 h-9 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${cutType === 'audio'
+                                        ? 'bg-gradient-to-r from-green-500/30 to-emerald-500/30 text-white border border-green-400/30'
+                                        : 'text-white/50 hover:text-white/80'
+                                    }`}
+                                >
+                                    <Music className="w-3.5 h-3.5" /> Audio
+                                </button>
+                            </div>
+
+                            {/* Quality selector */}
+                            {cutType === 'video' ? (
+                                <div className="mb-4">
+                                    <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] mb-2 pl-1">Video Quality</p>
+                                    <div className="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
+                                        {formats.length > 0 && (
+                                            <button
+                                                onClick={() => setCutVideoFormat('best')}
+                                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer group ${cutVideoFormat === 'best'
+                                                    ? 'bg-purple-500/20 border-purple-500/40'
+                                                    : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <p className="font-bold text-sm flex items-center gap-1.5">
+                                                        <Film className="w-3.5 h-3.5 text-purple-400" /> Best
+                                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-gradient-to-r from-purple-500/40 to-fuchsia-500/40 text-purple-200">Auto</span>
+                                                    </p>
+                                                    {cutVideoFormat === 'best' && <Check className="w-4 h-4 text-purple-300" />}
+                                                </div>
+                                                <p className="text-[10px] text-white/40 mt-0.5">Highest available</p>
+                                            </button>
+                                        )}
+                                        {formats.map((f, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => setCutVideoFormat(f.format_id)}
+                                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${cutVideoFormat === f.format_id
+                                                    ? 'bg-purple-500/20 border-purple-500/40'
+                                                    : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <p className="font-bold text-sm flex items-center gap-1.5">
+                                                        {f.height}p
+                                                        {f.height && f.height >= 2160 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300">4K</span>}
+                                                        {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
+                                                    </p>
+                                                    {cutVideoFormat === f.format_id && <Check className="w-4 h-4 text-purple-300" />}
+                                                </div>
+                                                <p className="text-[10px] text-white/40 mt-0.5">
+                                                    {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` • ${formatBytes(f.filesize)}` : f.format_note ? ` • ${f.format_note}` : ''}
+                                                </p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="mb-4">
+                                    <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] mb-2 pl-1">Audio Quality</p>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {[
+                                            { id: 'audio_best', label: 'Best', desc: '~320kbps', color: 'text-green-300', icon: <Music className="w-3.5 h-3.5" /> },
+                                            { id: 'audio_standard', label: 'Standard', desc: '~128kbps', color: 'text-emerald-300', icon: <Music className="w-3.5 h-3.5" /> },
+                                            { id: 'audio_low', label: 'Low', desc: '~64kbps', color: 'text-green-400/70', icon: <Music className="w-3.5 h-3.5" /> }
+                                        ].map(q => (
+                                            <button
+                                                key={q.id}
+                                                onClick={() => setCutAudioFormat(q.id)}
+                                                className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${cutAudioFormat === q.id
+                                                    ? 'bg-green-500/20 border-green-500/40'
+                                                    : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20'
+                                                }`}
+                                            >
+                                                <div className={`flex items-center justify-center gap-1.5 mb-1 ${q.color}`}>{q.icon}</div>
+                                                <p className="font-bold text-xs flex items-center justify-center gap-1">
+                                                    {q.label}
+                                                    {cutAudioFormat === q.id && <Check className="w-3 h-3 text-green-300" />}
+                                                </p>
+                                                <p className="text-[9px] text-white/40 mt-0.5">{q.desc}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Action button */}
+                            <button
+                                onClick={() => handleCutDownload(cutType === 'video' ? (cutVideoFormat || 'best') : (cutAudioFormat || 'audio_best'))}
+                                disabled={downloading}
+                                className={`w-full h-12 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all cursor-pointer active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${cutType === 'video'
+                                    ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white'
+                                    : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white'
+                                }`}
+                            >
+                                <Scissors className="w-4 h-4" /> Cut & Download
+                            </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
             {/* Settings Modal */}
             < Settings

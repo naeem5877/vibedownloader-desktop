@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electron', {
     getVideoInfo: (url: string) => ipcRenderer.invoke('get-video-info', url),
     getSpotifyInfo: (url: string) => ipcRenderer.invoke('get-spotify-info', url),
     downloadVideo: (params: any) => ipcRenderer.invoke('download-video', params),
+    cancelDownload: (jobId: string) => ipcRenderer.invoke('cancel-download', jobId),
     downloadSpotifyTrack: (params: any) => ipcRenderer.invoke('download-spotify-track', params),
     getProxyImage: (url: string) => ipcRenderer.invoke('proxy-image', url),
 

@@ -12,7 +12,7 @@
   </p>
   
   <p>
-    Download videos, audio, and playlists from YouTube, Instagram, TikTok, Spotify, and more — locally, ad-free, and privacy-first.
+    Download videos, audio, and playlists from YouTube, Instagram, TikTok, Twitch, Facebook, X, SoundCloud, Spotify, and more — locally, ad-free, and privacy-first. Add the free browser extension and download straight from the page.
   </p>
 
   <p>
@@ -68,13 +68,19 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 <td width="50%">
 
 ### 🎥 Multi-Platform Support
-Download from YouTube, Instagram (Reels, Stories, Posts), TikTok, Facebook, X (Twitter), Pinterest, and SoundCloud
+Download from YouTube, Instagram (Reels, Stories, Posts), TikTok, Facebook, X (Twitter), Pinterest, SoundCloud, and Twitch (live streams, VODs & clips)
 
 ### 🎵 Spotify Downloads
 Get tracks, albums, and playlists complete with metadata and cover art via YouTube audio.
 
 ### 📦 Batch Downloading
 Queue multiple videos or audio tracks at once with individual format controls and seamless processing
+
+### 🔴 Twitch Live Recording
+Record any live Twitch broadcast from the moment you hit Record until you stop it — automatically finished as a playable MP4 (plus VODs & clips)
+
+### 🧩 Browser Extension
+One-click download buttons right on the page for YouTube, YouTube Music, Instagram, Facebook, TikTok, X (Twitter), Spotify, and SoundCloud — sent straight to the desktop engine
 
 ### ⚡ Fast & Efficient
 Multi-threaded downloads for maximum speed
@@ -221,6 +227,25 @@ sudo dpkg -i VibeDownloader-x.x.x.deb
 > **Note:** The Android version is available exclusively through GitHub releases. We don't distribute through the Google Play Store to avoid restrictions and maintain full feature compatibility.
 
 [**View Android Repository →**](https://github.com/naeem5877/vibedownloader-android)
+
+---
+
+## 🧩 Browser Extension
+
+Download directly from the page — no copying links, no switching tabs.
+
+- **One-click download buttons** overlaid on YouTube (incl. Music), Instagram, Facebook, TikTok, X (Twitter), Spotify, and SoundCloud
+- **Native messaging bridge** — the extension talks to your desktop app over a secure local connection and can even launch the app for you
+- **Full desktop engine** — every download gets best-quality processing, smart organization, and the Cut feature
+
+### Install it (bundled with the desktop app)
+
+1. Install **VibeDownloader** for desktop
+2. In the app, click the **Extension** button (top-right corner)
+3. Pick your browser — the app detects supported browsers and shows you the exact steps
+4. It prepares the ready-to-load folder, then walk through: open `chrome://extensions` (or equivalent) → turn on **Developer mode** → **Load unpacked** → select the revealed folder
+
+> ✅ Chrome, Edge, Brave, Vivaldi, Opera, and Firefox are supported. The extension ships inside the installer — no separate download needed.
 
 ---
 

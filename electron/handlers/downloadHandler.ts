@@ -38,6 +38,84 @@ async function saveThumbnailTemp(url: string): Promise<{ path: string; mime: str
     }
 }
 
+// Cut a downloaded media file to [start, end] seconds using integrated FFmpeg.
+// Stream-copies video/audio where possible for near-lossless speed, falling
+// back to a re-encode when the source container doesn't support stream copy.
+async function cutMediaFile(filePath: string, start: number, end: number): Promise<string | null> {
+    if (!fs.existsSync(filePath)) return null;
+    const duration = Math.max(0, end - start);
+    if (duration <= 0) return null;
+
+    const ffmpegDir = path.dirname(getFfmpegBinaryPath());
+    const ffmpeg = path.join(ffmpegDir, 'ffmpeg.exe');
+    if (!fs.existsSync(ffmpeg)) return null;
+
+    const ext = path.extname(filePath);
+    const outPath = filePath.replace(ext, `_cut${ext}`);
+
+    const fmtSec = (s: number) => {
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = (s % 60).toFixed(2).padStart(5, '0');
+        return `${h}:${m.toString().padStart(2, '0')}:${sec}`;
+    };
+
+    // First try super-fast stream copy (no re-encode) so cuts are instant.
+    const copyArgs = [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-ss', fmtSec(start), '-i', filePath,
+        '-t', fmtSec(duration),
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        outPath
+    ];
+    const run = async (args: string[]) => {
+        await execFileAsync(ffmpeg, args);
+        return fs.existsSync(outPath);
+    };
+
+    // The full-length download is just a temp working file — once the clip is
+    // safely produced, remove it so only the cut file stays on disk.
+    const removeOriginal = () => {
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) {
+            console.error('Failed to remove full-length temp file:', e);
+        }
+    };
+
+    try {
+        const ok = await run(copyArgs);
+        if (ok) {
+            removeOriginal();
+            return outPath;
+        }
+    } catch (e) {
+        console.error('Stream-copy cut failed, falling back to re-encode:', e);
+    }
+
+    // Fallback: re-encode the segment to a compatible H.264 + AAC file.
+    try {
+        const reencodeArgs = [
+            '-hide_banner', '-loglevel', 'error', '-y',
+            '-ss', fmtSec(start), '-i', filePath,
+            '-t', fmtSec(duration),
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            outPath
+        ];
+        if (await run(reencodeArgs)) {
+            try { if (fs.existsSync(copyArgs[copyArgs.length - 1])) fs.unlinkSync(copyArgs[copyArgs.length - 1]); } catch {}
+            removeOriginal();
+            return outPath;
+        }
+    } catch (e) {
+        console.error('Re-encode cut failed:', e);
+    }
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch {}
+    return null;
+}
+
 // Some platforms (notably Instagram) deliver VP9/AV1 video with HE-AAC audio
 // inside an .mp4 container. That plays in a few apps but breaks in editors,
 // messaging apps and many hardware players. Probe the finished file and, when
@@ -152,8 +230,65 @@ export function cleanupDownloadArtifacts(): number {
     return n;
 }
 
+// Live recordings (Twitch etc.) never "complete" on their own — they run until
+// the stream ends or the user stops them. Track each active job so we can kill
+// its yt-dlp process on demand and still finalize the partial file cleanly.
+interface ActiveJob {
+    proc?: any;
+    cancelled: boolean;
+}
+const activeJobs = new Map<string, ActiveJob>();
+
+// Best-effort remux of a possibly-interrupted recording to a playable MP4.
+async function remuxToMp4(src: string, out: string): Promise<void> {
+    const ffmpegDir = path.dirname(getFfmpegBinaryPath());
+    const ffmpeg = path.join(ffmpegDir, 'ffmpeg.exe');
+    if (!fs.existsSync(ffmpeg)) throw new Error('ffmpeg not found');
+    if (fs.existsSync(out)) try { fs.unlinkSync(out); } catch {}
+    await execFileAsync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-c', 'copy', '-movflags', '+faststart', out]);
+    if (!fs.existsSync(out)) throw new Error('remux produced no output');
+}
+
+// Locate the file yt-dlp left behind after a live recording was stopped and
+// turn it into a final playable mp4 ("<name>.part" is the un-finalized file).
+async function finalizeLiveRecording(downloadPath: string, uniqueFilename: string, desiredName: string): Promise<string | null> {
+    try {
+        const files = fs.readdirSync(downloadPath).filter(f => f.startsWith(`${uniqueFilename}.`));
+        if (!files.length) return null;
+
+        // Already-final media file (stream ended on its own before we stopped it)
+        const existing = files.find(f => /\.(mp4|mkv|ts|webm|mov)$/i.test(f) && !f.endsWith('.part'));
+        if (existing) {
+            const src = path.join(downloadPath, existing);
+            if (existing.toLowerCase().endsWith('.mp4')) return src;
+            const out = path.join(downloadPath, desiredName);
+            try { await remuxToMp4(src, out); return out; } catch (e) { console.error('Remux failed:', e); return src; }
+        }
+
+        // Interrupted mid-recording → un-finalized "<name>.part"
+        const part = files.find(f => f.endsWith('.part'));
+        if (part) {
+            const src = path.join(downloadPath, part);
+            const out = path.join(downloadPath, desiredName);
+            try {
+                await remuxToMp4(src, out);
+                try { fs.unlinkSync(src); } catch {}
+                return out;
+            } catch (e) {
+                console.error('Remux of interrupted recording failed, keeping raw file:', e);
+                try { fs.renameSync(src, out); } catch {}
+                return out;
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error('finalizeLiveRecording error:', e);
+        return null;
+    }
+}
+
 export function registerDownloadHandlers() {
-    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string }) => {
+    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId, cutStart, cutEnd }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string, cutStart?: number, cutEnd?: number }) => {
         registerDownloadStart();
         try {
             const mainWindow = getMainWindow();
@@ -176,6 +311,7 @@ export function registerDownloadHandlers() {
             const isPinterest = url.includes('pinterest.com') || url.includes('pin.it');
             const isSoundcloud = url.includes('soundcloud.com');
             const isX = url.includes('twitter.com') || url.includes('x.com');
+            const isTwitch = url.includes('twitch.tv');
 
             // Determine platform
             let detectedPlatform = platform || 'youtube';
@@ -189,6 +325,7 @@ export function registerDownloadHandlers() {
                 else if (isPinterest) detectedPlatform = 'pinterest';
                 else if (isSoundcloud) detectedPlatform = 'soundcloud';
                 else if (isX) detectedPlatform = 'x';
+                else if (isTwitch) detectedPlatform = 'twitch';
             }
 
             // Determine content type from URL patterns
@@ -210,6 +347,12 @@ export function registerDownloadHandlers() {
                     detectedContentType = 'post';
                 } else if (isFbcdnUrl && isInstagram) {
                     detectedContentType = 'stories'; // Default direct CDN to stories
+                } else if (/\/videos\/\d+/.test(url)) {
+                    detectedContentType = 'vod';
+                } else if (url.includes('/clip/')) {
+                    detectedContentType = 'clip';
+                } else if (isTwitch) {
+                    detectedContentType = 'live';
                 } else {
                     detectedContentType = 'video';
                 }
@@ -219,6 +362,8 @@ export function registerDownloadHandlers() {
             const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType, playlistTitle);
             const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const ext = (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4');
+            const isCutDownload = typeof cutStart === 'number' && typeof cutEnd === 'number' && cutEnd > cutStart;
+            const isLiveDownload = isTwitch && detectedContentType === 'live';
 
             // Extract unique ID from URL to prevent file overwrites when downloading multiple videos from same creator
             let uniqueId = '';
@@ -245,6 +390,12 @@ export function registerDownloadHandlers() {
                 // YouTube / YouTube Music: use the stable video ID so re-downloading
                 // the same song overwrites the old file instead of cloning a new one.
                 uniqueId = extractYouTubeVideoId(url) || '';
+            } else if (isTwitch) {
+                // Twitch: /videos/<id> VODs, /clip/<slug> clips, or channel name live
+                const twitchVod = url.match(/\/videos\/(\d+)/);
+                const twitchClip = url.match(/\/clip\/([A-Za-z0-9_-]+)/);
+                const twitchChannel = url.match(/twitch\.tv\/([^/?#]+)/);
+                uniqueId = twitchVod?.[1] || twitchClip?.[1] || twitchChannel?.[1] || '';
             }
 
             // If no unique ID found from URL, generate a short timestamp-based ID
@@ -260,7 +411,8 @@ export function registerDownloadHandlers() {
             }
 
             // Create filename with unique ID to prevent overwrites
-            const uniqueFilename = `${safeTitle}_${uniqueId}`;
+            const cutSuffix = isCutDownload ? `_cut_${Math.round(cutStart)}-${Math.round(cutEnd)}` : '';
+            const uniqueFilename = `${safeTitle}${cutSuffix}_${uniqueId}`;
             // If it's a direct fbcdn image url, force jpg ext, else use formatId
             const isFbcdnImage = url.includes('fbcdn.net') && (url.includes('.jpg?') || url.includes('.jpeg?'));
             const finalExt = isFbcdnImage ? 'jpg' : ext;
@@ -307,7 +459,7 @@ export function registerDownloadHandlers() {
                     });
                 }
 
-                const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
                 fs.writeFileSync(finalFilePath, fileBuffer);
 
@@ -315,15 +467,23 @@ export function registerDownloadHandlers() {
                     await recodeVideoToH264(finalFilePath);
                 }
 
+                    let resultPath = finalFilePath;
+                    if (isCutDownload) {
+                        mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
+                        const cutPath = await cutMediaFile(finalFilePath, cutStart, cutEnd);
+                        if (cutPath) resultPath = cutPath;
+                        else console.error('Cut failed, keeping full-length file');
+                    }
+
                     mainWindow?.webContents.send('download-progress', {
                         complete: true,
                         title: safeTitle,
-                        path: finalFilePath,
+                        path: resultPath,
                         jobId
                     });
 
                 if (!suppressNotifications) {
-                    showNotification('Download Complete! ✅', `${safeTitle} saved`, undefined, finalFilePath);
+                    showNotification('Download Complete! ✅', `${safeTitle} saved`, undefined, resultPath);
                 }
                 return { success: true };
             }
@@ -356,9 +516,12 @@ export function registerDownloadHandlers() {
             args.push('--user-agent', defaultUA);
 
             if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
-                args.push('--extractor-args', 'youtube:player_client=web,android_vr,web_safari');
+                // tv_embedded returns the FULL DASH format list (up to 4K) AND
+                // handles age-gated videos. Other clients (web, android_vr,
+                // web_safari) currently return only the combined 360p format.
+                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
             } else {
-                args.push('--extractor-args', 'youtube:player_client=web,android_vr,web_safari');
+                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
             }
 
             if (cookiePath && fs.existsSync(cookiePath)) {
@@ -386,13 +549,19 @@ export function registerDownloadHandlers() {
                 // Ensure FFmpeg is available for merging video/audio
                 await ensureFFmpeg();
 
-                // FORCE MP4 and H264 priority
-                args.push('--merge-output-format', 'mp4');
-
-                if (formatId && formatId !== 'best') {
-                    args.push('-f', `${formatId}+bestaudio/best`);
+                if (isLiveDownload) {
+                    // Live broadcast: record the single live format stream until
+                    // the user stops it or the stream ends (no merge needed).
+                    args.push('-f', 'best');
                 } else {
-                    args.push('-S', 'res,ext:mp4:m4a,vcodec:h264,acodec:aac');
+                    // FORCE MP4 and H264 priority
+                    args.push('--merge-output-format', 'mp4');
+
+                    if (formatId && formatId !== 'best') {
+                        args.push('-f', `${formatId}+bestaudio/best`);
+                    } else {
+                        args.push('-S', 'res,ext:mp4:m4a,vcodec:h264,acodec:aac');
+                    }
                 }
             }
 
@@ -438,6 +607,10 @@ export function registerDownloadHandlers() {
 
             const ytDlpEventEmitter = ytDlpWrap.exec(args);
 
+            const jobHandle: ActiveJob = { cancelled: false };
+            jobHandle.proc = ytDlpEventEmitter;
+            if (jobId) activeJobs.set(jobId, jobHandle);
+
             ytDlpEventEmitter.on('progress', (progress: any) => {
                 // Ensure percent is a number and valid
                 const percent = typeof progress.percent === 'number' ? progress.percent : parseFloat(progress.percent) || 0;
@@ -448,6 +621,7 @@ export function registerDownloadHandlers() {
                     currentSpeed: progress.currentSpeed || '...',
                     eta: progress.eta || '...',
                     downloaded: progress.downloadedSize || '...',
+                    isLive: isLiveDownload,
                     jobId
                 });
             });
@@ -467,15 +641,42 @@ export function registerDownloadHandlers() {
 
                 ytDlpEventEmitter.on('close', async (code?: number | null) => {
                     if (failed) return;
+                    if (jobId) activeJobs.delete(jobId);
 
-                    // Non-zero exit without an error event: treat as a failure
-                    if (typeof code === 'number' && code !== 0) {
+                    // Non-zero exit without an error event: treat as a failure,
+                    // EXCEPT a live recording the user stopped on purpose.
+                    if (typeof code === 'number' && code !== 0 && !(isLiveDownload && jobHandle.cancelled)) {
                         console.error(`Download exited with code ${code}:`, safeTitle);
                         if (!settled) { settled = true; reject(new Error(`yt-dlp exited with code ${code}`)); }
                         return;
                     }
 
                     console.log("Download complete event for:", safeTitle);
+
+                    if (isLiveDownload) {
+                        // Recording stopped (by user or stream end) — finalize the
+                        // partial file into a playable mp4.
+                        const desiredName = `${uniqueFilename}.mp4`;
+                        const finalPath = await finalizeLiveRecording(downloadPath, uniqueFilename, desiredName);
+                        if (!finalPath) {
+                            console.error('Live recording produced no file');
+                            if (!settled) { settled = true; reject(new Error('Recording ended with no output file')); }
+                            return;
+                        }
+
+                        mainWindow?.webContents.send('download-progress', {
+                            complete: true,
+                            title: safeTitle,
+                            path: finalPath,
+                            isLive: true,
+                            jobId
+                        });
+                        if (!suppressNotifications) {
+                            showNotification('Recording Saved! ✅', `${safeTitle} (live)`, undefined, finalPath);
+                        }
+                        if (!settled) { settled = true; resolve({ success: true, path: finalPath }); }
+                        return;
+                    }
 
                     // Wait a tiny bit for file to be released
                     await new Promise(r => setTimeout(r, 500));
@@ -496,6 +697,15 @@ export function registerDownloadHandlers() {
                     const isVideoDownload = !(formatId && (formatId.startsWith('audio_') || formatId === 'audio'));
                     if (isVideoDownload && fs.existsSync(actualFilePath)) {
                         await recodeVideoToH264(actualFilePath);
+                    }
+
+                    // Cut the finished file down to [cutStart, cutEnd] if requested.
+                    let displayPath = actualFilePath;
+                    if (isCutDownload && fs.existsSync(actualFilePath)) {
+                        mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
+                        const cutResultPath = await cutMediaFile(actualFilePath, cutStart, cutEnd);
+                        if (cutResultPath) displayPath = cutResultPath;
+                        else console.error('Cut failed, keeping full-length file');
                     }
 
                     // yt-dlp can leave the converted thumbnail file behind after
@@ -546,7 +756,7 @@ export function registerDownloadHandlers() {
                     mainWindow?.webContents.send('download-progress', {
                         complete: true,
                         title: safeTitle,
-                        path: actualFilePath,
+                        path: displayPath,
                         jobId
                     });
 
@@ -555,11 +765,11 @@ export function registerDownloadHandlers() {
                             'Download Complete! ✅',
                             `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
                             thumbPath,
-                            actualFilePath
+                            displayPath
                         );
                     }
 
-                    if (!settled) { settled = true; resolve({ success: true, path: actualFilePath }); }
+                    if (!settled) { settled = true; resolve({ success: true, path: displayPath }); }
                 });
             });
         } catch (e: any) {
@@ -571,6 +781,18 @@ export function registerDownloadHandlers() {
         } finally {
             registerDownloadEnd();
         }
+    });
+
+    ipcMain.handle('cancel-download', (event: any, jobId: string) => {
+        const handle = activeJobs.get(jobId);
+        if (!handle) return { success: false, error: 'No active download for this job' };
+        handle.cancelled = true;
+        try {
+            handle.proc?.ytDlpProcess?.kill();
+        } catch (e) {
+            console.error('Failed to kill download process:', e);
+        }
+        return { success: true };
     });
 
     ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications, jobId }) => {
@@ -595,7 +817,7 @@ export function registerDownloadHandlers() {
             const args = [
                 ytSearchUrl,
                 '--js-runtimes', 'node',
-                '--extractor-args', 'youtube:player_client=web,android_vr,web_safari',
+                '--extractor-args', 'youtube:player_client=tv_embedded',
                 '--no-check-certificates',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
                 '-o', outputTemplate,

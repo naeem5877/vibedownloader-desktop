@@ -12,7 +12,9 @@ try {
     // Split by version header start
     // We look for "\n## [" to identify the start of a version block
     // The first block is usually just the file title
-    const blocks = changelog.split(/\r?\n## \[/);
+    // (A leading newline is prepended so the very first header is a valid split point.)
+    const normalized = changelog.replace(/\r\n/g, '\n').replace(/^\n+/, '');
+    const blocks = ('\n' + normalized).split(/\n## \[/);
 
     if (blocks.length > 1) {
         // block[1] is the content for the latest version (including the version number line)

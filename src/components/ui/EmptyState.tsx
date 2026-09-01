@@ -11,7 +11,7 @@ import {
     Twitter,
     Pin
 } from 'lucide-react';
-import { FaSpotify, FaTiktok, FaSoundcloud } from 'react-icons/fa6';
+import { FaSpotify, FaTiktok, FaSoundcloud, FaTwitch } from 'react-icons/fa6';
 
 interface EmptyStateProps {
     currentPlatform: {
@@ -73,6 +73,13 @@ const EmptyState: React.FC<EmptyStateProps> = memo(({ currentPlatform, hasCookie
             features: ['🎬 4K Video', '🖼️ HD Photos', '🏃 Fast Sync', '📂 GIFs'],
             icon: <Twitter className="w-12 h-12" />,
             color: '#FFFFFF'
+        },
+        twitch: {
+            title: 'Twitch Downloader',
+            subtitle: 'Live Streams, VODs & Clips',
+            features: ['🔴 Live', '🎬 VODs', '✂️ Clips', '⚡ HD'],
+            icon: <FaTwitch className="w-12 h-12" />,
+            color: '#9146FF'
         },
         pinterest: {
             title: 'Pinterest Downloader',
