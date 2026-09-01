@@ -63,61 +63,46 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 
 ## ✨ Key Features
 
-<div style="display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;">
+<table>
+<tr>
+<td width="50%" valign="top">
 
-<!-- ✂️ Cut & Download — Spotlight Banner -->
-<div style="flex: 1 1 100%; border: 1px solid rgba(88, 166, 255, 0.35); background: rgba(88, 166, 255, 0.06); border-radius: 16px; padding: 22px 28px;">
-  <p align="center" style="margin: 0;"><b>✂️ Cut &amp; Download</b> &nbsp;·&nbsp; <span style="color: #58a6ff;">NEW</span></p>
-  <p align="center" style="margin: 8px 0 0;">Trim any video or song with the built-in <b>waveform editor</b> before saving — drag the handles to pick a start &amp; end point, watch your clip length update live, and get a perfectly clean file (the full-length source is deleted automatically).</p>
-</div>
+### 🎥 Multi-Platform Support
+Videos, reels, shorts, stories & playlists from YouTube, Instagram, TikTok, Facebook, X, Pinterest, SoundCloud and Twitch
 
-<!-- Feature Cards -->
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>🎥 Multi-Platform Support</b></p>
-  <p align="center" style="margin: 8px 0 0;">Videos, reels, shorts, stories, tracks &amp; playlists from <b>YouTube</b>, <b>Instagram</b>, <b>TikTok</b>, <b>Facebook</b>, <b>X</b>, <b>Pinterest</b>, <b>SoundCloud</b> and <b>Twitch</b>.</p>
-</div>
+### ✂️ Cut & Download
+Trim any video or song with the waveform editor before saving — clean output, no leftovers
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>🔴 Twitch Live Recording</b></p>
-  <p align="center" style="margin: 8px 0 0;">Record any <b>live broadcast</b> from the moment you press Record — automatically finalized into a playable MP4. VODs &amp; clips work like regular videos.</p>
-</div>
+### 🎵 Spotify Downloads
+Tracks, albums & playlists with full metadata and cover art — up to lossless & hi-res
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>🧩 Browser Extension</b></p>
-  <p align="center" style="margin: 8px 0 0;">One-click download buttons right on the page for YouTube, Instagram, TikTok, Facebook, X, Spotify &amp; SoundCloud — sent straight to the desktop engine.</p>
-</div>
+### 📦 Batch Downloading
+Queue videos & audio with per-item quality controls and pause/resume
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>🎵 Spotify Downloads</b></p>
-  <p align="center" style="margin: 8px 0 0;">Albums, singles &amp; playlists complete with metadata and cover art — up to <b>lossless &amp; hi-res</b> quality.</p>
-</div>
+### 🔴 Twitch Live Recording
+Record any live broadcast until you stop — auto-finalized as a playable MP4
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>📦 Batch Downloading</b></p>
-  <p align="center" style="margin: 8px 0 0;">Queue mixes of videos &amp; audio with per-item quality controls, pause/resume and one seamless completion screen.</p>
-</div>
+</td>
+<td width="50%" valign="top">
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>📦 Smart Organization</b></p>
-  <p align="center" style="margin: 8px 0 0;">Files auto-sorted into folders by platform &amp; type — <code>Twitch/Live</code>, <code>VODs</code>, <code>Clips</code>, <code>Playlists</code> and more.</p>
-</div>
+### 🧩 Browser Extension
+One-click download buttons right on the page, sent straight to the desktop engine
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>🚀 Fast &amp; Efficient</b></p>
-  <p align="center" style="margin: 8px 0 0;">Multi-threaded downloads for maximum speed, bundled with a self-updating yt-dlp engine.</p>
-</div>
+### 📦 Smart Organization
+Auto-sorted folders by platform and content type — Live, VODs, Clips, Playlists
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>🔒 Privacy-First</b></p>
-  <p align="center" style="margin: 8px 0 0;">100% local processing — no accounts, no ads, no tracking, no server-side tricks. Ever.</p>
-</div>
+### 💎 Modern UI
+Clean dark interface with smooth animations
 
-<div style="flex: 1 1 400px; max-width: 560px; border: 1px solid rgba(127, 127, 127, 0.22); background: rgba(127, 127, 127, 0.06); border-radius: 16px; padding: 20px 24px;">
-  <p align="center" style="margin: 0;"><b>💎 Premium UX</b></p>
-  <p align="center" style="margin: 8px 0 0;">Clean dark interface, smooth animations and system tray support — on Windows, macOS, Linux &amp; Android.</p>
-</div>
+### 🔐 Privacy-First
+100% local processing — no accounts, no ads, no tracking
 
-</div>
+### 📥 System Tray
+Keep the app running in the background for instant access
+
+</td>
+</tr>
+</table>
 
 ---
 
