@@ -53,6 +53,7 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
     const contentFolders: Record<string, string> = {
         'video': 'Videos',
         'audio': 'Audio',
+        'subtitles': 'Subtitles',
         'music': 'Music',
         'reel': 'Reels',
         'reels': 'Reels',
@@ -118,3 +119,51 @@ export function getCookiePath(platform: string) {
 export function getHistoryPath() {
     return path.join(app.getPath('userData'), 'history.json');
 }
+
+// Instagram Stories resolver key
+//
+// Kept in its own file rather than in `settings.json`, because settings are read
+// wholesale by `get-settings` and sent to the renderer. This key pays real money
+// per lookup, so it must never travel that path. It is deliberately not in the
+// `AppSettings` interface for the same reason.
+const storiesKeyPath = () => path.join(app.getPath('userData'), 'instagram-stories-key');
+
+/** The resolver API key, or an empty string when none is configured. */
+export function loadStoriesApiKey(): string {
+    try {
+        const p = storiesKeyPath();
+        if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8').trim();
+    } catch (e) {
+        console.error('Failed to read the stories API key:', e);
+    }
+    return '';
+}
+
+/** Stores the key, or clears it when given an empty value. */
+export function saveStoriesApiKey(key: string): void {
+    try {
+        const p = storiesKeyPath();
+        const value = (key || '').trim();
+        if (!value) {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+            return;
+        }
+        fs.writeFileSync(p, value, 'utf-8');
+    } catch (e) {
+        console.error('Failed to save the stories API key:', e);
+    }
+}
+
+/**
+ * What the renderer is told about the key: whether one exists, and a masked
+ * hint so a user can tell *which* key is stored without the value being sent
+ * anywhere.
+ */
+export function getStoriesApiKeyStatus(): { configured: boolean; masked: string } {
+    const key = loadStoriesApiKey();
+    if (!key) return { configured: false, masked: '' };
+    if (key.length <= 8) return { configured: true, masked: `${key.slice(0, 2)}${'•'.repeat(6)}` };
+    return { configured: true, masked: `${key.slice(0, 6)}…${key.slice(-4)}` };
+}
+
+

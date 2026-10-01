@@ -1,5 +1,7 @@
 // YouTube / YouTube Music helpers.
 
+import { defaultUserAgent } from './platform';
+
 // Pull the 11-char video ID out of any YouTube/YouTube Music URL.
 export function extractYouTubeVideoId(url: string): string | null {
     if (!url) return null;
@@ -51,7 +53,7 @@ export async function fetchYouTubeMusicAlbumArt(videoId: string): Promise<string
             body: JSON.stringify(payload),
             headers: {
                 "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                  "User-Agent": defaultUserAgent(),
                 "Origin": "https://music.youtube.com",
                 "Referer": `https://music.youtube.com/watch?v=${videoId}`,
                 "X-YouTube-Client-Name": "67",

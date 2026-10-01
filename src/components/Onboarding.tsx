@@ -36,10 +36,18 @@ interface OnboardingProps {
     onComplete: () => void;
 }
 
+// The renderer is not told which OS it is on, and hardcoding "PC" made the
+// onboarding read wrong for every Mac and Linux user. The user agent is enough
+// to tell, and "your device" stays correct even if the check ever fails.
+const IS_MAC = /Macintosh|Mac OS X/i.test(
+    (typeof navigator !== 'undefined' && navigator.userAgent) || ''
+);
+const DEVICE_WORD = IS_MAC ? 'Mac' : 'computer';
+
 const FEATURES = [
     { icon: MousePointerClick, title: 'One-click downloads', desc: 'Download buttons appear right on the page.' },
     { icon: Zap, title: 'Works as you browse', desc: 'Auto-detects videos, reels, shorts & music instantly.' },
-    { icon: ShieldCheck, title: 'Private by design', desc: 'Everything stays on your PC — nothing uploaded.' },
+    { icon: ShieldCheck, title: 'Private by design', desc: `Everything stays on your ${DEVICE_WORD} — nothing uploaded.` },
 ];
 
 // Exact steps per browser for loading our bundled extension folder.
@@ -242,7 +250,7 @@ export function Onboarding({ initialStatus, preview, onComplete }: OnboardingPro
                                         </div>
                                     ) : (
                                         <p className="mt-3 p-3 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-white/40 leading-relaxed">
-                                            We couldn't detect a browser on this PC. Install Chrome, Edge, Brave or Firefox, then come back here.
+                                            We couldn't detect a browser on this {DEVICE_WORD.toLowerCase()}. Install Chrome, Edge, Brave or Firefox, then come back here.
                                         </p>
                                     )}
                                 </div>

@@ -8,18 +8,21 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 // @ts-ignore
 import NodeID3 from 'node-id3';
-import { getYtDlpWrap, ensureFFmpeg, getFfmpegBinaryPath, isFfmpegAvailable } from '../utils/binaries';
+import { getYtDlpWrap, getYtDlpBinaryPath, ensureFFmpeg, getFfmpegBinaryPath, getFfprobePath, isFfmpegAvailable } from '../utils/binaries';
 import { getOrganizedPath, getCookiePath, loadSettings } from '../utils/paths';
 import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
 import { fetchYouTubeMusicAlbumArt, extractYouTubeVideoId } from '../utils/youtubeMusic';
+import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/platform';
+import { preferredYoutubeClient } from '../utils/youtubeStrategy';
+import { classifyExtractionError } from '../utils/errorMessage';
 
 // Download an image URL to a unique temp file (used for MP3 cover embedding
 // and the Windows completion notification).
 async function saveThumbnailTemp(url: string): Promise<{ path: string; mime: string } | null> {
     try {
         const response = await fetch(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            headers: { 'User-Agent': defaultUserAgent() }
         });
         if (!response.ok) {
             console.error('Failed to fetch thumbnail:', response.statusText);
@@ -31,6 +34,7 @@ async function saveThumbnailTemp(url: string): Promise<{ path: string; mime: str
         const ext = contentType.includes('webp') ? 'webp' : contentType.includes('png') ? 'png' : 'jpg';
         const thumbPath = path.join(app.getPath('temp'), `vibe_thumb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`);
         fs.writeFileSync(thumbPath, buffer);
+        TEMP_THUMBNAIL_FILES.add(thumbPath);
         return { path: thumbPath, mime: contentType };
     } catch (e) {
         console.error("Failed to save thumbnail:", e);
@@ -38,6 +42,166 @@ async function saveThumbnailTemp(url: string): Promise<{ path: string; mime: str
     }
 }
 
+// Notification thumbnails are scratch files in the OS temp dir, so they have to
+// be cleaned up or they pile up for the life of the machine.
+const TEMP_THUMBNAIL_PREFIX = 'vibe_thumb_';
+const TEMP_THUMBNAIL_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const TEMP_THUMBNAIL_FILES = new Set<string>();
+
+export function cleanupTempThumbnails(maxAgeMs: number = TEMP_THUMBNAIL_MAX_AGE_MS) {
+    const tempDir = app.getPath('temp');
+    let names: string[] = [];
+    try {
+        names = fs.readdirSync(tempDir);
+    } catch (e) {
+        return;
+    }
+    const cutoff = Date.now() - maxAgeMs;
+    for (const name of names) {
+        if (!name.startsWith(TEMP_THUMBNAIL_PREFIX)) continue;
+        const full = path.join(tempDir, name);
+        try {
+            if (fs.statSync(full).mtimeMs < cutoff) {
+                fs.unlinkSync(full);
+                TEMP_THUMBNAIL_FILES.delete(full);
+            }
+        } catch (e) { /* best effort */ }
+    }
+}
+
+function discardTempThumbnail(thumbPath?: string) {
+    if (!thumbPath) return;
+    try {
+        if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
+    } catch (e) { /* best effort */ }
+    TEMP_THUMBNAIL_FILES.delete(thumbPath);
+}
+
+const SUBTITLE_ATTEMPTS = 3;
+const SUBTITLE_RETRY_MS = 4000;
+
+export interface SubtitleDownloadResult {
+    success: boolean;
+    path?: string;
+    error?: string;
+}
+
+/**
+ * Downloads a single caption track on its own, with no media involved.
+ *
+ * Subtitles are a separate download rather than a sidecar of a video download,
+ * so nothing here can be undone by a caption request failing. That isolation
+ * also matters because YouTube throttles its caption endpoint aggressively: the
+ * machine-translated languages return `HTTP Error 429: Too Many Requests`
+ * intermittently. The 429 clears within a few seconds, so retrying with a
+ * backoff succeeds where a single attempt does not.
+ */
+async function downloadSubtitleFile(
+    url: string,
+    uniqueId: string,
+    subtitle: { lang: string; isAuto?: boolean; format?: string },
+    downloadPath: string,
+    fileStem: string
+): Promise<SubtitleDownloadResult> {
+    const wantedExt = subtitle.format === 'srt' ? 'srt' : 'vtt';
+    const startedAt = Date.now();
+
+    if (subtitle.format === 'srt') {
+        // Conversion runs through FFmpeg, so make sure it exists before asking
+        // yt-dlp to convert.
+        try { await ensureFFmpeg(); } catch (e: any) {
+            return { success: false, error: `FFmpeg is needed to save subtitles as SRT: ${e?.message || e}` };
+        }
+    }
+
+    if (!fs.existsSync(downloadPath)) fs.mkdirSync(downloadPath, { recursive: true });
+
+    // `--write-subs` is author-uploaded tracks and `--write-auto-subs` is
+    // YouTube's automatic captions; passing both would write two files for one
+    // language. `--skip-download` keeps this to the caption only, and yt-dlp
+    // inserts the language code into the output template, so this writes
+    // "<title> [<id>].<lang>.srt" with no media file beside it.
+    const args: string[] = [
+        url,
+        '--skip-download',
+        '--no-warnings',
+        '--no-playlist',
+        subtitle.isAuto ? '--write-auto-subs' : '--write-subs',
+        '--sub-langs', subtitle.lang,
+        '-o', path.join(downloadPath, `${fileStem}.%(ext)s`),
+    ];
+const jsRuntime = detectJsRuntime();
+    if (jsRuntime) args.splice(2, 0, '--js-runtimes', jsRuntime.flag);
+    const jsRuntimeEnv = jsRuntimeSpawnEnv(jsRuntime);
+    if (subtitle.format === 'srt') {
+        // Any published caption format can be converted, so accept whatever the
+        // track really offers and let FFmpeg produce the requested srt. Asking
+        // for `vtt` alone would fail on tracks that publish srt but not vtt.
+        args.push('--sub-format', 'vtt/srt/best');
+        args.push('--convert-subs', 'srt');
+    } else {
+        // vtt is what YouTube serves natively, so it needs no conversion.
+        args.push('--sub-format', 'vtt');
+    }
+
+    // Conversion needs FFmpeg discoverable by yt-dlp, exactly as the media pass
+    // does it, otherwise `--convert-subs` reports ffmpeg as not installed.
+    const ffmpegPath = getFfmpegBinaryPath();
+    if (ffmpegPath) args.push('--ffmpeg-location', path.dirname(ffmpegPath));
+
+for (let attempt = 1; attempt <= SUBTITLE_ATTEMPTS; attempt++) {
+        let stderr = '';
+        try {
+            await execFileAsync(getYtDlpBinaryPath(), args, { cwd: downloadPath, maxBuffer: 32 * 1024 * 1024, env: jsRuntimeEnv });
+        } catch (e: any) {
+            stderr = String(e?.stderr || e?.message || '');
+            const throttled = /429|Too Many Requests/i.test(stderr);
+            console.warn(`Subtitle attempt ${attempt}/${SUBTITLE_ATTEMPTS} for '${subtitle.lang}' failed${throttled ? ' (throttled)' : ''}`);
+            if (attempt < SUBTITLE_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, SUBTITLE_RETRY_MS * attempt));
+                continue;
+            }
+            const detail = (stderr.split('\n').find((l) => l.includes('ERROR')) || '').replace('ERROR: ', '').trim().slice(0, 200);
+            return {
+                success: false,
+                error: throttled
+                    ? `YouTube is rate-limiting caption downloads right now. Wait about a minute and try "${subtitle.lang}" again.`
+                    : `Could not download the ${subtitle.lang} subtitles: ${detail || 'unknown error'}`,
+            };
+        }
+
+// Success cannot be read from the exit code: yt-dlp exits 0 and writes nothing
+        // when it has no track for the requested language. Scan for the file
+        // instead, and require a fresh timestamp so a file from an earlier
+        // download of the same video cannot pass for this one.
+        let found: string | undefined;
+        try {
+            const fresh = fs.readdirSync(downloadPath)
+                .filter((f) => f.startsWith(`${fileStem}.${subtitle.lang}.`))
+                .map((f) => path.join(downloadPath, f))
+                .filter((f) => {
+                    try { return fs.statSync(f).mtimeMs >= startedAt; }
+                    catch { return false; }
+                });
+            found = fresh.find((f) => f.toLowerCase().endsWith(`.${wantedExt}`)) || fresh[0];
+        } catch (e) { /* fall through to the retry decision */ }
+
+if (found) return { success: true, path: found };
+
+        // Exited cleanly but wrote nothing. Every attempt is a live extraction
+        // now, so one retry is worth it - the first can lose a race with a
+        // throttled or half-served response - before telling the user the
+        // language has no captions.
+        if (attempt < SUBTITLE_ATTEMPTS) {
+            console.warn(`No '${subtitle.lang}' subtitle written; retrying with a live extraction`);
+            await new Promise((r) => setTimeout(r, SUBTITLE_RETRY_MS * attempt));
+            continue;
+        }
+        return { success: false, error: `This video has no captions in "${subtitle.lang}".` };
+    }
+
+    return { success: false, error: `Could not download the ${subtitle.lang} subtitles.` };
+}
 // Cut a downloaded media file to [start, end] seconds using integrated FFmpeg.
 // Stream-copies video/audio where possible for near-lossless speed, falling
 // back to a re-encode when the source container doesn't support stream copy.
@@ -46,9 +210,10 @@ async function cutMediaFile(filePath: string, start: number, end: number): Promi
     const duration = Math.max(0, end - start);
     if (duration <= 0) return null;
 
-    const ffmpegDir = path.dirname(getFfmpegBinaryPath());
-    const ffmpeg = path.join(ffmpegDir, 'ffmpeg.exe');
-    if (!fs.existsSync(ffmpeg)) return null;
+    // Resolve through the shared resolver so a system FFmpeg works too, not
+    // just the copy inside userData.
+    const ffmpeg = getFfmpegBinaryPath();
+    if (!ffmpeg) return null;
 
     const ext = path.extname(filePath);
     const outPath = filePath.replace(ext, `_cut${ext}`);
@@ -123,10 +288,12 @@ async function cutMediaFile(filePath: string, start: number, end: number): Promi
 // to the universally compatible H.264 + AAC-LC using the integrated FFmpeg.
 async function recodeVideoToH264(filePath: string): Promise<void> {
     if (!fs.existsSync(filePath)) return;
-    const ffmpegDir = path.dirname(getFfmpegBinaryPath());
-    const ffprobe = path.join(ffmpegDir, 'ffprobe.exe');
-    const ffmpeg = path.join(ffmpegDir, 'ffmpeg.exe');
-    if (!fs.existsSync(ffprobe) || !fs.existsSync(ffmpeg)) return;
+    const ffmpeg = getFfmpegBinaryPath();
+    const ffprobe = getFfprobePath();
+    if (!ffprobe || !ffmpeg) {
+        console.warn('FFmpeg/ffprobe unavailable, skipping compatibility re-encode');
+        return;
+    }
 
     let probe: any;
     try {
@@ -156,16 +323,33 @@ async function recodeVideoToH264(filePath: string): Promise<void> {
 
     const ext = path.extname(filePath);
     const tmpPath = filePath.replace(ext, `_recode${ext}`);
-    const reason = videoOk ? `HE-AAC audio` : `${video.codec_name} video`;
+
+    // Transcode ONLY the streams that actually need it. Re-encoding the video
+    // is the expensive part (minutes for a 1080p file), so an HE-AAC audio
+    // track is fixed with a stream copy of the video instead.
+    const codecArgs: string[] = videoOk
+        ? ['-c:v', 'copy']
+        : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p'];
+
+    if (audio) {
+        if (audioOk) {
+            codecArgs.push('-c:a', 'copy');
+        } else {
+            codecArgs.push('-c:a', 'aac', '-b:a', '192k');
+        }
+    }
+
+    const reason = [
+        videoOk ? null : `${video.codec_name} video`,
+        !audioOk ? `${audioCodec}${heAac ? ' (HE-AAC)' : ''} audio` : null
+    ].filter(Boolean).join(' + ') || 'compatibility';
     console.log(`Re-encoding ${reason} for compatibility:`, path.basename(filePath));
     try {
         await execFileAsync(ffmpeg, [
             '-hide_banner', '-loglevel', 'error', '-y',
             '-i', filePath,
-            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-            '-c:a', 'aac', '-b:a', '192k',
+            ...codecArgs,
             '-movflags', '+faststart',
-            '-pix_fmt', 'yuv420p',
             tmpPath
         ]);
         fs.renameSync(tmpPath, filePath);
@@ -241,9 +425,8 @@ const activeJobs = new Map<string, ActiveJob>();
 
 // Best-effort remux of a possibly-interrupted recording to a playable MP4.
 async function remuxToMp4(src: string, out: string): Promise<void> {
-    const ffmpegDir = path.dirname(getFfmpegBinaryPath());
-    const ffmpeg = path.join(ffmpegDir, 'ffmpeg.exe');
-    if (!fs.existsSync(ffmpeg)) throw new Error('ffmpeg not found');
+    const ffmpeg = getFfmpegBinaryPath();
+    if (!ffmpeg) throw new Error('FFmpeg is required to finalise this recording but could not be found or downloaded.');
     if (fs.existsSync(out)) try { fs.unlinkSync(out); } catch {}
     await execFileAsync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-c', 'copy', '-movflags', '+faststart', out]);
     if (!fs.existsSync(out)) throw new Error('remux produced no output');
@@ -288,7 +471,7 @@ async function finalizeLiveRecording(downloadPath: string, uniqueFilename: strin
 }
 
 export function registerDownloadHandlers() {
-    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId, cutStart, cutEnd }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string, cutStart?: number, cutEnd?: number }) => {
+    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId, cutStart, cutEnd, audioTrack, audioLangLabel }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string, cutStart?: number, cutEnd?: number, audioTrack?: string, audioLangLabel?: string }) => {
         registerDownloadStart();
         try {
             const mainWindow = getMainWindow();
@@ -427,7 +610,7 @@ export function registerDownloadHandlers() {
                 mainWindow?.webContents.send('download-progress', { percent: 10, currentSpeed: 'Downloading...', jobId });
 
                 const resp = await fetch(url, {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                    headers: { 'User-Agent': defaultUserAgent() }
                 });
 
                 if (!resp.ok) throw new Error(`Failed to direct download: ${resp.status}`);
@@ -490,11 +673,15 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
 
             const args = [
                 url,
-                '--js-runtimes', 'node',
                 '--no-check-certificates',
                 '-o', outputTemplate,
                 '--no-playlist'
             ];
+
+            // Always have a JS runtime: it is the Node inside this app.
+            const jsRuntime = detectJsRuntime();
+            if (jsRuntime) args.splice(1, 0, '--js-runtimes', jsRuntime.flag);
+            const jsRuntimeEnv = jsRuntimeSpawnEnv(jsRuntime);
 
             // Add cookies if available for the specific platform
             let cookiePath = null;
@@ -510,18 +697,25 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             }
 
             // Add User-Agent to help with Facebook/Instagram/YouTube
-            const defaultUA = process.platform === 'darwin'
-                ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-                : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
-            args.push('--user-agent', defaultUA);
+            const defaultUA = defaultUserAgent();
+            // Not for YouTube: yt-dlp's default UA is paired with its default
+            // player client, and substituting a browser UA for it is what made
+            // the app return a low-res-only format list where the same user's
+            // own `yt-dlp` command returned 1080p. See infoHandler.ts.
+            if (!isYoutube) args.push('--user-agent', defaultUA);
 
-            if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
-                // tv_embedded returns the FULL DASH format list (up to 4K) AND
-                // handles age-gated videos. Other clients (web, android_vr,
-                // web_safari) currently return only the combined 360p format.
-                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
-            } else {
-                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
+            // Pinning a player disables yt-dlp's own fallback, and tv_embedded without a
+            // session hits YouTube's login wall - which YouTube phrases as
+            // "Sign in to confirm your age". That is why the same public video
+            // downloaded on some machines and reported an age error on others.
+            // So only pin when there are cookies; otherwise let yt-dlp choose.
+            // The download path cannot retry mid-transfer, so this takes the
+            // single best attempt. See utils/youtubeStrategy.ts.
+            if (isYoutube) {
+                const preferred = preferredYoutubeClient(Boolean(cookiePath && fs.existsSync(cookiePath)));
+                if (preferred.extractorArgs) {
+                    args.push('--extractor-args', preferred.extractorArgs[0]);
+                }
             }
 
             if (cookiePath && fs.existsSync(cookiePath)) {
@@ -540,6 +734,15 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 if (formatId === 'audio_best') quality = '0';
                 if (formatId === 'audio_low') quality = '9';
 
+                // A dubbed video publishes one audio format set per language.
+                // Pinning the chosen language's format id is what makes the
+                // download that language instead of YouTube's default track;
+                // without a selection the normal best-audio choice stands.
+                if (audioTrack) {
+                    args.push('-f', audioTrack);
+                    console.log(`Extracting ${audioLangLabel || audioTrack} audio (format ${audioTrack})`);
+                }
+
                 args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality);
                 // Let yt-dlp write + embed the best thumbnail (for music /
                 // "Topic" videos this is the square album cover). node-id3 is
@@ -551,14 +754,19 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
 
                 if (isLiveDownload) {
                     // Live broadcast: record the single live format stream until
-                    // the user stops it or the stream ends (no merge needed).
+                    // the user stops it or the merge finishes.
                     args.push('-f', 'best');
                 } else {
                     // FORCE MP4 and H264 priority
                     args.push('--merge-output-format', 'mp4');
 
                     if (formatId && formatId !== 'best') {
-                        args.push('-f', `${formatId}+bestaudio/best`);
+                        // Pair the chosen video with the chosen audio language.
+                        // `bestaudio` would quietly hand back the original track.
+                        args.push('-f', `${formatId}+${audioTrack || 'bestaudio'}/best`);
+                        if (audioTrack) {
+                            console.log(`Merging ${formatId} with ${audioLangLabel || audioTrack} audio (format ${audioTrack})`);
+                        }
                     } else {
                         args.push('-S', 'res,ext:mp4:m4a,vcodec:h264,acodec:aac');
                     }
@@ -568,16 +776,22 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             args.push('--progress', '--newline');
 
             // Ensure we use our own FFmpeg if available, or fall back to system
-            if (isFfmpegAvailable()) {
-                const ffmpegPath = getFfmpegBinaryPath();
-                if (fs.existsSync(ffmpegPath)) {
-                    const ffmpegDir = path.dirname(ffmpegPath);
-                    args.push('--ffmpeg-location', ffmpegDir);
-                    console.log('Using integrated FFmpeg at:', ffmpegDir);
-                } else {
-                    console.log('Using system FFmpeg');
-                }
+            // Point yt-dlp at whichever FFmpeg we actually resolved.
+            const ffmpegPath = getFfmpegBinaryPath();
+            if (ffmpegPath) {
+                const ffmpegDir = path.dirname(ffmpegPath);
+                args.push('--ffmpeg-location', ffmpegDir);
+                console.log('Using FFmpeg at:', ffmpegDir);
+            } else {
+                console.warn('No FFmpeg available, letting yt-dlp use whatever it can find');
             }
+
+            // Captions are NOT part of a media download. The user downloads a
+            // subtitle on its own via the `download-subtitles` channel, so there
+            // are no subtitle flags here: YouTube throttles its caption endpoint
+            // (HTTP 429 on the machine-translated languages) and yt-dlp fetches
+            // subtitles before the media, so bundling them would let a throttled
+            // caption abort - and therefore destroy - the video download.
 
             // Thumbnail for the completion notification. yt-dlp embeds its own
             // thumbnail into audio files; we ALSO kick off a parallel YouTube
@@ -601,183 +815,272 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             // Speed up downloads with parallel fragments
             args.push('--concurrent-fragments', '16');
 
+            // YouTube applies a per-connection throttle to googlevideo streams.
+            // yt-dlp's native downloader only chunks when this is set (it is
+            // disabled by default), so plain-HTTPS DASH streams otherwise run
+            // over a single un-chunked connection and crawl.
+            args.push('--http-chunk-size', '10M');
+
             console.log("Starting download with args:", args);
             console.log("Saving to:", downloadPath);
 
-
-            const ytDlpEventEmitter = ytDlpWrap.exec(args);
-
             const jobHandle: ActiveJob = { cancelled: false };
-            jobHandle.proc = ytDlpEventEmitter;
             if (jobId) activeJobs.set(jobId, jobHandle);
 
-            ytDlpEventEmitter.on('progress', (progress: any) => {
-                // Ensure percent is a number and valid
-                const percent = typeof progress.percent === 'number' ? progress.percent : parseFloat(progress.percent) || 0;
+            // Captured before the process starts so a subtitle sidecar left over
+            // from an earlier download of the same video cannot be mistaken for
+            // the one this run produced.
+            const downloadStartedAt = Date.now() - 2000;
 
-                mainWindow?.webContents.send('download-progress', {
-                    percent: percent,
-                    totalSize: progress.totalSize || '...',
-                    currentSpeed: progress.currentSpeed || '...',
-                    eta: progress.eta || '...',
-                    downloaded: progress.downloadedSize || '...',
-                    isLive: isLiveDownload,
-                    jobId
+            // Runs yt-dlp with the given args and resolves only once the
+            // finished file has been located and post-processed. It rejects on
+            // failure so a cached-extraction run can be retried from scratch.
+            const runYtDlp = (execArgs: string[]) => {
+                const ytDlpEventEmitter = ytDlpWrap.exec(execArgs, { env: jsRuntimeEnv });
+                jobHandle.proc = ytDlpEventEmitter;
+
+                ytDlpEventEmitter.on('progress', (progress: any) => {
+                    // Ensure percent is a number and valid
+                    const percent = typeof progress.percent === 'number' ? progress.percent : parseFloat(progress.percent) || 0;
+
+                    mainWindow?.webContents.send('download-progress', {
+                        percent: percent,
+                        totalSize: progress.totalSize || '...',
+                        currentSpeed: progress.currentSpeed || '...',
+                        eta: progress.eta || '...',
+                        downloaded: progress.downloadedSize || '...',
+                        isLive: isLiveDownload,
+                        jobId
+                    });
                 });
-            });
 
-            // Resolve only after yt-dlp actually finishes, so callers (e.g.
-            // playlist bulk download) know when the file is really done.
-            return await new Promise<{ success: boolean; path?: string }>((resolve, reject) => {
-                let settled = false;
-                let failed = false;
+                // Resolve only after yt-dlp actually finishes, so callers (e.g.
+                // playlist bulk download) know when the file is really done.
+                return new Promise<{ success: boolean; path?: string }>((resolve, reject) => {
+                    let settled = false;
+                    let failed = false;
 
-                ytDlpEventEmitter.on('error', (error: any) => {
-                    console.error("Download Error", error);
-                    failed = true;
-                    mainWindow?.webContents.send('download-progress', { error: error.message, jobId });
-                    if (!settled) { settled = true; reject(new Error(error.message)); }
-                });
+                    ytDlpEventEmitter.on('error', (error: any) => {
+                        console.error("Download Error", error);
+                        failed = true;
+                        // Never hand the UI yt-dlp's raw output: it is multi-line
+                        // and echoes our own command line back, flags included.
+                        // Classifying also fixes the misleading case where a user
+                        // who already added cookies was told to add cookies.
+                        const classified = classifyExtractionError(error?.message || String(error), url, {
+                            hasCookies: Boolean(cookiePath && fs.existsSync(cookiePath))
+                        });
+                        mainWindow?.webContents.send('download-progress', { error: classified.message, jobId });
+                        if (!settled) { settled = true; reject(new Error(classified.message)); }
+                    });
 
-                ytDlpEventEmitter.on('close', async (code?: number | null) => {
-                    if (failed) return;
-                    if (jobId) activeJobs.delete(jobId);
+                    ytDlpEventEmitter.on('close', async (code?: number | null) => {
+                        if (failed) return;
+                        if (jobId) activeJobs.delete(jobId);
 
-                    // Non-zero exit without an error event: treat as a failure,
-                    // EXCEPT a live recording the user stopped on purpose.
-                    if (typeof code === 'number' && code !== 0 && !(isLiveDownload && jobHandle.cancelled)) {
-                        console.error(`Download exited with code ${code}:`, safeTitle);
-                        if (!settled) { settled = true; reject(new Error(`yt-dlp exited with code ${code}`)); }
-                        return;
-                    }
-
-                    console.log("Download complete event for:", safeTitle);
-
-                    if (isLiveDownload) {
-                        // Recording stopped (by user or stream end) — finalize the
-                        // partial file into a playable mp4.
-                        const desiredName = `${uniqueFilename}.mp4`;
-                        const finalPath = await finalizeLiveRecording(downloadPath, uniqueFilename, desiredName);
-                        if (!finalPath) {
-                            console.error('Live recording produced no file');
-                            if (!settled) { settled = true; reject(new Error('Recording ended with no output file')); }
+                        // Non-zero exit without an error event: treat as a failure,
+                        // EXCEPT a live recording the user stopped on purpose.
+                        if (typeof code === 'number' && code !== 0 && !(isLiveDownload && jobHandle.cancelled)) {
+                            console.error(`Download exited with code ${code}:`, safeTitle);
+                            if (!settled) { settled = true; reject(new Error(`yt-dlp exited with code ${code}`)); }
                             return;
                         }
+
+                        console.log("Download complete event for:", safeTitle);
+
+                        if (isLiveDownload) {
+                            // Recording stopped (by user or stream end) — finalize the
+                            // partial file into a playable mp4.
+                            const desiredName = `${uniqueFilename}.mp4`;
+                            const finalPath = await finalizeLiveRecording(downloadPath, uniqueFilename, desiredName);
+                            if (!finalPath) {
+                                console.error('Live recording produced no file');
+                                if (!settled) { settled = true; reject(new Error('Recording ended with no output file')); }
+                                return;
+                            }
 
                         mainWindow?.webContents.send('download-progress', {
                             complete: true,
                             title: safeTitle,
                             path: finalPath,
                             isLive: true,
+                                jobId
+                            });
+                            if (!suppressNotifications) {
+                                showNotification('Recording Saved! ✅', `${safeTitle} (live)`, undefined, finalPath);
+                            }
+                            if (!settled) { settled = true; resolve({ success: true, path: finalPath }); }
+                            return;
+                        }
+
+                        // Wait a tiny bit for file to be released
+                        await new Promise(r => setTimeout(r, 500));
+
+                        // yt-dlp may write a different extension than finalExt (e.g.
+                        // webm/mkv when no mp4 format exists) — locate the real file.
+                        let actualFilePath = finalFilePath;
+                        if (!fs.existsSync(actualFilePath)) {
+                            try {
+                                const mediaFiles = fs.readdirSync(downloadPath).filter(f =>
+                                    f.startsWith(`${uniqueFilename}.`) && /\.(mp4|webm|mkv|mov|m4v)$/i.test(f)
+                                );
+                                if (mediaFiles.length) actualFilePath = path.join(downloadPath, mediaFiles[0]);
+                            } catch (e) {
+                                console.error('Failed to locate output media file:', e);
+                            }
+                        }
+                        const isVideoDownload = !(formatId && (formatId.startsWith('audio_') || formatId === 'audio'));
+                        if (isVideoDownload && fs.existsSync(actualFilePath)) {
+                            await recodeVideoToH264(actualFilePath);
+                        }
+
+                        // Cut the finished file down to [cutStart, cutEnd] if requested.
+                        let displayPath = actualFilePath;
+                        if (isCutDownload && fs.existsSync(actualFilePath)) {
+                            mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
+                            const cutResultPath = await cutMediaFile(actualFilePath, cutStart, cutEnd);
+                            if (cutResultPath) displayPath = cutResultPath;
+                            else console.error('Cut failed, keeping full-length file');
+                        }
+
+                        // yt-dlp can leave the converted thumbnail file behind after
+                        // embedding — remove any leftover image files for this download.
+                        try {
+                            for (const f of fs.readdirSync(downloadPath)) {
+                                if (f.startsWith(`${uniqueFilename}.`) && /\.(jpe?g|png|webp)$/i.test(f)) {
+                                    try {
+                                        fs.unlinkSync(path.join(downloadPath, f));
+                                        console.log('Removed leftover thumbnail:', f);
+                                    } catch (e) {
+                                        console.error('Failed to remove leftover thumbnail:', e);
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Failed to scan download folder for leftover thumbnails:', e);
+                        }
+
+                        // Upgrade the embedded cover to the true square YouTube Music
+                        // album art when the parallel lookup succeeded.
+                        const isAudioDownload = formatId && (formatId.startsWith('audio_') || formatId === 'audio');
+                        if (isAudioDownload && artPromise && fs.existsSync(finalFilePath)) {
+                            const art = await artPromise;
+                            if (art) {
+                                console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
+                                const info = await saveThumbnailTemp(art);
+                                if (info) {
+                                    // The earlier candidate is superseded by the real
+                                    // album art, so drop it instead of leaking it.
+                                    discardTempThumbnail(thumbPath);
+                                    thumbPath = info.path;
+                                    try {
+                                        const tags = {
+                                            title: safeTitle,
+                                            image: {
+                                                mime: info.mime,
+                                                type: { id: 3, name: "front cover" },
+                                                description: "Cover",
+                                                imageBuffer: fs.readFileSync(info.path)
+                                            }
+                                        };
+                                        console.log("Embedding YouTube Music album art:", NodeID3.update(tags, finalFilePath));
+                                    } catch (e) {
+                                        console.error("Failed to write album art tags (non-fatal):", e);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Captions are downloaded separately by the user through
+                        // the `download-subtitles` channel, so a media download
+                        // has nothing left to verify here.
+                        mainWindow?.webContents.send('download-progress', {
+                            complete: true,
+                            title: safeTitle,
+                            path: displayPath,
                             jobId
                         });
+
                         if (!suppressNotifications) {
-                            showNotification('Recording Saved! ✅', `${safeTitle} (live)`, undefined, finalPath);
-                        }
-                        if (!settled) { settled = true; resolve({ success: true, path: finalPath }); }
-                        return;
-                    }
-
-                    // Wait a tiny bit for file to be released
-                    await new Promise(r => setTimeout(r, 500));
-
-                    // yt-dlp may write a different extension than finalExt (e.g.
-                    // webm/mkv when no mp4 format exists) — locate the real file.
-                    let actualFilePath = finalFilePath;
-                    if (!fs.existsSync(actualFilePath)) {
-                        try {
-                            const mediaFiles = fs.readdirSync(downloadPath).filter(f =>
-                                f.startsWith(`${uniqueFilename}.`) && /\.(mp4|webm|mkv|mov|m4v)$/i.test(f)
+                            showNotification(
+                                'Download Complete! ✅',
+                                `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
+                                thumbPath,
+                                displayPath
                             );
-                            if (mediaFiles.length) actualFilePath = path.join(downloadPath, mediaFiles[0]);
-                        } catch (e) {
-                            console.error('Failed to locate output media file:', e);
                         }
-                    }
-                    const isVideoDownload = !(formatId && (formatId.startsWith('audio_') || formatId === 'audio'));
-                    if (isVideoDownload && fs.existsSync(actualFilePath)) {
-                        await recodeVideoToH264(actualFilePath);
-                    }
+                        // The notification has taken the image into memory by now,
+                        // so the scratch file is no longer needed.
+                        discardTempThumbnail(thumbPath);
 
-                    // Cut the finished file down to [cutStart, cutEnd] if requested.
-                    let displayPath = actualFilePath;
-                    if (isCutDownload && fs.existsSync(actualFilePath)) {
-                        mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
-                        const cutResultPath = await cutMediaFile(actualFilePath, cutStart, cutEnd);
-                        if (cutResultPath) displayPath = cutResultPath;
-                        else console.error('Cut failed, keeping full-length file');
-                    }
+                        if (settled) return;
 
-                    // yt-dlp can leave the converted thumbnail file behind after
-                    // embedding — remove any leftover image files for this download.
-                    try {
-                        for (const f of fs.readdirSync(downloadPath)) {
-                            if (f.startsWith(`${uniqueFilename}.`) && /\.(jpe?g|png|webp)$/i.test(f)) {
-                                try {
-                                    fs.unlinkSync(path.join(downloadPath, f));
-                                    console.log('Removed leftover thumbnail:', f);
-                                } catch (e) {
-                                    console.error('Failed to remove leftover thumbnail:', e);
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Failed to scan download folder for leftover thumbnails:', e);
-                    }
 
-                    // Upgrade the embedded cover to the true square YouTube Music
-                    // album art when the parallel lookup succeeded.
-                    const isAudioDownload = formatId && (formatId.startsWith('audio_') || formatId === 'audio');
-                    if (isAudioDownload && artPromise && fs.existsSync(finalFilePath)) {
-                        const art = await artPromise;
-                        if (art) {
-                            console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
-                            const info = await saveThumbnailTemp(art);
-                            if (info) {
-                                thumbPath = info.path;
-                                try {
-                                    const tags = {
-                                        title: safeTitle,
-                                        image: {
-                                            mime: info.mime,
-                                            type: { id: 3, name: "front cover" },
-                                            description: "Cover",
-                                            imageBuffer: fs.readFileSync(info.path)
-                                        }
-                                    };
-                                    console.log("Embedding YouTube Music album art:", NodeID3.update(tags, finalFilePath));
-                                } catch (e) {
-                                    console.error("Failed to write album art tags (non-fatal):", e);
-                                }
-                            }
-                        }
-                    }
-
-                    mainWindow?.webContents.send('download-progress', {
-                        complete: true,
-                        title: safeTitle,
-                        path: displayPath,
-                        jobId
+                        settled = true;
+                        resolve({ success: true, path: displayPath });
                     });
-
-                    if (!suppressNotifications) {
-                        showNotification(
-                            'Download Complete! ✅',
-                            `${safeTitle} saved to ${detectedPlatform}/${detectedContentType}`,
-                            thumbPath,
-                            displayPath
-                        );
-                    }
-
-                    if (!settled) { settled = true; resolve({ success: true, path: displayPath }); }
                 });
-            });
+            };
+
+            try {
+                return await runYtDlp(args);
+            } finally {
+                if (jobId) activeJobs.delete(jobId);
+                // Safety net for failures and cancellations, which never reach
+                // the success path that discards the thumbnail.
+                discardTempThumbnail(thumbPath);
+            }
         } catch (e: any) {
             console.error("Main Error", e);
             if (!suppressNotifications) {
                 showNotification('Download Failed', e.message);
             }
             return { success: false, error: e.message };
+        } finally {
+            registerDownloadEnd();
+        }
+    });
+
+    // Captions are downloaded on their own, never as part of a media download,
+    // and land in the platform's Subtitles folder.
+    ipcMain.handle('download-subtitles', async (event: any, { url, title, platform, contentType, playlistTitle, thumbnail, suppressNotifications, subtitle }: {
+        url: string; title?: string; platform?: string; contentType?: string; playlistTitle?: string;
+        thumbnail?: string; suppressNotifications?: boolean;
+        subtitle: { lang: string; isAuto?: boolean; format?: 'srt' | 'vtt' };
+    }) => {
+        if (!url) return { success: false, error: 'No URL provided' };
+        if (!subtitle?.lang) return { success: false, error: 'No subtitle language selected' };
+        registerDownloadStart();
+        try {
+            const detectedPlatform = platform || 'youtube';
+            const safeTitle = (title || 'video').replace(/[\\/:*?"<>|]/g, '').trim() || 'video';
+            // A playlist keeps its own folder, matching where its media goes.
+            const subtitleDir = getOrganizedPath(detectedPlatform, 'subtitles', playlistTitle);
+            const uniqueId = extractYouTubeVideoId(url) || Date.now().toString(36);
+            const fileStem = `${safeTitle} [${uniqueId}]`;
+
+            console.log(`Downloading ${subtitle.lang} (${subtitle.isAuto ? 'auto' : 'manual'}) subtitles as ${subtitle.format || 'vtt'}`);
+
+            const result = await downloadSubtitleFile(url, uniqueId, subtitle, subtitleDir, fileStem);
+
+            if (result.success && result.path && !suppressNotifications) {
+                const thumb = thumbnail ? await saveThumbnailTemp(thumbnail) : null;
+                showNotification(
+                    'Subtitles Saved! \u2705',
+                    `${path.basename(result.path)} saved to ${detectedPlatform}/Subtitles`,
+                    thumb?.path,
+                    result.path
+                );
+                discardTempThumbnail(thumb?.path);
+            }
+            if (!result.success) {
+                console.error('Subtitle download failed:', result.error);
+                if (!suppressNotifications) showNotification('Subtitle Download Failed', result.error || 'Unknown error');
+            }
+            return result;
+        } catch (e: any) {
+            console.error('Subtitle download error:', e);
+            return { success: false, error: e?.message || String(e) };
         } finally {
             registerDownloadEnd();
         }
@@ -816,7 +1119,6 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
 
             const args = [
                 ytSearchUrl,
-                '--js-runtimes', 'node',
                 '--extractor-args', 'youtube:player_client=tv_embedded',
                 '--no-check-certificates',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '0',
@@ -827,15 +1129,16 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 '--concurrent-fragments', '16'
             ];
 
+            const spotifyJsRuntime = detectJsRuntime();
+            if (spotifyJsRuntime) args.splice(1, 0, '--js-runtimes', spotifyJsRuntime.flag);
+
             // Pass ffmpeg location to yt-dlp so it can find ffprobe/ffmpeg
-            if (isFfmpegAvailable()) {
-                const ffmpegPath = getFfmpegBinaryPath();
-                if (fs.existsSync(ffmpegPath)) {
-                    args.push('--ffmpeg-location', path.dirname(ffmpegPath));
-                }
+            const ffmpegPath = getFfmpegBinaryPath();
+            if (ffmpegPath) {
+                args.push('--ffmpeg-location', path.dirname(ffmpegPath));
             }
 
-            const ytDlpEventEmitter = ytDlpWrap.exec(args);
+            const ytDlpEventEmitter = ytDlpWrap.exec(args, { env: jsRuntimeSpawnEnv(spotifyJsRuntime) });
 
             ytDlpEventEmitter.on('progress', (progress: any) => {
                 const percent = typeof progress.percent === 'number' ? progress.percent : parseFloat(progress.percent) || 0;
@@ -891,7 +1194,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                                     responseType: 'arraybuffer',
                                     timeout: 3000,
                                     headers: {
-                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                                        'User-Agent': defaultUserAgent(),
                                         'Referer': 'https://open.spotify.com/',
                                         'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
                                     }
@@ -958,7 +1261,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 responseType: 'arraybuffer',
                 timeout: 3000,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    'User-Agent': defaultUserAgent(),
                     'Referer': 'https://open.spotify.com/',
                     'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
                 }

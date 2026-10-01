@@ -3,11 +3,12 @@ import { app, BrowserWindow, shell, Tray, Menu } from 'electron';
 import path from 'path';
 import { initPaths, ensureYtDlp, checkFFmpegOnStartup, checkForYtDlpUpdate } from './utils/binaries';
 import { setMainWindow } from './utils/windowManager';
-import { registerDownloadHandlers, getActiveDownloadCount, waitForDownloadsToFinish, cleanupDownloadArtifacts } from './handlers/downloadHandler';
+import { registerDownloadHandlers, getActiveDownloadCount, waitForDownloadsToFinish, cleanupDownloadArtifacts, cleanupTempThumbnails } from './handlers/downloadHandler';
 import { registerInfoHandlers } from './handlers/infoHandler';
 import { registerCookieHandlers } from './handlers/cookieHandler';
 import { registerGeneralHandlers } from './handlers/generalHandler';
 import { registerExtensionHandlers } from './handlers/extensionHandler';
+import { registerLyricsHandlers } from './handlers/lyricsHandler';
 import { showNotification } from './utils/notifications';
 import { setupAutoUpdater, registerUpdaterHandlers } from './utils/updater';
 import { startWebSocketServer, stopWebSocketServer } from './utils/websocketServer';
@@ -222,6 +223,14 @@ if (!gotTheLock) {
             checkForYtDlpUpdate();
         } catch (e) {
             console.error("Failed to ensure yt-dlp binary:", e);
+            // Without yt-dlp nothing can be downloaded, so this is worth telling
+            // the user about rather than only writing to the log they never see.
+            try {
+                showNotification(
+                    'VibeDownloader cannot start',
+                    'Its YouTube downloader component (yt-dlp) could not be downloaded. Check your internet connection or firewall, then restart the app.'
+                );
+            } catch { /* ignore */ }
         }
 
         checkFFmpegOnStartup();
@@ -234,6 +243,11 @@ if (!gotTheLock) {
         // Remove yt-dlp fragment files left behind by a previously interrupted
         // download (crash / forced kill). Safe: nothing can be downloading yet.
         cleanupDownloadArtifacts();
+
+        // Clear scratch thumbnails from a previous session. The info-JSON cache these
+        // two lines used to accompany is gone: every fetch and download now runs
+        // a live extraction, so there is no cache left to bound.
+        try { cleanupTempThumbnails(); } catch (e) { console.error('Temp thumbnail sweep failed:', e); }
 
         // Start WebSocket server for browser extension
         startWebSocketServer();
@@ -278,6 +292,7 @@ if (!gotTheLock) {
         registerCookieHandlers();
         registerGeneralHandlers();
         registerExtensionHandlers();
+        registerLyricsHandlers();
         registerUpdaterHandlers();
 
         // Initialize auto-updater (only in production)

@@ -2,10 +2,190 @@ import { ipcMain, app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { getYtDlpWrap } from '../utils/binaries';
-import { getCookiePath } from '../utils/paths';
+import { getCookiePath, loadStoriesApiKey } from '../utils/paths';
 import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
+import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/platform';
+import { classifyExtractionError } from '../utils/errorMessage';
+import { buildSubtitleList } from '../utils/subtitles';
+import { buildAudioTrackList } from '../utils/audioTracks';
 import { fetchYouTubeMusicAlbumArt } from '../utils/youtubeMusic';
-import { igApi } from 'insta-fetcher';
+import { parseStoryUrl, fetchStories, normalizeStoryInput } from '../utils/instagramStories';
+import { youtubeClientAttempts, isClientSensitiveError } from '../utils/youtubeStrategy';
+import { getYtDlpVersion } from '../utils/binaries';
+import type { NormalizedStory } from '../utils/instagramStories';
+
+/** Separators YouTube uses between artist names in a single credit string. */
+const ARTIST_SPLIT = /\s*(?:,|;|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\band\b)\s*/i;
+
+/**
+ * The artist to match lyrics against.
+ *
+ * yt-dlp exposes three overlapping fields and they disagree. YouTube Music
+ * sometimes reports the same name twice in `artist` - verified on
+ * `music.youtube.com/watch?v=tdnkkMK3N88`, where `artist` and `creator` are both
+ * `"Murtaza Qizilbash, Murtaza Qizilbash"` while `uploader` is clean. Passing
+ * the doubled string straight through matches no catalogue, and the result is a
+ * silent "no lyrics" rather than a visible error.
+ *
+ * So each source is taken in turn, split into individual names, stripped of the
+ * `- Topic` channel marker, and de-duplicated case-insensitively. A repeated
+ * name is a metadata artefact, never a real collaboration - two songs by the
+ * same artist are not a collaboration.
+ */
+function pickMusicArtist(raw: any): string {
+    for (const source of [raw.artist, raw.creator, raw.uploader]) {
+        if (typeof source !== 'string') continue;
+
+        const names = source
+            .split(ARTIST_SPLIT)
+            .map((name: string) => name.replace(/\s*-\s*Topic\s*$/i, '').trim())
+            .filter(Boolean);
+
+        const seen = new Set<string>();
+        const unique: string[] = [];
+        for (const name of names) {
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            unique.push(name);
+        }
+
+        if (unique.length) return unique.join(', ');
+    }
+
+    return '';
+}
+
+/**
+ * Turns a raw yt-dlp JSON payload into the metadata shape the renderer expects.
+ * Kept separate from the IPC handler so a cached extraction can be rendered
+ * through exactly the same code as a live one, and exported so the metadata
+ * contract can be asserted without going through yt-dlp.
+ */
+export async function buildMetadataFromRaw(raw: any, url: string, isYoutube: boolean) {
+    let contentType = 'video';
+    if (url.includes('/stories/') || url.includes('/story/')) {
+        contentType = 'story';
+    } else if (raw._type === 'playlist' || (raw.entries && raw.entries.length > 0)) {
+        contentType = 'playlist';
+    }
+
+    let thumbnail = raw.thumbnail;
+    let ytMusicArtFound = false;
+
+    const isMusic = isYoutube && (url.includes('music.youtube.com') || raw.categories?.includes('Music') || raw.uploader?.endsWith('-Topic'));
+
+    if (isMusic && raw.id) {
+        try {
+            const ytMusicArt = await fetchYouTubeMusicAlbumArt(raw.id);
+            if (ytMusicArt) {
+                thumbnail = ytMusicArt;
+                ytMusicArtFound = true;
+                console.log('✅ Premium YT Music square art fetched:', thumbnail);
+            }
+        } catch (e) { console.error('YT Music art fetch error:', e); }
+    }
+
+    if (!ytMusicArtFound && raw.thumbnails && raw.thumbnails.length > 0) {
+        // Sort thumbnails by resolution total pixels (fallback reference)
+        const sortedByRes = [...raw.thumbnails].sort((a: any, b: any) =>
+            ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0))
+        );
+
+        // 1. BEST OPTION: Look for square art from Google Content hosts (lh3.googleusercontent.com, etc.)
+        // These are high-quality, bar-free square covers
+        const googleArt = raw.thumbnails.find((t: any) =>
+            t.url.includes('googleusercontent.com') || t.url.includes('ggpht.com')
+        );
+
+        if (googleArt && isYoutube) {
+            // Upgrade resolution to 2000x2000px and FORCE JPEG (-rj)
+            let highResUrl = googleArt.url;
+            if (highResUrl.includes('=w')) {
+                highResUrl = highResUrl.replace(/=w\d+-h\d+/, '=w2000-h2000');
+                // Add -rj if not present to force JPEG
+                if (!highResUrl.includes('-rj')) {
+                    highResUrl = highResUrl.split('=').slice(0, -1).join('=') + '=w2000-h2000-rj';
+                }
+            } else if (!highResUrl.includes('=')) {
+                highResUrl += '=w2000-h2000-l90-rj';
+            }
+            thumbnail = highResUrl;
+            console.log('Force JPEG Premium square art selected (from metadata):', thumbnail);
+        } else {
+            if (isMusic) {
+                // 2. Music-specific square check
+                const squareThumb = raw.thumbnails.find((t: any) => {
+                    if (!t.width || !t.height) return false;
+                    const ratio = t.width / t.height;
+                    return Math.abs(ratio - 1) < 0.05 && t.width >= 300;
+                });
+
+                if (squareThumb) {
+                    thumbnail = squareThumb.url.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+                } else {
+                    // Avoid landscape with bars
+                    thumbnail = sortedByRes.find(t => !t.url.includes('maxresdefault'))?.url || sortedByRes[0].url;
+                    thumbnail = thumbnail?.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+                }
+            } else {
+                // 3. Regular video logic
+                const potentialSquare = raw.thumbnails.find((t: any) => {
+                    if (!t.width || !t.height) return false;
+                    return t.width === t.height && t.width >= 400;
+                });
+
+                thumbnail = potentialSquare?.url || sortedByRes[0].url;
+                thumbnail = thumbnail?.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+            }
+        }
+    }
+
+    const entriesArr = Array.isArray(raw.entries) ? raw.entries : [];
+    const sanitizedEntries = entriesArr
+        .filter((e: any) => e && (e.id || e.title || e.url))
+        .map((e: any, i: number) => ({
+            id: e.id || `track-${i}-${Date.now()}`,
+            title: e.title || e.fulltitle || `Track ${i + 1}`,
+            thumbnail: e.thumbnail || (e.thumbnails && e.thumbnails.length > 0 ? e.thumbnails[0].url : ''),
+            duration: e.duration || 0,
+            url: e.url || e.webpage_url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : url)
+        }));
+
+    // The renderer needs to know this is a music track to decide whether lyrics
+    // are worth looking up, and the raw yt-dlp signals that drive that decision
+    // are not otherwise forwarded. `isMusic` was already computed above; the
+    // categories travel with it so the renderer can re-derive the same answer
+    // instead of trusting a bare boolean it cannot audit.
+    const musicArtist = isMusic ? pickMusicArtist(raw) : '';
+
+    const metadata = {
+        id: raw.id || `pl-${Date.now()}`,
+        title: raw.title || raw.fulltitle || 'Untitled Playlist',
+        thumbnail: thumbnail || '',
+        thumbnails: raw.thumbnails || [],
+        uploader: raw.uploader || raw.channel || raw.creator || raw.uploader_id || 'Unknown',
+        uploader_url: raw.uploader_url || raw.channel_url,
+        channel_follower_count: raw.channel_follower_count,
+        view_count: raw.view_count || 0,
+        like_count: raw.like_count || 0,
+        duration: raw.duration || 0,
+        description: raw.description?.slice(0, 300) || '',
+        formats: raw.formats || [],
+        subtitles: buildSubtitleList(raw),
+        audioTracks: buildAudioTrackList(raw),
+        isLive: !!raw.is_live,
+        isMusic,
+        categories: raw.categories || [],
+        artist: musicArtist,
+        webpage_url: raw.webpage_url || url,
+        contentType,
+        entries: sanitizedEntries,
+        playlist_count: raw.playlist_count || sanitizedEntries.length || 0
+    };
+
+    return { metadata, contentType };
+}
 
 export function registerInfoHandlers() {
     ipcMain.handle('get-video-info', async (event: any, url: any) => {
@@ -20,6 +200,10 @@ export function registerInfoHandlers() {
 
         console.log(`Fetching info for ${url}...`);
 
+        // Hoisted: the catch block needs to know whether cookies were actually
+        // sent, so that a failure does not tell a user to add cookies again.
+        let sentCookies = false;
+
         try {
             const ytDlpWrap = getYtDlpWrap();
             const hasListParam = url.includes('list=');
@@ -31,13 +215,25 @@ export function registerInfoHandlers() {
                 '--dump-single-json',
                 '--no-warnings',
                 '--socket-timeout', '30',
-                '--js-runtimes', 'node',
                 '--no-check-certificates'
             ];
 
+            // yt-dlp needs a JavaScript runtime to get past YouTube's challenges, and
+            // warns that without one "some formats may be missing". We now always
+            // have one: the Node runtime already inside this app. See
+            // utils/platform.ts detectJsRuntime.
+            const jsRuntime = detectJsRuntime();
+            if (jsRuntime) args.push('--js-runtimes', jsRuntime.flag);
+            const jsRuntimeEnv = jsRuntimeSpawnEnv(jsRuntime);
+
             // Add cookies if available for the specific platform
             let cookiePath = null;
-            const isInstagram = url.includes('instagram.com') || url.includes('instagr.am');
+            // A bare `@handle` carries no domain, so it is normalised to a
+            // canonical stories URL before any of this runs. That keeps every
+            // downstream `url.includes('instagram.com')` check working without
+            // teaching each one about handles.
+            const normalized = normalizeStoryInput(url);
+            const isInstagram = normalized.url.includes('instagram.com') || normalized.url.includes('instagr.am');
             const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com');
             const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
             const isTiktok = url.includes('tiktok.com');
@@ -51,56 +247,42 @@ export function registerInfoHandlers() {
             } else if (isTiktok) {
                 cookiePath = getCookiePath('tiktok');
             }
+// Instagram Stories via the ProfileQuery resolver.
+            //
+            // The previous implementation used `insta-fetcher`, which is dead
+            // (400 at `getIdByUsername()`, UA from 2021) and also discarded the
+            // story id from the URL, so `/stories/user/<id>/` returned the whole
+            // tray. See `stories.md`.
+            if (isInstagram && normalized.isStoryRequest) {
+                console.log('Using the Stories resolver for Instagram stories...');
 
-            // Insta-fetcher for Instagram Stories
-            if (isInstagram && (url.includes('/stories/') || url.includes('/story/'))) {
-                console.log('Using insta-fetcher for Instagram stories...');
-                let sessionid = '';
-                if (cookiePath && fs.existsSync(cookiePath)) {
-                    const cookieText = fs.readFileSync(cookiePath, 'utf8');
-                    for (const line of cookieText.split('\n')) {
-                        if (line.includes('sessionid')) {
-                            const parts = line.split('\t');
-                            if (parts.length >= 7) {
-                                sessionid = `sessionid=${parts[6].trim()}`;
-                            }
-                            break;
-                        }
-                    }
+                const parsed = parseStoryUrl(normalized.url);
+                if (!parsed) throw new Error("Invalid Instagram Story URL");
+
+                let stories: NormalizedStory[];
+                try {
+                    stories = await fetchStories(parsed.handle, loadStoriesApiKey(), parsed.storyId);
+                } catch (e: any) {
+                    // Every failure mode is already a user-facing sentence.
+                    throw new Error(e?.message || 'Could not read those Instagram stories.');
                 }
 
-                if (!sessionid) {
-                    throw new Error("🔒 Login required. This content is private or requires authentication.");
-                }
-
-                // Extract username from url: https://www.instagram.com/stories/username/12345/
-                const cleanUrl = url.split('?')[0];
-                const match = cleanUrl.match(/\/stories\/([^\/]+)/);
-                if (!match) throw new Error("Invalid Instagram Story URL");
-                const username = match[1];
-
-                const ig = new igApi(sessionid);
-                const storiesData = await ig.fetchStories(username);
-
-                let entries: any[] = [];
-                if (storiesData && storiesData.stories) {
-                    entries = storiesData.stories.map((s: any, i: number) => ({
-                        id: s.id || `story-${i}-${Date.now()}`,
-                        title: `Story Part ${i + 1}`,
-                        thumbnail: s.type === 'image' ? s.url : (s.url || ''),
-                        duration: s.video_duration || 15,
-                        url: s.url,
-                        isIGStoryImage: s.type === 'image',
-                        ext: s.type === 'image' ? 'jpg' : 'mp4'
-                    }));
-                }
+                const entries = stories.map((s, i) => ({
+                    id: s.id,
+                    title: s.title || `Story ${i + 1}`,
+                    thumbnail: s.thumbnail,
+                    duration: s.duration,
+                    url: s.url,
+                    isIGStoryImage: s.isIGStoryImage,
+                    ext: s.ext
+                }));
 
                 const metadata = {
-                    id: `ig-story-${username}`,
-                    title: `Story by ${username}`,
+                    id: `ig-story-${parsed.handle}`,
+                    title: `Story by ${parsed.handle}`,
                     thumbnail: entries.length > 0 ? entries[0].thumbnail : '',
-                    uploader: username,
-                    uploader_url: `https://instagram.com/${username}`,
+                    uploader: parsed.handle,
+                    uploader_url: `https://instagram.com/${parsed.handle}`,
                     view_count: 0,
                     duration: 0,
                     contentType: 'story',
@@ -138,7 +320,7 @@ export function registerInfoHandlers() {
 
                 const resp = await fetch(url, {
                     headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                        'User-Agent': defaultUserAgent(),
                         'Cookie': cookieHeader,
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                         'Accept-Language': 'en-US,en;q=0.9',
@@ -204,30 +386,28 @@ export function registerInfoHandlers() {
             }
 
             // Add User-Agent to help with Facebook/Instagram/YouTube
-            const defaultUA = process.platform === 'darwin'
-                ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-                : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
-            args.push('--user-agent', defaultUA);
-
-            if (isYoutube && cookiePath && fs.existsSync(cookiePath)) {
-                // tv_embedded returns the FULL DASH format list (up to 4K) AND
-                // handles age-gated videos. Other clients (web, tv, android_vr,
-                // web_safari) currently return a crippled response that only
-                // lists the combined 360p format.
-                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
-            } else {
-                args.push('--extractor-args', 'youtube:player_client=tv_embedded');
-            }
+            const defaultUA = defaultUserAgent();
+            // ...but never for YouTube. yt-dlp pairs its own default UA with its
+            // default player client; overriding the UA with a desktop Chrome
+            // string while still using that non-browser client is a mismatch,
+            // and YouTube answers a mismatched client with a degraded format
+            // list (only low-res offered). A user's own `yt-dlp -F` uses the
+            // default UA and works, while the app with this override did not.
+            // yt-dlp also sets per-extractor UAs itself, so the default is the
+            // correct value, not a gap.
+            if (!isYoutube) args.push('--user-agent', defaultUA);
 
             // STRICT SEPARATION: Only use cookies for the specific platform
             if (cookiePath && fs.existsSync(cookiePath)) {
                 args.push('--cookies', cookiePath);
+                sentCookies = true;
                 const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : 'Platform';
                 console.log(`Using custom cookies for ${platformName} (Path: ${cookiePath})`);
             } else if (!cookiePath && fs.existsSync(path.join(app.getPath('userData'), 'cookies.txt'))) {
                 // Only fall back to legacy cookies.txt if strict platform cookies are NOT expected
                 // For generic sites, we can use legacy. For FB/Insta, we rely on their specific files.
                 args.push('--cookies', path.join(app.getPath('userData'), 'cookies.txt'));
+                sentCookies = true;
                 console.log('Using legacy cookies.txt');
             }
 
@@ -242,154 +422,95 @@ export function registerInfoHandlers() {
                 args.push('--no-playlist');
             }
 
-            const ytDlpPromise = ytDlpWrap.execPromise(args);
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Request timed out')), 60000);
-            });
+// Always a live extraction. There used to be a cache-first branch
+            // here that answered a re-pasted video from a payload on disk, which
+            // made a repeat visit feel instant - but it also meant the UI could
+            // show metadata that no longer matched the video, since format lists,
+            // caption languages and stream URLs all change on YouTube's side.
+            // Freshness is worth the round trip.
+            //
+            // YouTube is attempted through each player in turn. A player that
+            // gets refused (age wall, bot wall, "format not available") must not
+            // become a user-facing failure while a different player would have
+            // worked, which is what made this succeed on some machines and not
+            // others. See utils/youtubeStrategy.ts.
+            const hasCookies = sentCookies;
+            const attempts = isYoutube ? youtubeClientAttempts(hasCookies) : [{ label: 'default', extractorArgs: null }];
 
-            const metadataString = await Promise.race([ytDlpPromise, timeoutPromise]) as string;
-            const raw = JSON.parse(metadataString);
+            let lastError: any;
+            for (const attempt of attempts) {
+                const attemptArgs = attempt.extractorArgs
+                    ? [...args, '--extractor-args', attempt.extractorArgs[0]]
+                    : args;
 
-            let contentType = 'video';
-            if (url.includes('/stories/') || url.includes('/story/')) {
-                contentType = 'story';
-            } else if (raw._type === 'playlist' || (raw.entries && raw.entries.length > 0)) {
-                contentType = 'playlist';
-            }
-
-            let thumbnail = raw.thumbnail;
-            let ytMusicArtFound = false;
-
-            const isMusic = isYoutube && (url.includes('music.youtube.com') || raw.categories?.includes('Music') || raw.uploader?.endsWith('- Topic'));
-
-            if (isMusic && raw.id) {
                 try {
-                    const ytMusicArt = await fetchYouTubeMusicAlbumArt(raw.id);
-                    if (ytMusicArt) {
-                        thumbnail = ytMusicArt;
-                        ytMusicArtFound = true;
-                        console.log('✅ Premium YT Music square art fetched:', thumbnail);
+                    const ytDlpPromise = ytDlpWrap.execPromise(attemptArgs, { env: jsRuntimeEnv });
+                    const timeoutPromise = new Promise((_, reject) => {
+                        setTimeout(() => reject(new Error('Request timed out')), 60000);
+                    });
+
+                    const metadataString = await Promise.race([ytDlpPromise, timeoutPromise]) as string;
+                    const raw = JSON.parse(metadataString);
+
+                    if (attempts.length > 1) {
+                        console.log(`YouTube extraction succeeded via ${attempt.label}`);
                     }
-                } catch (e) { console.error('YT Music art fetch error:', e); }
-            }
 
-            if (!ytMusicArtFound && raw.thumbnails && raw.thumbnails.length > 0) {
-                // Sort thumbnails by resolution total pixels (fallback reference)
-                const sortedByRes = [...raw.thumbnails].sort((a: any, b: any) =>
-                    ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0))
-                );
+                    const { metadata } = await buildMetadataFromRaw(raw, url, isYoutube);
+                    return { success: true, metadata };
+                } catch (e: any) {
+                    lastError = e;
+                    console.warn(`YouTube extraction failed via ${attempt.label}:`, String(e?.message || e).split('\n')[0]);
 
-                // 1. BEST OPTION: Look for square art from Google Content hosts (lh3.googleusercontent.com, etc.)
-                // These are high-quality, bar-free square covers
-                const googleArt = raw.thumbnails.find((t: any) =>
-                    t.url.includes('googleusercontent.com') || t.url.includes('ggpht.com')
-                );
-
-                if (googleArt && isYoutube) {
-                    // Upgrade resolution to 2000x2000px and FORCE JPEG (-rj)
-                    let highResUrl = googleArt.url;
-                    if (highResUrl.includes('=w')) {
-                        highResUrl = highResUrl.replace(/=w\d+-h\d+/, '=w2000-h2000');
-                        // Add -rj if not present to force JPEG
-                        if (!highResUrl.includes('-rj')) {
-                            highResUrl = highResUrl.split('=').slice(0, -1).join('=') + '=w2000-h2000-rj';
-                        }
-                    } else if (!highResUrl.includes('=')) {
-                        highResUrl += '=w2000-h2000-l90-rj';
-                    }
-                    thumbnail = highResUrl;
-                    console.log('Force JPEG Premium square art selected (from metadata):', thumbnail);
-                } else {
-                    if (isMusic) {
-                        // 2. Music-specific square check
-                        const squareThumb = raw.thumbnails.find((t: any) => {
-                            if (!t.width || !t.height) return false;
-                            const ratio = t.width / t.height;
-                            return Math.abs(ratio - 1) < 0.05 && t.width >= 300;
-                        });
-
-                        if (squareThumb) {
-                            thumbnail = squareThumb.url.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
-                        } else {
-                            // Avoid landscape with bars
-                            thumbnail = sortedByRes.find(t => !t.url.includes('maxresdefault'))?.url || sortedByRes[0].url;
-                            thumbnail = thumbnail?.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
-                        }
-                    } else {
-                        // 3. Regular video logic
-                        const potentialSquare = raw.thumbnails.find((t: any) => {
-                            if (!t.width || !t.height) return false;
-                            return t.width === t.height && t.width >= 400;
-                        });
-
-                        thumbnail = potentialSquare?.url || sortedByRes[0].url;
-                        thumbnail = thumbnail?.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
-                    }
+                    const isLast = attempt === attempts[attempts.length - 1];
+                    if (isLast || !isClientSensitiveError(e)) throw e;
+                    console.log('Retrying YouTube extraction with a different player...');
                 }
             }
 
-            const entriesArr = Array.isArray(raw.entries) ? raw.entries : [];
-            const sanitizedEntries = entriesArr
-                .filter((e: any) => e && (e.id || e.title || e.url))
-                .map((e: any, i: number) => ({
-                    id: e.id || `track-${i}-${Date.now()}`,
-                    title: e.title || e.fulltitle || `Track ${i + 1}`,
-                    thumbnail: e.thumbnail || (e.thumbnails && e.thumbnails.length > 0 ? e.thumbnails[0].url : ''),
-                    duration: e.duration || 0,
-                    url: e.url || e.webpage_url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : url)
-                }));
-
-            const metadata = {
-                id: raw.id || `pl-${Date.now()}`,
-                title: raw.title || raw.fulltitle || 'Untitled Playlist',
-                thumbnail: thumbnail || '',
-                thumbnails: raw.thumbnails || [],
-                uploader: raw.uploader || raw.channel || raw.creator || raw.uploader_id || 'Unknown',
-                uploader_url: raw.uploader_url || raw.channel_url,
-                channel_follower_count: raw.channel_follower_count,
-                view_count: raw.view_count || 0,
-                like_count: raw.like_count || 0,
-                duration: raw.duration || 0,
-                description: raw.description?.slice(0, 300) || '',
-                formats: raw.formats || [],
-                isLive: !!raw.is_live,
-                webpage_url: raw.webpage_url || url,
-                contentType,
-                entries: sanitizedEntries,
-                playlist_count: raw.playlist_count || sanitizedEntries.length || 0
-            };
-
-            return { success: true, metadata };
+            throw lastError;
         } catch (e: any) {
             console.error("Info fetch error:", e);
-            const rawError = e.message || e.stderr || String(e);
-            let friendlyError = "Failed to fetch video info";
 
-            if (rawError.includes('log in') || rawError.includes('login') || rawError.includes('authentication')) {
-                friendlyError = "🔒 Login required. This content is private or requires authentication.";
-            } else if (rawError.includes('Private video') || rawError.includes('private')) {
-                friendlyError = "🔒 This video is private and cannot be accessed.";
-            } else if (rawError.includes('Video unavailable') || rawError.includes('unavailable')) {
-                friendlyError = "❌ This video is unavailable or has been removed.";
-            } else if (rawError.includes('age') || rawError.includes('Age')) {
-                friendlyError = "🔞 Age-restricted content. Login required to access.";
-            } else if (rawError.includes('blocked') || rawError.includes('country')) {
-                friendlyError = "🌍 This content is blocked in your region.";
-            } else if (rawError.includes('not found') || rawError.includes('404')) {
-                friendlyError = "🔍 Content not found. Check the URL and try again.";
-            } else if (rawError.includes('timed out') || rawError.includes('timeout')) {
-                friendlyError = "⏱️ Request timed out. Please try again.";
-            } else if (rawError.includes('network') || rawError.includes('connection')) {
-                friendlyError = "📶 Network error. Check your internet connection.";
-            } else if (rawError.includes('Unsupported URL')) {
-                if (url.includes('facebook.com/stories')) {
-                    friendlyError = "⚠️ Facebook Stories are currently not supported by the downloader. Support will be added in a future update.";
-                } else {
-                    friendlyError = "❌ This URL is not supported.";
-                }
+            // `hasCookies` matters: without it every age/login failure says "add
+            // cookies", which is useless advice for a user who already did, and
+            // actively wrong when YouTube's bot wall was reported as an age
+            // gate.
+            const classified = classifyExtractionError(e.message || e.stderr || String(e), url, {
+                hasCookies: sentCookies
+            });
+
+            // Log the yt-dlp version with every failure. "Same app version" does
+            // not mean "same yt-dlp" - the binary is updated separately over the
+            // network, so two users on one release are routinely months apart,
+            // and that is invisible unless it is written down.
+            let ytdlpVersion: string | null = null;
+            try {
+                ytdlpVersion = await getYtDlpVersion();
+            } catch { /* the binary may be the thing that is broken */ }
+            console.warn(
+                `Extraction failed (${classified.kind}) | url=${url} | yt-dlp=${ytdlpVersion || 'unknown'} | ` +
+                `cookies=${sentCookies ? 'yes' : 'no'} | ${String(e).split('\n')[0]}`
+            );
+
+            // A stale yt-dlp is the usual cause of bot-protection failures, so
+            // start a throttled update attempt while we report the failure.
+            if (classified.suggestYtDlpUpdate) {
+                try {
+                    const { checkForYtDlpUpdate } = require('../utils/binaries');
+                    checkForYtDlpUpdate(true).catch(() => {});
+                } catch { /* ignore */ }
             }
 
-            return { success: false, error: friendlyError };
+            // Name the version in the message when the failure is the kind a stale
+            // yt-dlp causes. The user cannot check this themselves, and it is
+            // the one variable that differs between two identical installs.
+            let message = classified.message;
+            if (classified.suggestYtDlpUpdate && ytdlpVersion) {
+                message += ` (downloader version: ${ytdlpVersion})`;
+            }
+
+            return { success: false, error: message };
         }
     });
 

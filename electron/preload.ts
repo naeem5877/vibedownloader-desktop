@@ -4,15 +4,26 @@ contextBridge.exposeInMainWorld('electron', {
     getVideoInfo: (url: string) => ipcRenderer.invoke('get-video-info', url),
     getSpotifyInfo: (url: string) => ipcRenderer.invoke('get-spotify-info', url),
     downloadVideo: (params: any) => ipcRenderer.invoke('download-video', params),
+    downloadSubtitles: (params: any) => ipcRenderer.invoke('download-subtitles', params),
     cancelDownload: (jobId: string) => ipcRenderer.invoke('cancel-download', jobId),
     downloadSpotifyTrack: (params: any) => ipcRenderer.invoke('download-spotify-track', params),
     getProxyImage: (url: string) => ipcRenderer.invoke('proxy-image', url),
+
+    // Lyrics (returns null when nothing matched — the panel is not rendered)
+    getLyrics: (params: { title: string; artist: string; duration?: number; isMusic?: boolean }) => ipcRenderer.invoke('get-lyrics', params),
+    saveLyrics: (params: { title: string; artist: string; displayTitle?: string; displayArtist?: string; duration?: number; isMusic?: boolean; mode: 'plain' | 'synced' | 'words' | 'translation' }) => ipcRenderer.invoke('save-lyrics', params),
 
     // Cookies
     saveCookies: (content: string, platform: string) => ipcRenderer.invoke('save-cookies', content, platform),
     getCookiesStatus: (platform: string) => ipcRenderer.invoke('get-cookies-status', platform),
     deleteCookies: (platform: string) => ipcRenderer.invoke('delete-cookies', platform),
     chooseCookieFile: () => ipcRenderer.invoke('choose-cookie-file'),
+    // Instagram Stories resolver key. Write-only by design: the value is never
+    // returned to the renderer, only whether one is configured.
+    getStoriesApiKeyStatus: () => ipcRenderer.invoke('get-stories-api-key-status'),
+    saveStoriesApiKey: (key: string) => ipcRenderer.invoke('save-stories-api-key', key),
+    clearStoriesApiKey: () => ipcRenderer.invoke('clear-stories-api-key'),
+    testStoriesApiKey: () => ipcRenderer.invoke('test-stories-api-key'),
 
     // Download Path
     getDownloadPath: () => ipcRenderer.invoke('get-download-path'),

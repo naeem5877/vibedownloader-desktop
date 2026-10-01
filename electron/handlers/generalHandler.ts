@@ -3,6 +3,7 @@ import fs from 'fs';
 import { getMainWindow } from '../utils/windowManager';
 import { getHistoryPath, loadSettings, saveSettings } from '../utils/paths';
 import { getYtDlpWrap, getYtDlpBinaryPath, initPaths } from '../utils/binaries';
+import { defaultUserAgent } from '../utils/platform';
 import { showNotification } from '../utils/notifications';
 import YtDlpWrap from 'yt-dlp-wrap';
 
@@ -115,7 +116,7 @@ export function registerGeneralHandlers() {
                 responseType: 'arraybuffer',
                 timeout: 3000, // 3 second max - fail fast
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    'User-Agent': defaultUserAgent(),
                     'Accept': 'image/avif,image/webp,image/apng,image/*,*/*',
                     'Referer': 'https://open.spotify.com/'
                 }

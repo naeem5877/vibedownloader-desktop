@@ -78,6 +78,28 @@ function getEnvPaths() {
     };
 }
 
+/**
+ * macOS application bundles.
+ *
+ * Browsers are .app bundles whose executable sits at Contents/MacOS, and they
+ * are not in Program Files - so a Windows-only path list detects nothing on a
+ * Mac and every user saw "We couldn't detect a browser". System-wide installs
+ * are in /Applications; a per-user drag-and-drop install lands in
+ * ~/Applications, which is the one people forget.
+ */
+export function macAppPaths(appName: string, exeName: string): string[] {
+    const home = os.homedir();
+    return [
+        path.join('/Applications', `${appName}.app`, 'Contents', 'MacOS', exeName),
+        path.join(home, 'Applications', `${appName}.app`, 'Contents', 'MacOS', exeName),
+    ];
+}
+
+/** Where a Chromium-family browser keeps its profiles on macOS. */
+export function macProfileRoot(...segments: string[]): string {
+    return path.join(os.homedir(), 'Library', 'Application Support', ...segments);
+}
+
 // Detect which browsers are actually installed on this PC. Brave still reads
 // Chrome's external-extension registry key, so its entry doubles as Chrome's.
 export function getInstalledBrowsers(): BrowserDef[] {
@@ -103,9 +125,20 @@ export function getInstalledBrowsers(): BrowserDef[] {
         return null;
     };
 
-    const firefoxRegistryPath = fromRegistry('firefox.exe');
+    const firefoxRegistryPath = process.platform === 'win32' ? fromRegistry('firefox.exe') : null;
 
-    const exes: Record<BrowserId, string[]> = {
+    // On macOS none of the Program Files / LOCALAPPDATA paths exist, so the
+    // whole list has to be .app bundles instead.
+    const isMac = process.platform === 'darwin';
+    const exes: Record<BrowserId, string[]> = isMac ? {
+        chrome: macAppPaths('Google Chrome', 'Google Chrome'),
+        edge: macAppPaths('Microsoft Edge', 'Microsoft Edge'),
+        brave: macAppPaths('Brave Browser', 'Brave Browser'),
+        vivaldi: macAppPaths('Vivaldi', 'Vivaldi'),
+        chromium: macAppPaths('Chromium', 'Chromium'),
+        opera: macAppPaths('Opera', 'Opera'),
+        firefox: macAppPaths('Firefox', 'firefox'),
+    } : {
         chrome: [
             path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
             path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
@@ -304,14 +337,25 @@ function getExtensionManifestVersion(): string {
 // `location: 4` and the absolute `path`.
 function getProfilePreferencesFiles(browser: BrowserDef): string[] {
     const { la } = getEnvPaths();
-    const roots: Partial<Record<BrowserId, string>> = {
+    // macOS keeps the user data dir itself (no "User Data" segment) under
+    // ~/Library/Application Support, which is where the Default and Profile N
+    // folders live.
+    const isMac = process.platform === 'darwin';
+    const macRoots: Partial<Record<BrowserId, string>> = {
+        chrome: macProfileRoot('Google', 'Chrome'),
+        edge: macProfileRoot('Microsoft Edge'),
+        brave: macProfileRoot('BraveSoftware', 'Brave-Browser'),
+        vivaldi: macProfileRoot('Vivaldi'),
+        chromium: macProfileRoot('Chromium'),
+    };
+    const winRoots: Partial<Record<BrowserId, string>> = {
         chrome: path.join(la, 'Google', 'Chrome', 'User Data'),
         edge: path.join(la, 'Microsoft', 'Edge', 'User Data'),
         brave: path.join(la, 'BraveSoftware', 'Brave-Browser', 'User Data'),
         vivaldi: path.join(la, 'Vivaldi', 'User Data'),
         chromium: path.join(la, 'Chromium', 'User Data'),
     };
-    const root = roots[browser.id];
+    const root = (isMac ? macRoots : winRoots)[browser.id];
     if (!root || !fs.existsSync(root)) return [];
 
     const candidates: string[] = [];

@@ -35,8 +35,13 @@ function getEdgeNativeMessagingDir(): string | null {
     }
 }
 
-// Where the bundled Windows host exe lives inside the app.
+// Where the bundled Windows host exe lives inside the app. Only ever called
+// from the Windows branch below, but guarded anyway so a future caller on
+// mac/linux gets a clear error instead of probing for a non-existent .exe.
 function getSourceHostExe(): string {
+    if (os.platform() !== 'win32') {
+        throw new Error('The native messaging host binary is Windows-only.');
+    }
     if (app.isPackaged) {
         return path.join(process.resourcesPath, 'native-host', `${HOST_NAME}.exe`);
     }

@@ -7,6 +7,8 @@
 // spotify-url-info is an ESM-only package, so we use dynamic import()
 // The electron backend compiles to CommonJS, so we lazily import it at runtime.
 
+import { defaultUserAgent } from './platform';
+
 let _spotifyModule: any = null;
 
 async function getSpotifyModule() {
@@ -94,6 +96,12 @@ export async function fetchSpotifyInfo(url: string): Promise<any> {
             title: data.name,
             thumbnail: albumArt,
             uploader: artists,
+            // Everything reachable from a Spotify link is a recording, so the
+            // renderer can treat this as music without re-deriving it from
+            // categories the way a YouTube extraction has to.
+            isMusic: true,
+            artist: artists,
+            categories: ['Music'],
             duration: Math.floor((data.duration || 0) / 1000),
             view_count: 0,
             webpage_url: url,
@@ -218,7 +226,7 @@ async function attachTrackArt(tracks: any[], fallbackCover: string): Promise<Map
 async function fetchSpotifyOGFallback(url: string, parsed: { type: string, id: string }): Promise<any> {
     const axios = require('axios');
     const uas = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        defaultUserAgent(),
         'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
         'VibeDownloader/1.4.1'
     ];

@@ -36,6 +36,19 @@ pnpm-debug.log*
 *.sln
 *.sw?
 
+# Local planning notes (personal, never commit)
+/lyrics.md
+/platforms.md
+/stories.md
+
+# Build output / stray bundles
+/build-out/
+/index-*.js
+
+# One-off debug scripts (the test-*.cjs suites are tracked)
+/scripts/probe-*.cjs
+/scripts/smoke-*.cjs
+
 # System Files
 Thumbs.db
 Desktop.ini

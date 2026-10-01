@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
 import { Settings } from './Settings';
 import { TutorialModal } from './TutorialModal';
 import { CutTimeline } from './CutTimeline';
+import LyricsPanel, { type LyricsData } from './LyricsPanel';
 import ShinyText from './ui/ShinyText';
 import EmptyState from './ui/EmptyState';
 
@@ -30,6 +31,30 @@ interface PlaylistEntry {
     artist?: string;
     searchQuery?: string;
 }
+
+// Subtitle track as reported by the main process (see electron/utils/subtitles.ts).
+  interface SubtitleTrack {
+      key: string;
+      lang: string;
+      label: string;
+      langLabel: string;
+      isAuto: boolean;
+      formats: string[];
+  }
+
+// Audio language as reported by the main process (see electron/utils/audioTracks.ts).
+// Only present when the video publishes more than one audio language, which is
+// why the picker is hidden rather than showing a single useless row.
+  interface AudioTrack {
+      key: string;
+      lang: string;
+      langLabel: string;
+      isOriginal: boolean;
+      formatId: string;
+      ext: string;
+      acodec: string;
+      abr: number;
+  }
 
 interface VideoMetadata {
     id: string;
@@ -81,6 +106,31 @@ const PLATFORM_DOMAINS: Record<string, string[]> = {
     'pinterest': ['pinterest.com', 'pin.it'],
     'soundcloud': ['soundcloud.com'],
     'twitch': ['twitch.tv']
+};
+
+/**
+ * Instagram accepts a bare handle where the other platforms need a link.
+ *
+ * `nike` and `@nike` carry no domain, so the platform check in handleSubmit
+ * rejects them before a request is ever made. Expanding the handle into the
+ * canonical stories URL here means everything downstream - platform detection,
+ * the backend branch, the tray UI - treats it like any other link, so this is
+ * the only place that has to know a bare handle is allowed.
+ *
+ * This runs only when the Instagram tab is selected, because only then is a
+ * bare word unambiguously a handle; on the YouTube tab the same text is a video
+ * id. Instagram usernames may contain dots, so a dot disqualifies nothing.
+ *
+ * Returns null for anything that is not a bare Instagram handle.
+ */
+const normalizeInstagramHandle = (raw: string): string | null => {
+    const value = (raw || '').trim();
+    if (!value) return null;
+    // A URL, or a path with a scheme or host: leave it for the usual flow.
+    if (value.includes('/') || value.includes('\\') || /^[a-z]+:\/\//i.test(value)) return null;
+    const handle = value.replace(/^@/, '');
+    if (!/^[a-z0-9._]{1,30}$/i.test(handle)) return null;
+    return `https://www.instagram.com/stories/${handle}/`;
 };
 
 const formatNumber = (num: number) => {
@@ -404,6 +454,128 @@ const BatchQueueItem = memo(({
         prev.item.error === next.item.error;
 });
 
+// Diagnostic readout for how long a metadata fetch took. Ticks while the fetch
+// is in flight, then freezes on the final value when the result appears.
+// Self-contained so the 10x/second tick does not re-render the whole downloader.
+//
+// TEST ONLY: this is hidden in normal builds so it never reaches users. It is on
+// during `npm run dev`, and can be forced on in a production build with
+// VITE_SHOW_FETCH_TIMER=true.
+const SHOW_FETCH_TIMER =
+    import.meta.env.DEV || import.meta.env.VITE_SHOW_FETCH_TIMER === 'true';
+
+const FetchTimer = memo(({ start, elapsed, failed }: { start: number | null; elapsed: number | null; failed: boolean }) => {
+    const [, tick] = useState(0);
+
+    useEffect(() => {
+        if (elapsed !== null || start === null) return;
+        const id = setInterval(() => tick(n => n + 1), 100);
+        return () => clearInterval(id);
+    }, [start, elapsed]);
+
+    const ms = elapsed !== null ? elapsed : (start !== null ? performance.now() - start : 0);
+    const done = elapsed !== null;
+    const color = done ? (failed ? 'text-red-400/80' : 'text-green-400/80') : 'text-amber-400/80';
+
+    return (
+        <div className="mb-3 flex items-center justify-center gap-2 font-mono text-[11px] tracking-wider select-none">
+            <span className="text-white/25">FETCH</span>
+            <span className={color}>{(ms / 1000).toFixed(2)}s</span>
+            <span className="text-white/20">
+                {done ? (failed ? 'FAILED' : 'DONE') : elapsed === null ? '...' : ''}
+            </span>
+        </div>
+    );
+});
+FetchTimer.displayName = 'FetchTimer';
+
+// One selectable caption language. Memoized because the picker can render
+// 150+ of these and a search keystroke would otherwise re-render every row.
+const SubtitleChoice = memo(({
+    track,
+    active,
+    disabled,
+    onPick,
+}: {
+    track: SubtitleTrack;
+    active: boolean;
+    disabled: boolean;
+    onPick: () => void;
+}) => (
+    // A dense single-line row: this list can be 150+ entries long, so every
+    // pixel of height spent on icons and padding is scrolling the user has to
+    // undo. The language code doubles as the identity and the scan anchor.
+    <button
+        onClick={onPick}
+        disabled={disabled}
+        aria-pressed={active}
+        className={`group relative w-full flex items-center gap-2.5 h-9 pl-3 pr-2.5 text-left transition
+            ${active ? 'bg-blue-500/15' : 'hover:bg-white/[0.04]'}`}
+    >
+        {active && <span className="absolute left-0 inset-y-0 w-[2px] bg-blue-400" />}
+        <span className={`w-10 shrink-0 text-center text-[10px] font-semibold uppercase tracking-wide rounded py-[3px] transition
+            ${active ? 'bg-blue-500/25 text-blue-200' : 'bg-white/[0.06] text-white/45 group-hover:text-white/70'}`}>
+            {track.lang}
+        </span>
+        <span className={`text-[13px] truncate flex-1 ${active ? 'text-white' : 'text-white/80'}`}>
+            {track.langLabel}
+        </span>
+        {track.isAuto && (
+            <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-white/30 transition group-hover:text-white/50">
+                Auto
+            </span>
+        )}
+        <span className="w-3.5 shrink-0 flex items-center justify-center">
+            {active && <Check className="w-3.5 h-3.5 text-blue-400" />}
+        </span>
+    </button>
+));
+SubtitleChoice.displayName = 'SubtitleChoice';
+
+// One audio language. Same row shape as SubtitleChoice so the two pickers read
+// as one control, with the codec and bitrate that will actually be downloaded
+// shown instead of the auto/generated badge captions carry.
+const AudioTrackChoice = memo(({
+    track,
+    active,
+    disabled,
+    onPick,
+}: {
+    track: AudioTrack;
+    active: boolean;
+    disabled: boolean;
+    onPick: () => void;
+}) => (
+    <button
+        onClick={onPick}
+        disabled={disabled}
+        aria-pressed={active}
+        className={`group relative w-full flex items-center gap-2.5 h-9 pl-3 pr-2.5 text-left transition
+            ${active ? 'bg-emerald-500/15' : 'hover:bg-white/[0.04]'}`}
+    >
+        {active && <span className="absolute left-0 inset-y-0 w-[2px] bg-emerald-400" />}
+        <span className={`w-12 shrink-0 text-center text-[10px] font-semibold uppercase tracking-wide rounded py-[3px] transition
+            ${active ? 'bg-emerald-500/25 text-emerald-200' : 'bg-white/[0.06] text-white/45 group-hover:text-white/70'}`}>
+            {track.lang.split('-')[0]}
+        </span>
+        <span className={`text-[13px] truncate flex-1 ${active ? 'text-white' : 'text-white/80'}`}>
+            {track.langLabel}
+        </span>
+        {track.isOriginal && (
+            <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-white/30 transition group-hover:text-white/50">
+                Original
+            </span>
+        )}
+        <span className="shrink-0 text-[10px] tabular-nums text-white/25 transition group-hover:text-white/45">
+            {track.abr ? `${track.abr}k` : track.ext}
+        </span>
+        <span className="w-3.5 shrink-0 flex items-center justify-center">
+            {active && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+        </span>
+    </button>
+));
+AudioTrackChoice.displayName = 'AudioTrackChoice';
+
 export function Downloader() {
     const [url, setUrl] = useState('');
     const [currentPlatform, setCurrentPlatform] = useState<Platform>(platforms[0]);
@@ -420,16 +592,217 @@ export function Downloader() {
     const [downloadedFilePath, setDownloadedFilePath] = useState<string | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
+    // Test instrumentation: metadata fetch timing (ms). `fetchStart` is the
+    // performance.now() captured when Fetch was pressed; `fetchElapsed` is
+    // frozen once the fetch settles.
+    const [fetchStart, setFetchStart] = useState<number | null>(null);
+    const [fetchElapsed, setFetchElapsed] = useState<number | null>(null);
+
     // Cookie features
     const [showCookieModal, setShowCookieModal] = useState(false);
     const [cookieContent, setCookieContent] = useState('');
     const [hasCookies, setHasCookies] = useState(false);
 
+    // Instagram Stories resolver key. Only its *status* is held - the value is
+    // write-only, so it is never read back into the renderer.
+    const [storiesKey, setStoriesKey] = useState<{ configured: boolean; masked: string }>({ configured: false, masked: '' });
+    const [storiesKeyInput, setStoriesKeyInput] = useState('');
+    const [storiesKeyBusy, setStoriesKeyBusy] = useState(false);
+    const [storiesKeyMsg, setStoriesKeyMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
     // Playlist features
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
     const [searchQuery, setSearchQuery] = useState('');
 
+    // Subtitle sidecar choice. null = don't save subtitles. Reset on every new
+    // fetch, because the available tracks belong to the video just loaded.
+    // Keyed by track key rather than language, because a language can be
+    // published both by the author and by YouTube's auto-captions.
+    const [subtitleKey, setSubtitleKey] = useState<string | null>(null);
+    const [subtitleFormat, setSubtitleFormat] = useState<'srt' | 'vtt'>('srt');
+    const [subtitleSearch, setSubtitleSearch] = useState('');
+    // A caption download is its own action with its own outcome, so it gets its
+    // own status rather than borrowing the media download's progress or error.
+    const [subtitleDownloading, setSubtitleDownloading] = useState(false);
+    const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null);
+    const [subtitleResult, setSubtitleResult] = useState<string | null>(null);
+
+    // Lyrics for a music track. Stays null unless a provider actually matched,
+    // which is the signal LyricsPanel uses to render nothing at all - a track
+    // with no lyrics must not leave an empty box behind.
+    const [lyrics, setLyrics] = useState<LyricsData | null>(null);
+
+    // Audio language choice. Only dubbed videos offer a choice at all, and the
+    // selection applies to both audio-only downloads and the audio muxed into a
+    // video, so it is held here once and read by both paths.
+    const [audioTrackKey, setAudioTrackKey] = useState<string | null>(null);
+
+    const audioTracks = useMemo<AudioTrack[]>(
+        () => ((metadata as any)?.audioTracks as AudioTrack[]) || [],
+        [metadata]
+    );
+
+    // A video with one audio language has nothing to choose, so the whole
+    // section stays out of the UI rather than offering a single row.
+    const hasAudioChoice = audioTracks.length > 1;
+
+    const selectedAudioTrack = useMemo<AudioTrack | null>(
+        () => audioTracks.find((t) => t.key === audioTrackKey) || null,
+        [audioTracks, audioTrackKey]
+    );
+
+    // Default to the language the video was recorded in. The owning video id is
+    // remembered separately because a fetch clears metadata before it starts, so
+    // without this a re-fetch of the same video would silently drop the choice
+    // while a genuinely new video still starts from its own original language.
+    const audioChoiceOwner = useRef<string | null>(null);
+
+    useEffect(() => {
+        // Nothing to choose: single-audio video, or metadata still loading.
+        if (!hasAudioChoice) return;
+
+        const owner = (metadata as any)?.id ?? null;
+        const keepCurrent =
+            audioChoiceOwner.current === owner &&
+            audioTrackKey !== null &&
+            audioTracks.some((t) => t.key === audioTrackKey);
+        if (keepCurrent) return;
+
+        const original = audioTracks.find((t) => t.isOriginal) || audioTracks[0];
+        audioChoiceOwner.current = owner;
+        setAudioTrackKey(original ? original.key : null);
+    }, [hasAudioChoice, audioTracks, metadata, audioTrackKey]);
+
+    // Every caption language the video publishes, author-uploaded and automatic.
+    const subtitleTracks = useMemo<SubtitleTrack[]>(
+        () => ((metadata as any)?.subtitles as SubtitleTrack[]) || [],
+        [metadata]
+    );
+
+    // A typical video publishes well over a hundred languages, so the picker
+    // filters on both the language name and its raw code.
+    const subtitleVisibleTracks = useMemo(() => {
+        const q = subtitleSearch.trim().toLowerCase();
+        const matches = (t: SubtitleTrack) =>
+            !q || t.langLabel.toLowerCase().includes(q) || t.lang.toLowerCase().includes(q);
+        return subtitleTracks.filter(matches);
+    }, [subtitleTracks, subtitleSearch]);
+
+    const subtitleAuthored = useMemo(
+        () => subtitleVisibleTracks.filter((t) => !t.isAuto),
+        [subtitleVisibleTracks]
+    );
+    const subtitleAutomatic = useMemo(
+        () => subtitleVisibleTracks.filter((t) => t.isAuto),
+        [subtitleVisibleTracks]
+    );
+
+    // The list is sized from its contents instead of being left to flexbox. A
+    // scroll container is allowed to shrink below its content, so a
+    // max-height alone collapses this to its borders and 159 rows vanish. The
+    // height is therefore derived from the real row and header sizes, which
+    // also lets a two-track video stay short.
+    const SUBTITLE_ROW_H = 36;
+    const SUBTITLE_GROUP_H = 28;
+    const subtitleListHeight = useMemo(() => {
+        const groups = (subtitleAuthored.length ? 1 : 0) + (subtitleAutomatic.length ? 1 : 0);
+        const natural = subtitleVisibleTracks.length * SUBTITLE_ROW_H + groups * SUBTITLE_GROUP_H;
+        return Math.min(264, natural);
+    }, [subtitleVisibleTracks.length, subtitleAuthored.length, subtitleAutomatic.length]);
+
+    // A track is only offered if the format we would ask for is actually
+    // published for it, so a choice can never be made that yt-dlp cannot fill.
+    const subtitleSelection = useMemo(() => {
+        if (!subtitleKey) return null;
+        const track = subtitleTracks.find((t) => t.key === subtitleKey);
+        if (!track) return null;
+        const wanted = subtitleFormat === 'srt' ? 'srt' : 'vtt';
+        // Mirrors what downloadHandler actually asks yt-dlp for: srt is
+        // converted from whatever the track publishes, while vtt is requested
+        // directly and so must be published. Offering an srt that the handler
+        // could not fill would silently drop the user's choice.
+        const usable = wanted === 'srt'
+            ? track.formats.length > 0
+            : track.formats.includes('vtt');
+        if (!usable) return null;
+        return { lang: track.lang, langLabel: track.langLabel, isAuto: track.isAuto, format: subtitleFormat };
+    }, [subtitleKey, subtitleFormat, subtitleTracks]);
+
+    // Changing the track or format invalidates any previous caption warning,
+    // which would otherwise describe a language the user no longer picked.
+    const pickSubtitle = useCallback((key: string | null) => {
+        setSubtitleKey(key);
+        setSubtitleNotice(null);
+    }, []);
+
+    const pickSubtitleFormat = useCallback((fmt: 'srt' | 'vtt') => {
+        setSubtitleFormat(fmt);
+        setSubtitleNotice(null);
+    }, []);
+
     const isSpotify = currentPlatform.id === 'spotify';
+
+    // Whether the loaded item is a music track. Spotify is always one; YouTube
+    // depends on the detection that runs in the main process. Shared by the
+    // lyrics lookup and the subtitle picker so the two can never disagree about
+    // what kind of thing this is.
+    const isMusicTrack = isSpotify || Boolean((metadata as any)?.isMusic);
+
+    // Lyrics lookup identity. Keyed on the track rather than re-run on every
+    // render, and guarded by a cancel flag so a slow response for a track the
+    // user has already navigated away from cannot overwrite the current one.
+    const lyricsTarget = useMemo(() => {
+        const m = metadata as any;
+        if (!m || !isMusicTrack) return null;
+
+        // A live stream has no end, so it has no track to match lyrics against.
+        if (m.isLive) return null;
+
+        const title = String(m.title || '').trim();
+        // A `-Topic` suffixed uploader names the artist plus a marker, it is not
+        // a collaboration, so the marker is stripped before matching.
+        const artist = String(m.artist || m.uploader || '')
+            .replace(/\s*-\s*Topic\s*$/i, '')
+            .trim();
+
+        // A lyric search needs both halves. Without an artist name the match
+        // would be loose enough to return the wrong song.
+        if (!title || !artist) return null;
+
+        return { id: `${m.id}|${title}|${artist}`, title, artist, duration: m.duration };
+    }, [metadata, isMusicTrack]);
+
+    useEffect(() => {
+        // Cleared first so the previous track's lyrics disappear as soon as the
+        // new one loads rather than lingering over it.
+        setLyrics(null);
+        if (!lyricsTarget) return;
+
+        let cancelled = false;
+        window.electron
+            .getLyrics({
+                title: lyricsTarget.title,
+                artist: lyricsTarget.artist,
+                duration: lyricsTarget.duration,
+                isMusic: true
+            })
+            .then((result) => {
+                if (cancelled || !result) return;
+                // No cast: the preload's declared return type is deliberately
+                // precise, so the compiler checks this assignment against the
+                // shape the panel actually renders.
+                //
+                // `title`/`artist` on the result are the strings that matched,
+                // so they are normalized; `displayTitle`/`displayArtist` are
+                // cleaned for a human. Both are already set here by the main
+                // process - the renderer must not substitute the raw upload
+                // title, which carries the credits and channel.
+                setLyrics({ ...result, duration: lyricsTarget.duration });
+            })
+            .catch((e) => console.warn('Lyrics lookup failed:', e?.message || e));
+
+        return () => { cancelled = true; };
+    }, [lyricsTarget]);
 
     // Loading messages rotating
     const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
@@ -826,6 +1199,56 @@ export function Downloader() {
         }
     }, [isBatchComplete, downloadQueue.length]);
 
+    // Read whether a Stories key exists. The value itself is never fetched.
+    useEffect(() => {
+        let cancelled = false;
+        window.electron.getStoriesApiKeyStatus()
+            .then((s) => { if (!cancelled) setStoriesKey(s); })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [showCookieModal]);
+
+    const handleSaveStoriesKey = async () => {
+        const value = storiesKeyInput.trim();
+        if (!value) return;
+        setStoriesKeyBusy(true);
+        setStoriesKeyMsg(null);
+        try {
+            const res = await window.electron.saveStoriesApiKey(value);
+            if (!res.success) {
+                setStoriesKeyMsg({ ok: false, text: res.error || 'Could not save the key.' });
+                return;
+            }
+            setStoriesKey({ configured: Boolean(res.configured), masked: res.masked || '' });
+            setStoriesKeyInput('');
+            // Confirming costs nothing (`/v1/credits` is free), and a key that
+            // looks right but was revoked would otherwise fail later with no
+            // explanation.
+            const test = await window.electron.testStoriesApiKey();
+            setStoriesKeyMsg(
+                test.success
+                    ? { ok: true, text: test.credits != null ? `Key works — ${test.credits} credits left.` : 'Key works.' }
+                    : { ok: false, text: `Saved, but it was rejected: ${test.error}` }
+            );
+        } catch (e: any) {
+            setStoriesKeyMsg({ ok: false, text: e?.message || 'Could not save the key.' });
+        } finally {
+            setStoriesKeyBusy(false);
+        }
+    };
+
+    const handleClearStoriesKey = async () => {
+        setStoriesKeyBusy(true);
+        try {
+            await window.electron.clearStoriesApiKey();
+            setStoriesKey({ configured: false, masked: '' });
+            setStoriesKeyInput('');
+            setStoriesKeyMsg({ ok: true, text: 'Key removed.' });
+        } finally {
+            setStoriesKeyBusy(false);
+        }
+    };
+
 
     const handleSaveCookies = async () => {
         if (!cookieContent.trim()) return;
@@ -872,8 +1295,13 @@ export function Downloader() {
 
     const handleSubmit = async (e?: React.FormEvent, manualUrl?: string) => {
         if (e) e.preventDefault();
-        const targetUrl = manualUrl || url;
-        if (!targetUrl || loading) return;
+        const rawTarget = manualUrl || url;
+        if (!rawTarget || loading) return;
+
+        // Instagram accepts a bare handle; every other platform needs a link.
+        // The selected tab is what makes a bare word unambiguous.
+        const targetUrl = (currentPlatform.id === 'instagram' && normalizeInstagramHandle(rawTarget))
+            || rawTarget;
 
         // Platform validation
         const u = targetUrl.toLowerCase();
@@ -904,44 +1332,68 @@ export function Downloader() {
         setSelectedItems(new Set());
         setSearchQuery('');
 
+        // Test instrumentation: time the metadata fetch from the moment Fetch is
+        // pressed until the result (or the error) is available to render.
+        const fetchStartedAt = performance.now();
+        setFetchStart(fetchStartedAt);
+        setFetchElapsed(null);
+
         try {
             // Determine platform for fetch logic
             const detectedId = Object.keys(PLATFORM_DOMAINS).find(id => PLATFORM_DOMAINS[id].some(d => u.includes(d))) as PlatformId;
             const finalPlatformId = detectedId || currentPlatform.id;
             const isTargetSpotify = finalPlatformId === 'spotify';
 
-            const res = isTargetSpotify
-                ? await window.electron.getSpotifyInfo(targetUrl)
-                : await window.electron.getVideoInfo(targetUrl);
+            // Reuse a background prefetch for this exact URL when one is already
+            // A fetch always goes to the platform now. There is no background prefetch and
+            // no cached extraction to reuse, so the click pays the full network
+            // cost and the result always reflects what the platform is serving at
+            // that moment.
+            const pending = isTargetSpotify
+                ? window.electron.getSpotifyInfo(targetUrl)
+                : window.electron.getVideoInfo(targetUrl);
+
+            const res = await pending;
 
             console.log('Metadata response:', res);
             if (res.success && res.metadata) {
-                let finalMetadata = res.metadata;
+                const finalMetadata = res.metadata;
+
+                // Auto-select all items in playlist
+                if (finalMetadata.entries) {
+                    setSelectedItems(new Set(finalMetadata.entries.map((e: PlaylistEntry) => e.id)));
+                }
+
+                // Subtitle tracks belong to the video just loaded, so drop any
+                // previous choice rather than carry it onto unrelated content.
+                setSubtitleKey(null);
+                setSubtitleSearch('');
+                setSubtitleNotice(null);
+
+                // Show the result first, then swap in the proxied thumbnail when
+                // it lands. Awaiting the proxy used to add 100-600ms of dead time
+                // before anything appeared on screen.
+                setMetadata(finalMetadata);
 
                 // Proxy thumbnail for Instagram/Facebook/Spotify (improves CORS/Referer reliability)
                 const useProxy = finalMetadata.thumbnail && (
-                    finalMetadata.thumbnail.includes('fbcdn.net') || 
-                    finalMetadata.thumbnail.includes('scdn.co') || 
+                    finalMetadata.thumbnail.includes('fbcdn.net') ||
+                    finalMetadata.thumbnail.includes('scdn.co') ||
                     finalMetadata.thumbnail.includes('spotifycdn.com') ||
                     finalMetadata.thumbnail.includes('googleusercontent.com')
                 );
 
                 if (useProxy) {
-                    console.log('Proxying thumbnail for stability:', finalMetadata.thumbnail.slice(0, 50));
-                    try {
-                        const proxyResult = await window.electron.getProxyImage(finalMetadata.thumbnail);
-                        if (proxyResult) {
-                            finalMetadata = { ...finalMetadata, thumbnail: proxyResult };
-                        }
-                    } catch (proxyErr) {
-                        console.warn('Thumbnail proxy failed:', proxyErr);
-                    }
-                }
-
-                setMetadata(finalMetadata);
-                // Auto-select all items in playlist
-                if (finalMetadata.entries) {
-                    setSelectedItems(new Set(finalMetadata.entries.map((e: PlaylistEntry) => e.id)));
+                    const thumbSrc = finalMetadata.thumbnail;
+                    console.log('Proxying thumbnail for stability:', thumbSrc.slice(0, 50));
+                    window.electron.getProxyImage(thumbSrc)
+                        .then((proxyResult) => {
+                            if (!proxyResult) return;
+                            setMetadata(prev => (prev && prev.id === finalMetadata.id
+                                ? { ...prev, thumbnail: proxyResult }
+                                : prev));
+                        })
+                        .catch((proxyErr) => console.warn('Thumbnail proxy failed:', proxyErr));
                 }
             } else {
                 setError(res.error || 'Failed to fetch info');
@@ -949,6 +1401,7 @@ export function Downloader() {
         } catch (err: any) {
             setError(err.message || 'Unknown error');
         } finally {
+            setFetchElapsed(performance.now() - fetchStartedAt);
             setLoading(false);
         }
     };
@@ -977,7 +1430,9 @@ export function Downloader() {
                 playlistTitle,
                 jobId: jobId || undefined,
                 cutStart: cut?.start,
-                cutEnd: cut?.end
+                cutEnd: cut?.end,
+                audioTrack: selectedAudioTrack?.formatId,
+                audioLangLabel: selectedAudioTrack?.langLabel
             });
         } catch (err: any) {
             setError(err.message);
@@ -986,7 +1441,39 @@ export function Downloader() {
             setProgress(null);
             setActiveJobId(null);
         }
-    }, [metadata, downloading, url]);
+    }, [metadata, downloading, url, selectedAudioTrack]);
+
+    // Subtitles download on their own - no media is fetched, and nothing is
+    // attached to a video download.
+    const handleSubtitleDownload = useCallback(async () => {
+        if (!subtitleSelection || subtitleDownloading) return;
+        const targetUrl = metadata?.webpage_url || url;
+        if (!targetUrl) return;
+
+        setSubtitleDownloading(true);
+        setSubtitleNotice(null);
+        setSubtitleResult(null);
+        try {
+            const result = await window.electron.downloadSubtitles({
+                url: targetUrl,
+                title: metadata?.title || 'video',
+                platform: currentPlatform.id,
+                contentType: metadata?.contentType,
+                playlistTitle: metadata?.entries?.length ? metadata?.title : undefined,
+                thumbnail: metadata?.thumbnail,
+                subtitle: subtitleSelection
+            });
+            if (result?.success) {
+                setSubtitleResult(result.path || '');
+            } else {
+                setSubtitleNotice(result?.error || 'Could not download the subtitles');
+            }
+        } catch (err: any) {
+            setSubtitleNotice(err.message || 'Could not download the subtitles');
+        } finally {
+            setSubtitleDownloading(false);
+        }
+    }, [subtitleSelection, subtitleDownloading, metadata, url, currentPlatform.id]);
 
     const handleStopLiveRecording = useCallback(async () => {
         if (!activeJobId) return;
@@ -1091,8 +1578,7 @@ export function Downloader() {
     }, []);
 
     // Get all available video formats sorted by resolution - prioritize MP4 over WEBM
-    const formats = useMemo(() => {
-        if (!metadata?.formats) return [];
+    const formats = useMemo(() => {        if (!metadata?.formats) return [];
 
         // Priority order for video extensions (lower index = higher priority)
         const extPriority: Record<string, number> = {
@@ -1178,6 +1664,8 @@ export function Downloader() {
         setMetadata(null);
         setError(null);
         setComplete(false);
+        setFetchStart(null);
+        setFetchElapsed(null);
         setDownloadedFilePath(null);
         setProgress(null);
         setSelectedItems(new Set());
@@ -1460,7 +1948,7 @@ export function Downloader() {
                                             type="text"
                                             value={url}
                                             onChange={(e) => setUrl(e.target.value)}
-                                            placeholder={isSpotify ? 'Drop link...' : `Paste link here...`}
+                                            placeholder={isSpotify ? 'Drop link...' : currentPlatform.id === 'instagram' ? 'Paste link or @username...' : 'Paste link here...'}
                                             disabled={loading || downloading || batchDownloading}
                                             className="w-full h-full pl-3 pr-40 bg-transparent text-white placeholder-white/20 outline-none font-bold text-sm tracking-tight disabled:opacity-50 transition-all"
                                         />
@@ -1491,6 +1979,14 @@ export function Downloader() {
                                                         // Detect platform
                                                         const u = text.toLowerCase();
                                                         const detectedId = Object.keys(PLATFORM_DOMAINS).find(id => PLATFORM_DOMAINS[id].some(d => u.includes(d)));
+
+                                                        // A pasted bare handle has no domain, so fall back to
+                                                        // the selected tab rather than rejecting it.
+                                                        if (!detectedId && currentPlatform.id === 'instagram' && normalizeInstagramHandle(text)) {
+                                                            setUrl(text);
+                                                            handleSubmit(undefined, text);
+                                                            return;
+                                                        }
 
                                                         if (detectedId) {
                                                             const newPlatform = platforms.find(p => p.id === detectedId);
@@ -1679,6 +2175,15 @@ export function Downloader() {
                     )}
                 </AnimatePresence>
 
+                {/* Fetch timing (diagnostic, test builds only) */}
+                {SHOW_FETCH_TIMER && fetchStart !== null && (loading || fetchElapsed !== null) && (
+                    <FetchTimer
+                        start={fetchStart}
+                        elapsed={fetchElapsed}
+                        failed={!!fetchElapsed && !!error}
+                    />
+                )}
+
                 {/* Content */}
                 <AnimatePresence mode="wait">
                     {/* Loading Skeleton */}
@@ -1863,6 +2368,38 @@ export function Downloader() {
                                     )}
 
                                     {/* Audio Options */}
+                                    {/* Audio language. Absent unless the video
+                                        publishes more than one language, so a
+                                        normal single-audio video is unchanged.
+                                        Sits above both output sections because it
+                                        governs each of them. */}
+                                    {hasAudioChoice && !isSpotify && !isLive && (
+                                        <div data-audio-language-panel className="mb-4 rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+                                            <div className="h-7 px-3 flex items-center justify-between border-b border-white/10 bg-white/[0.03] sticky top-0 z-10 backdrop-blur-sm">
+                                                <h3 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/50">
+                                                    <Globe className="w-3 h-3" /> Audio Language
+                                                </h3>
+                                                <span className="text-[9px] uppercase tracking-wider text-white/30 tabular-nums">{audioTracks.length} tracks</span>
+                                            </div>
+                                            <div data-audio-language-list className="max-h-[264px] overflow-y-auto">
+                                                {audioTracks.map((track) => (
+                                                    <AudioTrackChoice
+                                                        key={track.key}
+                                                        track={track}
+                                                        active={audioTrackKey === track.key}
+                                                        disabled={downloading}
+                                                        onPick={() => setAudioTrackKey(track.key)}
+                                                    />
+                                                ))}
+                                            </div>
+                                            <div className="px-3 py-2 border-t border-white/10 bg-white/[0.03]">
+                                                <p className="text-[10px] leading-snug text-white/35">
+                                                    Used for audio-only downloads and for the audio merged into video downloads.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {!isSpotify && !isLive && (
                                         <div className="mb-4">
                                             <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
@@ -1914,12 +2451,216 @@ export function Downloader() {
                                                                     {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
                                                                 </p>
                                                                 <p className="text-xs text-white/40">{f.ext?.toUpperCase() || 'MP4'} {f.format_note && `• ${f.format_note}`}</p>
-                                                            </div>
+                                </div>
                                                         </div>
                                                         <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
                                                     </button>
                                                 ))}
                                             </div>
+                                        </div>
+                                    )}
+                                    {/* Subtitles. Suppressed for music: a song's
+                                        YouTube captions are either auto-generated
+                                        from the vocal or hand-typed karaoke text, and
+                                        either way they are a worse read on the words
+                                        than the lyrics panel above, so offering both
+                                        only splits the user's attention. */}
+                                    {!isMusicTrack && !isLive && subtitleTracks.length > 0 && (
+                                        <div>
+                                            <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
+                                                <Captions className="w-4 h-4" /> Subtitles
+                                                <span className="text-[10px] font-normal text-white/30">
+                                                    {subtitleTracks.length} language{subtitleTracks.length === 1 ? '' : 's'}
+                                                </span>
+                                            </h3>
+                                            {/* One panel holds the filter, the list and the
+                                                action, so picking a language never moves
+                                                the download button out from under the
+                                                cursor and the whole control reads as a
+                                                single unit. */}
+                                            <div data-subtitle-panel className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+                                                <div className="p-2.5">
+                                                    <div className="relative">
+                                                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+                                                        <input
+                                                            type="text"
+                                                            value={subtitleSearch}
+                                                            onChange={(e) => setSubtitleSearch(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && subtitleVisibleTracks.length) {
+                                                                    pickSubtitle(subtitleVisibleTracks[0].key);
+                                                                } else if (e.key === 'Escape') {
+                                                                    setSubtitleSearch('');
+                                                                }
+                                                            }}
+                                                            placeholder={`Search ${subtitleTracks.length} languages...`}
+                                                            disabled={downloading}
+                                                            className="w-full h-9 pl-9 pr-9 rounded-lg bg-white/5 border border-white/10 text-white text-[13px] placeholder-white/25 outline-none transition focus:border-blue-400/40 focus:bg-white/[0.07] disabled:opacity-50"
+                                                        />
+                                                        {subtitleSearch && (
+                                                            <button
+                                                                onClick={() => setSubtitleSearch('')}
+                                                                aria-label="Clear language search"
+                                                                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition"
+                                                            >
+                                                                <X className="w-3 h-3" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[10px] text-white/35">
+                                                        <span className="truncate">
+                                                            {subtitleSearch.trim()
+                                                                ? `${subtitleVisibleTracks.length} of ${subtitleTracks.length} languages`
+                                                                : `${subtitleTracks.filter((t) => !t.isAuto).length} by creator · ${subtitleTracks.filter((t) => t.isAuto).length} auto-generated`}
+                                                        </span>
+                                                        {subtitleSearch.trim() && subtitleVisibleTracks.length === 0 && (
+                                                            <span className="shrink-0 text-white/50">No match</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Deliberately not .smooth-scroll: that class
+                                                    sets content-visibility: auto, which
+                                                    lets Chromium skip the offscreen rows
+                                                    while the group headers inside are
+                                                    position: sticky. The list is long
+                                                    enough that keeping it rendered is
+                                                    cheaper than debugging sticky
+                                                    headers that land in the wrong place. */}
+                                                <div
+                                                    data-subtitle-list
+                                                    className="overflow-y-auto custom-scrollbar border-y border-white/10 bg-[#0d0d0f]"
+                                                    // With no visible rows there is nothing to cap,
+                                                    // and a derived height of 0 would clip the
+                                                    // empty-state message, so let the message size
+                                                    // the box instead.
+                                                    style={{ height: subtitleVisibleTracks.length > 0 ? subtitleListHeight : undefined }}
+                                                >
+                                                    {subtitleVisibleTracks.length === 0 ? (
+                                                        <p className="px-4 py-10 text-center text-xs text-white/40">
+                                                            {subtitleSearch.trim()
+                                                                ? <>No language matches &ldquo;{subtitleSearch.trim()}&rdquo;.</>
+                                                                : <>No track offers a {subtitleFormat.toUpperCase()} file.</>}
+                                                        </p>
+                                                    ) : (
+                                                        <>
+                                                            {subtitleAuthored.length > 0 && (
+                                                                <div>
+                                                                    <div className="sticky top-0 z-10 flex items-center gap-2 h-7 px-3 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-white/[0.06]">
+                                                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">By creator</span>
+                                                                        <span className="text-[10px] text-white/25">{subtitleAuthored.length}</span>
+                                                                    </div>
+                                                                    <div className="divide-y divide-white/[0.04]">
+                                                                        {subtitleAuthored.map((t) => (
+                                                                            <SubtitleChoice
+                                                                                key={t.key}
+                                                                                track={t}
+                                                                                active={subtitleKey === t.key}
+                                                                                disabled={downloading}
+                                                                                onPick={() => pickSubtitle(subtitleKey === t.key ? null : t.key)}
+                                                                            />
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {subtitleAutomatic.length > 0 && (
+                                                                <div>
+                                                                    <div className="sticky top-0 z-10 flex items-center gap-2 h-7 px-3 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-white/[0.06]">
+                                                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-white/45">Auto-generated &amp; translated</span>
+                                                                        <span className="text-[10px] text-white/25">{subtitleAutomatic.length}</span>
+                                                                    </div>
+                                                                    <div className="divide-y divide-white/[0.04]">
+                                                                        {subtitleAutomatic.map((t) => (
+                                                                            <SubtitleChoice
+                                                                                key={t.key}
+                                                                                track={t}
+                                                                                active={subtitleKey === t.key}
+                                                                                disabled={downloading}
+                                                                                onPick={() => pickSubtitle(subtitleKey === t.key ? null : t.key)}
+                                                                            />
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+
+                                                {/* Pinned action bar. It is always present at a
+                                                    fixed height, so choosing a
+                                                    language never reflows the
+                                                    page under the pointer. */}
+                                                <div className="p-2.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`flex h-10 p-0.5 rounded-lg bg-white/5 border border-white/10 transition-opacity ${subtitleSelection ? '' : 'opacity-40'}`}>
+                                                            {(['srt', 'vtt'] as const).map((fmt) => (
+                                                                <button
+                                                                    key={fmt}
+                                                                    onClick={() => pickSubtitleFormat(fmt)}
+                                                                    disabled={!subtitleSelection || subtitleDownloading}
+                                                                    title={fmt === 'srt' ? 'Converted to SRT with FFmpeg' : 'Saved exactly as published'}
+                                                                    className={`h-full px-3 rounded-md text-xs font-medium transition disabled:cursor-not-allowed ${
+                                                                        subtitleFormat === fmt
+                                                                            ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                                                                            : 'text-white/45 hover:text-white/80'
+                                                                    }`}
+                                                                >
+                                                                    {fmt.toUpperCase()}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <button
+                                                            onClick={handleSubtitleDownload}
+                                                            disabled={!subtitleSelection || subtitleDownloading}
+                                                            className="flex-1 h-10 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-400 font-medium text-[13px] flex items-center justify-center gap-2 transition hover:bg-blue-500/30 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                                                        >
+                                                            {subtitleDownloading ? (
+                                                                <>
+                                                                    <span className="w-3.5 h-3.5 rounded-full border-2 border-blue-400/30 border-t-blue-400 animate-spin shrink-0" />
+                                                                    Downloading
+                                                                </>
+                                                            ) : subtitleSelection ? (
+                                                                <>
+                                                                    <Download className="w-4 h-4 shrink-0" />
+                                                                    <span className="truncate">Download {subtitleSelection.langLabel || subtitleSelection.lang}</span>
+                                                                </>
+                                                            ) : (
+                                                                'Select a language'
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                    <p className="mt-2 px-1 text-[10px] leading-relaxed text-white/30 text-center">
+                                                        {subtitleSelection
+                                                            ? `${subtitleSelection.lang} saved to ${currentPlatform.name} › Subtitles${subtitleFormat === 'srt' ? ' · converted with FFmpeg' : ' · no conversion'}`
+                                                            : `Saved on its own to ${currentPlatform.name} › Subtitles`}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {subtitleNotice && (
+                                                <p className="mt-2 flex items-start gap-2 text-[11px] leading-relaxed text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2">
+                                                    <span className="w-1 h-1 rounded-full bg-amber-400/70 mt-[6px] shrink-0" />
+                                                    {subtitleNotice}
+                                                </p>
+                                            )}
+
+                                            {subtitleResult && (
+                                                <p className="mt-2 flex items-center gap-2 text-[11px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-3 py-2">
+                                                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                                    <span className="truncate" title={subtitleResult}>{subtitleResult}</span>
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Lyrics. Renders nothing unless a provider
+                                        matched, so a track with no lyrics leaves
+                                        no trace - not even an empty box. Placed
+                                        outside the Spotify guards above because a
+                                        Spotify link is always music. */}
+                                    {lyrics && (
+                                        <div className="mt-3">
+                                            <LyricsPanel lyrics={lyrics} />
                                         </div>
                                     )}
                                 </div>
@@ -2180,7 +2921,8 @@ export function Downloader() {
                                             window.electron.chooseDownloadFolder().then(res => {
                                                 if (res.path) window.electron.openInFolder(res.path);
                                                 else if (metadata) window.electron.openInFolder(metadata.title);
-                                            });
+});
+
                                         }
                                     }}
                                     className="h-12 px-6 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
@@ -2195,6 +2937,7 @@ export function Downloader() {
                                         // For now, let's stick to "Download Another" as the primary "Reset" action,
                                         // and maybe a "Open" button if we know the path.
                                         setComplete(false); setMetadata(null); setUrl('');
+                                        setFetchStart(null); setFetchElapsed(null);
                                     }}
                                     className="h-12 px-8 bg-white text-black rounded-xl font-bold cursor-pointer hover:bg-white/90 transition flex items-center justify-center gap-2"
                                 >
@@ -2279,6 +3022,68 @@ export function Downloader() {
                                             Your privacy is our priority. Cookies are stored exclusively on your local machine and are used solely to authenticate downloads from restricted or private sources. We do not track, store, or transmit any sensitive data.
                                         </p>
                                     </div>
+
+                                    {/* Stories resolver key - Instagram only.
+                                        Stories are the one thing cookies cannot
+                                        avoid: a link to an expired or private
+                                        story needs a live session regardless.
+                                        The key buys that session from a resolver
+                                        instead, so no Instagram login is needed. */}
+                                    {currentPlatform.id === 'instagram' && (
+                                        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                                            <h3 className="text-sm font-bold text-white mb-1">Read Stories without logging in</h3>
+                                            <p className="text-[11px] text-white/50 leading-relaxed mb-3">
+                                                Instagram serves no story data to anonymous clients, so a session is
+                                                required. Add a Stories service API key and the app resolves
+                                                public stories for you — no Instagram login, no cookies.
+                                                Each lookup uses 2 credits.
+                                            </p>
+
+                                            {storiesKey.configured ? (
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-2 text-xs">
+                                                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                                        <span className="text-white/70">Key saved: <code className="text-emerald-300">{storiesKey.masked}</code></span>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleClearStoriesKey}
+                                                            disabled={storiesKeyBusy}
+                                                            className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-bold uppercase tracking-widest text-white/50 hover:text-white/80 transition disabled:opacity-50 cursor-pointer"
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    <input
+                                                        type="password"
+                                                        value={storiesKeyInput}
+                                                        onChange={(e) => setStoriesKeyInput(e.target.value)}
+                                                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveStoriesKey(); }}
+                                                        placeholder="Paste your Stories API key"
+                                                        className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-xs text-white placeholder-white/25 outline-none focus:border-emerald-500/40 transition"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSaveStoriesKey}
+                                                        disabled={!storiesKeyInput.trim() || storiesKeyBusy}
+                                                        className="w-full px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-xs font-bold text-emerald-300 transition disabled:opacity-40 cursor-pointer"
+                                                    >
+                                                        {storiesKeyBusy ? 'Checking…' : 'Save and verify key'}
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {storiesKeyMsg && (
+                                                <p className={`mt-2 text-[11px] ${storiesKeyMsg.ok ? 'text-emerald-300' : 'text-red-400'}`}>
+                                                    {storiesKeyMsg.text}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {!hasCookies ? (
                                         <div className="space-y-6">

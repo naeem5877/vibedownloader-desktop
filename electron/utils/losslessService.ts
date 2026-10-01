@@ -7,6 +7,8 @@
  * Based on SpotiFLAC knowledge base.
  */
 
+import { defaultUserAgent } from './platform';
+
 // --- SongLink API ---
 
 interface SongLinkURLs {
@@ -78,7 +80,11 @@ const QOBUZ_APIS = [
 
 const QOBUZ_APP_ID = '798273057';
 
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
+// Must match the host OS: a Windows UA from a macOS/Linux IP is a common
+// trigger for these services' bot checks. The retries below also rotate
+// through a Googlebot and an app UA, so the first entry has to be the
+// platform-correct one to have any chance of matching the request origin.
+const USER_AGENT = defaultUserAgent();
 
 /**
  * Check if lossless audio is available for a Spotify track via SongLink or Deezer fallback
@@ -86,7 +92,7 @@ const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 export async function checkLosslessAvailability(spotifyTrackId: string, trackTitle?: string, artistName?: string): Promise<LosslessTrackInfo> {
     const axios = require('axios');
     const uas = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        defaultUserAgent(),
         'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
         'VibeDownloader/1.4.1'
     ];
@@ -202,7 +208,7 @@ export async function getLosslessDownloadURL(spotifyTrackId: string, tidalURL?: 
 } | null> {
     const axios = require('axios');
     const uas = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        defaultUserAgent(),
         'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
         'VibeDownloader/1.4.1'
     ];
