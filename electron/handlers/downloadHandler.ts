@@ -471,7 +471,7 @@ async function finalizeLiveRecording(downloadPath: string, uniqueFilename: strin
 }
 
 export function registerDownloadHandlers() {
-    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId, cutStart, cutEnd, audioTrack, audioLangLabel }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string, cutStart?: number, cutEnd?: number, audioTrack?: string, audioLangLabel?: string }) => {
+    ipcMain.handle('download-video', async (event: any, { url, formatId, title, platform, contentType, thumbnail, playlistTitle, suppressNotifications, jobId, cutStart, cutEnd, audioTrack, audioLangLabel, mediaExt }: { url: any, formatId: any, title: any, platform?: string, contentType?: string, thumbnail?: string, playlistTitle?: string, suppressNotifications?: boolean, jobId?: string, cutStart?: number, cutEnd?: number, audioTrack?: string, audioLangLabel?: string, mediaExt?: string }) => {
         registerDownloadStart();
         try {
             const mainWindow = getMainWindow();
@@ -485,7 +485,7 @@ export function registerDownloadHandlers() {
             }
 
             // Detect platform and content type from URL if not provided
-            const isFbcdnUrl = url.includes('fbcdn.net');
+            const isFbcdnUrl = url.includes('fbcdn.net') || url.includes('rapidcdn.app');
             const isFacebook = url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com') || (isFbcdnUrl && platform === 'facebook');
             const isInstagram = platform === 'instagram' || url.includes('instagram.com') || url.includes('instagr.am') || (isFbcdnUrl && platform !== 'facebook');
             const isYoutube = url.includes('youtube.com') || url.includes('youtu.be');
@@ -598,14 +598,24 @@ export function registerDownloadHandlers() {
             const uniqueFilename = `${safeTitle}${cutSuffix}_${uniqueId}`;
             // If it's a direct fbcdn image url, force jpg ext, else use formatId
             const isFbcdnImage = url.includes('fbcdn.net') && (url.includes('.jpg?') || url.includes('.jpeg?'));
-            const finalExt = isFbcdnImage ? 'jpg' : ext;
+            // The renderer reports the real container for CDN items (Instagram
+            // story trays mix mp4 and jpg, and the CDN URLs carry no extension
+            // and answer with application/octet-stream, so nothing downstream can
+            // infer it). Only trust an explicit jpg/mp4 from the main process.
+            const resolvedMediaExt = mediaExt === 'jpg' || mediaExt === 'mp4' ? mediaExt : null;
+            const finalExt = isFbcdnImage ? 'jpg' : (resolvedMediaExt ?? ext);
             const outputTemplate = path.join(downloadPath, `${uniqueFilename}.%(ext)s`);
             const finalFilePath = path.join(downloadPath, `${uniqueFilename}.${finalExt}`);
 
             // ==========================================
             // FAST PATH: Direct CDN links (e.g. IG Stories)
             // ==========================================
-            if (url.includes('fbcdn.net')) {
+            // Hosts that serve the media bytes directly. Instagram hands out two
+            // different CDNs depending on which path resolved the item:
+            // fbcdn.net for anonymous CDN links, and rapidcdn.app for the
+            // built-in downloader's story tray URLs.
+            const isDirectCdn = url.includes('fbcdn.net') || url.includes('rapidcdn.app');
+            if (isDirectCdn) {
                 console.log('Using FAST PATH for direct CDN URL:', url.substring(0, 50));
                 mainWindow?.webContents.send('download-progress', { percent: 10, currentSpeed: 'Downloading...', jobId });
 

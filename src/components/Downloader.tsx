@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions
@@ -30,6 +30,8 @@ interface PlaylistEntry {
     url: string;
     artist?: string;
     searchQuery?: string;
+    ext?: string;
+    isIGStoryImage?: boolean;
 }
 
 // Subtitle track as reported by the main process (see electron/utils/subtitles.ts).
@@ -276,7 +278,7 @@ const PlaylistItem = memo(({
             <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate" title={entry.title}>{entry.title}</p>
                 <p className="text-xs text-white/40">
-                    {entry.artist && <span>{entry.artist} • </span>}
+                    {entry.artist && <span>{entry.artist} â€¢ </span>}
                     {formatDuration(entry.duration)}
                 </p>
             </div>
@@ -379,7 +381,7 @@ const BatchQueueItem = memo(({
                     </div>
                     <div className="flex items-center gap-3 text-xs">
                         <p className="text-white/40 truncate max-w-[200px]">{item.url}</p>
-                        {item.error && <span className="text-red-400 truncate max-w-[150px]">• {item.error}</span>}
+                        {item.error && <span className="text-red-400 truncate max-w-[150px]">â€¢ {item.error}</span>}
                     </div>
 
                     {/* Progress Bar (Slim) */}
@@ -395,7 +397,7 @@ const BatchQueueItem = memo(({
                                 <span>{item.speed && item.speed !== '...' ? item.speed : 'Downloading...'}</span>
                                 <div className="flex items-center gap-2">
                                     {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
-                                    {item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
+                                    {item.eta && item.eta !== '...' && <span>â€¢ {item.eta} left</span>}
                                 </div>
                             </div>
                         </>
@@ -602,13 +604,6 @@ export function Downloader() {
     const [showCookieModal, setShowCookieModal] = useState(false);
     const [cookieContent, setCookieContent] = useState('');
     const [hasCookies, setHasCookies] = useState(false);
-
-    // Instagram Stories resolver key. Only its *status* is held - the value is
-    // write-only, so it is never read back into the renderer.
-    const [storiesKey, setStoriesKey] = useState<{ configured: boolean; masked: string }>({ configured: false, masked: '' });
-    const [storiesKeyInput, setStoriesKeyInput] = useState('');
-    const [storiesKeyBusy, setStoriesKeyBusy] = useState(false);
-    const [storiesKeyMsg, setStoriesKeyMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
     // Playlist features
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -863,9 +858,10 @@ export function Downloader() {
         formatId?: string;
         platform?: string;
         speed?: string;
-        eta?: string;
-        downloaded?: string;
-    }>>([]);
+eta?: string;
+    downloaded?: string;
+    ext?: string;
+}>>([]);
     const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
     const [batchDownloading, setBatchDownloading] = useState(false);
     const batchCompletionRef = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null);
@@ -1017,8 +1013,9 @@ export function Downloader() {
                                         formatId,
                                         title,
                                         platform: currentPlatform.id,
-                                        contentType: metadata.contentType === 'story' ? 'story' : undefined,
-                                        thumbnail: metadata.thumbnail,
+contentType: metadata.contentType === 'story' ? 'story' : undefined,
+    mediaExt: currentItem.ext as 'jpg' | 'mp4' | undefined,
+    thumbnail: metadata.thumbnail,
                                         suppressNotifications: true
                                     });
                                 }
@@ -1198,56 +1195,6 @@ export function Downloader() {
             window.electron.showNotification('Batch Download Complete', `All ${downloadQueue.length} media downloaded successfully.`);
         }
     }, [isBatchComplete, downloadQueue.length]);
-
-    // Read whether a Stories key exists. The value itself is never fetched.
-    useEffect(() => {
-        let cancelled = false;
-        window.electron.getStoriesApiKeyStatus()
-            .then((s) => { if (!cancelled) setStoriesKey(s); })
-            .catch(() => {});
-        return () => { cancelled = true; };
-    }, [showCookieModal]);
-
-    const handleSaveStoriesKey = async () => {
-        const value = storiesKeyInput.trim();
-        if (!value) return;
-        setStoriesKeyBusy(true);
-        setStoriesKeyMsg(null);
-        try {
-            const res = await window.electron.saveStoriesApiKey(value);
-            if (!res.success) {
-                setStoriesKeyMsg({ ok: false, text: res.error || 'Could not save the key.' });
-                return;
-            }
-            setStoriesKey({ configured: Boolean(res.configured), masked: res.masked || '' });
-            setStoriesKeyInput('');
-            // Confirming costs nothing (`/v1/credits` is free), and a key that
-            // looks right but was revoked would otherwise fail later with no
-            // explanation.
-            const test = await window.electron.testStoriesApiKey();
-            setStoriesKeyMsg(
-                test.success
-                    ? { ok: true, text: test.credits != null ? `Key works — ${test.credits} credits left.` : 'Key works.' }
-                    : { ok: false, text: `Saved, but it was rejected: ${test.error}` }
-            );
-        } catch (e: any) {
-            setStoriesKeyMsg({ ok: false, text: e?.message || 'Could not save the key.' });
-        } finally {
-            setStoriesKeyBusy(false);
-        }
-    };
-
-    const handleClearStoriesKey = async () => {
-        setStoriesKeyBusy(true);
-        try {
-            await window.electron.clearStoriesApiKey();
-            setStoriesKey({ configured: false, masked: '' });
-            setStoriesKeyInput('');
-            setStoriesKeyMsg({ ok: true, text: 'Key removed.' });
-        } finally {
-            setStoriesKeyBusy(false);
-        }
-    };
 
 
     const handleSaveCookies = async () => {
@@ -1432,7 +1379,10 @@ export function Downloader() {
                 cutStart: cut?.start,
                 cutEnd: cut?.end,
                 audioTrack: selectedAudioTrack?.formatId,
-                audioLangLabel: selectedAudioTrack?.langLabel
+                audioLangLabel: selectedAudioTrack?.langLabel,
+                mediaExt: itemId
+                    ? (metadata?.entries?.find((e: PlaylistEntry) => e.id === itemId)?.ext as 'jpg' | 'mp4' | undefined)
+                    : undefined
             });
         } catch (err: any) {
             setError(err.message);
@@ -1539,8 +1489,8 @@ export function Downloader() {
         }
     }, [downloading, metadata]);
 
-    // Listen for Spotify search from browser extension (title/artist → YouTube download).
-    // NOTE: this does NOT auto-start the download — it opens the app and shows the
+    // Listen for Spotify search from browser extension (title/artist â†’ YouTube download).
+    // NOTE: this does NOT auto-start the download â€” it opens the app and shows the
     // track card (like the URL flow) so the user clicks the Download button manually.
     useEffect(() => {
         const handler = (data: { searchQuery: string; title: string; artist: string; thumbnail: string }) => {
@@ -1759,8 +1709,9 @@ export function Downloader() {
                         formatId: formatId,
                         title: item.title,
                         platform: currentPlatform.id,
-                        contentType: metadata?.contentType || (isStory ? 'story' : undefined),
-                        playlistTitle, // This will create the /playlists/{title}/ folder
+contentType: metadata?.contentType || (isStory ? 'story' : undefined),
+        mediaExt: item.ext as 'jpg' | 'mp4' | undefined,
+        playlistTitle, // This will create the /playlists/{title}/ folder
                         suppressNotifications: true
                     });
                 }
@@ -1863,7 +1814,7 @@ export function Downloader() {
                     </h1>
                     <p className="text-white/40">
                         Download from {currentPlatform.name}
-                        {isSpotify && <span className="text-green-400 text-xs ml-2">• via YouTube</span>}
+                        {isSpotify && <span className="text-green-400 text-xs ml-2">â€¢ via YouTube</span>}
                     </p>
                 </div>
 
@@ -2288,7 +2239,7 @@ export function Downloader() {
                                                     </p>
                                                     <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
                                                         {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
-                                                        {progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
+                                                        {progress?.eta && progress.eta !== '...' && <span>â€¢ {progress.eta} left</span>}
                                                     </div>
                                                 </div>
                                             </>
@@ -2409,21 +2360,21 @@ export function Downloader() {
                                                 <button onClick={() => handleDownload('audio_best')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-9 h-9 rounded-lg bg-green-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
-                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Best)</p><p className="text-xs text-white/40">~320kbps • High Quality</p></div>
+                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Best)</p><p className="text-xs text-white/40">~320kbps â€¢ High Quality</p></div>
                                                     </div>
                                                     <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
                                                 </button>
                                                 <button onClick={() => handleDownload('audio_standard')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-green-400/80" /></div>
-                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Standard)</p><p className="text-xs text-white/40">~128kbps • Balanced</p></div>
+                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Standard)</p><p className="text-xs text-white/40">~128kbps â€¢ Balanced</p></div>
                                                     </div>
                                                     <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
                                                 </button>
                                                 <button onClick={() => handleDownload('audio_low')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-yellow-400" /></div>
-                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Low)</p><p className="text-xs text-white/40">~64kbps • Save Data</p></div>
+                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Low)</p><p className="text-xs text-white/40">~64kbps â€¢ Save Data</p></div>
                                                     </div>
                                                     <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
                                                 </button>
@@ -2450,7 +2401,7 @@ export function Downloader() {
                                                                     {f.height && f.height >= 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300">4K</span>}
                                                                     {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
                                                                 </p>
-                                                                <p className="text-xs text-white/40">{f.ext?.toUpperCase() || 'MP4'} {f.format_note && `• ${f.format_note}`}</p>
+                                                                <p className="text-xs text-white/40">{f.ext?.toUpperCase() || 'MP4'} {f.format_note && `â€¢ ${f.format_note}`}</p>
                                 </div>
                                                         </div>
                                                         <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
@@ -2511,7 +2462,7 @@ export function Downloader() {
                                                         <span className="truncate">
                                                             {subtitleSearch.trim()
                                                                 ? `${subtitleVisibleTracks.length} of ${subtitleTracks.length} languages`
-                                                                : `${subtitleTracks.filter((t) => !t.isAuto).length} by creator · ${subtitleTracks.filter((t) => t.isAuto).length} auto-generated`}
+                                                                : `${subtitleTracks.filter((t) => !t.isAuto).length} by creator Â· ${subtitleTracks.filter((t) => t.isAuto).length} auto-generated`}
                                                         </span>
                                                         {subtitleSearch.trim() && subtitleVisibleTracks.length === 0 && (
                                                             <span className="shrink-0 text-white/50">No match</span>
@@ -2631,8 +2582,8 @@ export function Downloader() {
                                                     </div>
                                                     <p className="mt-2 px-1 text-[10px] leading-relaxed text-white/30 text-center">
                                                         {subtitleSelection
-                                                            ? `${subtitleSelection.lang} saved to ${currentPlatform.name} › Subtitles${subtitleFormat === 'srt' ? ' · converted with FFmpeg' : ' · no conversion'}`
-                                                            : `Saved on its own to ${currentPlatform.name} › Subtitles`}
+                                                            ? `${subtitleSelection.lang} saved to ${currentPlatform.name} â€º Subtitles${subtitleFormat === 'srt' ? ' Â· converted with FFmpeg' : ' Â· no conversion'}`
+                                                            : `Saved on its own to ${currentPlatform.name} â€º Subtitles`}
                                                     </p>
                                                 </div>
                                             </div>
@@ -2787,7 +2738,7 @@ export function Downloader() {
                                         </div>
                                         <div>
                                             <h2 className="font-bold text-xl text-white tracking-tight">{metadata.uploader}'s Stories</h2>
-                                            <p className="text-white/60 text-sm font-medium">{(metadata.entries?.length ?? 0)} stories available • {selectedItems.size} selected</p>
+                                            <p className="text-white/60 text-sm font-medium">{(metadata.entries?.length ?? 0)} stories available â€¢ {selectedItems.size} selected</p>
                                         </div>
                                     </div>
                                     <button
@@ -3023,65 +2974,19 @@ export function Downloader() {
                                         </p>
                                     </div>
 
-                                    {/* Stories resolver key - Instagram only.
-                                        Stories are the one thing cookies cannot
-                                        avoid: a link to an expired or private
-                                        story needs a live session regardless.
-                                        The key buys that session from a resolver
-                                        instead, so no Instagram login is needed. */}
+                                    {/* Instagram Stories - Instagram only.
+                                        Stories are read by the built-in downloader that ships
+                                        with the app. No Instagram login, no cookies, no API key,
+                                        and nothing is billed per lookup. */}
                                     {currentPlatform.id === 'instagram' && (
                                         <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
                                             <h3 className="text-sm font-bold text-white mb-1">Read Stories without logging in</h3>
-                                            <p className="text-[11px] text-white/50 leading-relaxed mb-3">
-                                                Instagram serves no story data to anonymous clients, so a session is
-                                                required. Add a Stories service API key and the app resolves
-                                                public stories for you — no Instagram login, no cookies.
-                                                Each lookup uses 2 credits.
+                                            <p className="text-[11px] text-white/50 leading-relaxed">
+                                                Instagram serves no story data to anonymous clients, so the app uses its
+                                                own built-in downloader instead. No Instagram login, no cookies, no
+                                                API key, and no credits are involved. On the Instagram tab you can
+                                                paste a bare username such as <code className="text-emerald-300">nike</code>.
                                             </p>
-
-                                            {storiesKey.configured ? (
-                                                <div className="space-y-3">
-                                                    <div className="flex items-center gap-2 text-xs">
-                                                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                                        <span className="text-white/70">Key saved: <code className="text-emerald-300">{storiesKey.masked}</code></span>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleClearStoriesKey}
-                                                            disabled={storiesKeyBusy}
-                                                            className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-bold uppercase tracking-widest text-white/50 hover:text-white/80 transition disabled:opacity-50 cursor-pointer"
-                                                        >
-                                                            Remove
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-2">
-                                                    <input
-                                                        type="password"
-                                                        value={storiesKeyInput}
-                                                        onChange={(e) => setStoriesKeyInput(e.target.value)}
-                                                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveStoriesKey(); }}
-                                                        placeholder="Paste your Stories API key"
-                                                        className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-xs text-white placeholder-white/25 outline-none focus:border-emerald-500/40 transition"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleSaveStoriesKey}
-                                                        disabled={!storiesKeyInput.trim() || storiesKeyBusy}
-                                                        className="w-full px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-xs font-bold text-emerald-300 transition disabled:opacity-40 cursor-pointer"
-                                                    >
-                                                        {storiesKeyBusy ? 'Checking…' : 'Save and verify key'}
-                                                    </button>
-                                                </div>
-                                            )}
-
-                                            {storiesKeyMsg && (
-                                                <p className={`mt-2 text-[11px] ${storiesKeyMsg.ok ? 'text-emerald-300' : 'text-red-400'}`}>
-                                                    {storiesKeyMsg.text}
-                                                </p>
-                                            )}
                                         </div>
                                     )}
 
@@ -3095,7 +3000,7 @@ export function Downloader() {
                                                     </div>
                                                     <div className="flex-1">
                                                         <h4 className="text-sm font-bold text-white">Easier with the Extension</h4>
-                                                        <p className="text-[11px] text-white/40">Sync your session automatically — no copy-paste needed.</p>
+                                                        <p className="text-[11px] text-white/40">Sync your session automatically â€” no copy-paste needed.</p>
                                                     </div>
                                                 </div>
                                                 <button
@@ -3363,7 +3268,7 @@ export function Downloader() {
                                 </div>
                             </div>
 
-                            {/* Body — horizontal split */}
+                            {/* Body â€” horizontal split */}
                             <div className="flex flex-col md:flex-row md:items-stretch overflow-y-auto custom-scrollbar">
                                 {/* Left: preview */}
                                 <div className="md:w-[38%] md:max-w-[340px] shrink-0 md:border-r border-white/[0.07] p-5 pb-4">
@@ -3402,7 +3307,7 @@ export function Downloader() {
                                             <div className="flex items-center justify-between">
                                                 <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Range</span>
                                                 <span className="text-[11px] font-mono font-bold text-purple-300/80">
-                                                    {formatDuration(cutStart)} → {formatDuration(cutEnd)}
+                                                    {formatDuration(cutStart)} â†’ {formatDuration(cutEnd)}
                                                 </span>
                                             </div>
                                             <div className="flex items-center justify-between">
@@ -3462,7 +3367,7 @@ export function Downloader() {
                                         </div>
                                     </div>
 
-                            {/* Type toggle — segmented control */}
+                            {/* Type toggle â€” segmented control */}
                             <div className="flex p-1 bg-white/[0.04] border border-white/10 rounded-xl mb-4">
                                 <button
                                     onClick={() => setCutType('video')}
@@ -3525,7 +3430,7 @@ export function Downloader() {
                                                     {cutVideoFormat === f.format_id && <Check className="w-4 h-4 text-purple-300" />}
                                                 </div>
                                                 <p className="text-[10px] text-white/40 mt-0.5">
-                                                    {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` • ${formatBytes(f.filesize)}` : f.format_note ? ` • ${f.format_note}` : ''}
+                                                    {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` â€¢ ${formatBytes(f.filesize)}` : f.format_note ? ` â€¢ ${f.format_note}` : ''}
                                                 </p>
                                             </button>
                                         ))}

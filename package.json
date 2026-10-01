@@ -19,7 +19,7 @@
     "dev:server": "vite",
     "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && node -e \"require('fs').writeFileSync('dist-electron/package.json', JSON.stringify({type:'commonjs'}))\" && electron .",
     "build": "tsc -b && vite build",
-    "build:electron": "tsc -p electron/tsconfig.json && node -e \"require('fs').writeFileSync('dist-electron/package.json', JSON.stringify({type:'commonjs'}))\"",
+    "build:electron": "tsc -p electron/tsconfig.json && node -e \"require('fs').writeFileSync('dist-electron/package.json', JSON.stringify({type:'commonjs'}))\" && node scripts/copy-vendor.cjs",
     "pack": "npm run build && npm run build:electron && electron-builder",
     "pack:win": "npm run build && npm run build:electron && electron-builder --win",
     "pack:mac": "npm run build && npm run build:electron && electron-builder --mac",

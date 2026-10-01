@@ -14,7 +14,7 @@ interface Window {
     electron: {
         getVideoInfo: (url: string) => Promise<any>;
         getSpotifyInfo: (url: string) => Promise<any>;
-        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string; cutStart?: number; cutEnd?: number; audioTrack?: string; audioLang?: string; audioLangLabel?: string }) => Promise<{ success: boolean; path?: string }>;
+        downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string; cutStart?: number; cutEnd?: number; audioTrack?: string; audioLang?: string; audioLangLabel?: string; mediaExt?: 'jpg' | 'mp4' }) => Promise<{ success: boolean; path?: string }>;
         downloadSubtitles: (params: { url: string; title?: string; platform?: string; contentType?: string; playlistTitle?: string; thumbnail?: string; suppressNotifications?: boolean; subtitle: { lang: string; langLabel?: string; isAuto?: boolean; format?: 'srt' | 'vtt' } }) => Promise<{ success: boolean; path?: string; error?: string }>;
         cancelDownload: (jobId: string) => Promise<{ success: boolean; error?: string }>;
         downloadSpotifyTrack: (params: { searchQuery: string; title: string; artist: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string }) => Promise<any>;

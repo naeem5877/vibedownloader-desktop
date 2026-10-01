@@ -2,14 +2,15 @@ import { ipcMain, app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { getYtDlpWrap } from '../utils/binaries';
-import { getCookiePath, loadStoriesApiKey } from '../utils/paths';
+import { getCookiePath } from '../utils/paths';
 import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
 import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/platform';
 import { classifyExtractionError } from '../utils/errorMessage';
 import { buildSubtitleList } from '../utils/subtitles';
 import { buildAudioTrackList } from '../utils/audioTracks';
 import { fetchYouTubeMusicAlbumArt } from '../utils/youtubeMusic';
-import { parseStoryUrl, fetchStories, normalizeStoryInput } from '../utils/instagramStories';
+import { parseStoryUrl, normalizeStoryInput } from '../utils/instagramStories';
+import { fetchStoriesLocal } from '../utils/instagramStoriesLocal';
 import { youtubeClientAttempts, isClientSensitiveError } from '../utils/youtubeStrategy';
 import { getYtDlpVersion } from '../utils/binaries';
 import type { NormalizedStory } from '../utils/instagramStories';
@@ -254,14 +255,14 @@ export function registerInfoHandlers() {
             // story id from the URL, so `/stories/user/<id>/` returned the whole
             // tray. See `stories.md`.
             if (isInstagram && normalized.isStoryRequest) {
-                console.log('Using the Stories resolver for Instagram stories...');
+                console.log('Using the built-in downloader for Instagram stories...');
 
                 const parsed = parseStoryUrl(normalized.url);
                 if (!parsed) throw new Error("Invalid Instagram Story URL");
 
                 let stories: NormalizedStory[];
                 try {
-                    stories = await fetchStories(parsed.handle, loadStoriesApiKey(), parsed.storyId);
+                    stories = await fetchStoriesLocal(parsed.handle, parsed.storyId);
                 } catch (e: any) {
                     // Every failure mode is already a user-facing sentence.
                     throw new Error(e?.message || 'Could not read those Instagram stories.');
