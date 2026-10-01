@@ -46,6 +46,70 @@ test('the vendored licence and notice ship alongside the code', () => {
     }
 });
 
+// ---- duplicate stories ----------------------------------------------------
+
+/** Build a signed-wrapper url whose JWT payload points at `file`. */
+function rapidcdn(file, salt) {
+    const payload = Buffer.from(JSON.stringify({ url: file })).toString('base64url');
+    const token = `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.${payload}.sig${salt}`;
+    return `https://d.rapidcdn.app/v2?token=${token}`;
+}
+
+test('re-signed copies of one file collapse to a single story', () => {
+    const a = loadAdapter();
+    const file = 'https://instagram.fbcdn.net/o1/v/t2/m78/AQNT-story.mp4?oh=abc';
+    const items = Array.from({ length: 8 }, (_, i) => ({ url: rapidcdn(file, i) }));
+    const out = a.dedupeByFile(items);
+    assert.strictEqual(out.length, 1, '8 signed copies of one file should become 1 story');
+});
+
+test('different files are all kept', () => {
+    const a = loadAdapter();
+    const items = [0, 1, 2].map(i => ({ url: rapidcdn(`https://instagram.fbcdn.net/story${i}.mp4`, i) }));
+    assert.strictEqual(a.dedupeByFile(items).length, 3);
+});
+
+test('a reused file later in the list is dropped, order is kept', () => {
+    const a = loadAdapter();
+    const one = 'https://instagram.fbcdn.net/one.mp4';
+    const two = 'https://instagram.fbcdn.net/two.mp4';
+    const items = [
+        { url: rapidcdn(one, 0) },
+        { url: rapidcdn(two, 1) },
+        { url: rapidcdn(one, 2) }
+    ];
+    const out = a.dedupeByFile(items);
+    assert.strictEqual(out.length, 2);
+    assert.ok(out[0].url.includes(new URL(rapidcdn(one, 0)).searchParams.get('token')));
+});
+
+test('the volatile query is ignored so re-signed urls match', () => {
+    const a = loadAdapter();
+    const base = 'https://instagram.fbcdn.net/same.mp4';
+    assert.strictEqual(a.dedupeKey(base + '?oh=1'), a.dedupeKey(base + '?oh=2'));
+});
+
+test('plain urls without a token still dedupe', () => {
+    const a = loadAdapter();
+    const items = [
+        { url: 'https://instagram.fbcdn.net/a.mp4' },
+        { url: 'https://instagram.fbcdn.net/a.mp4' },
+        { url: 'https://instagram.fbcdn.net/b.mp4' }
+    ];
+    assert.strictEqual(a.dedupeByFile(items).length, 2);
+});
+
+test('an unreadable url is kept rather than dropped', () => {
+    const a = loadAdapter();
+    assert.strictEqual(a.dedupeKey('not a url'), 'not a url');
+    assert.strictEqual(a.dedupeByFile([{ url: 'not a url' }]).length, 1);
+});
+
+test('the adapter deduplicates before mapping rows', () => {
+    const src = read(path.join(SRC, 'utils', 'instagramStoriesLocal.ts'));
+    assert.match(src, /dedupeByFile\(items\)/);
+});
+
 // ---- URL shaping -----------------------------------------------------------
 
 /**

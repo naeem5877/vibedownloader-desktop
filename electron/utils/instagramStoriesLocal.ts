@@ -92,9 +92,55 @@ async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T, index: 
     return out;
 }
 
+/**
+ * Drop repeats of the same file while preserving first-seen order, so the tray
+ * shows one row per story and each file is sniffed and fetched exactly once.
+ */
+export function dedupeByFile<T extends { url: string }>(items: T[]): T[] {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+        const key = dedupeKey(item.url);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
 export function buildStoriesUrl(handle: string, storyId?: string): string {
     const tail = storyId ? `${encodeURIComponent(storyId)}/` : '';
     return `https://www.instagram.com/stories/${encodeURIComponent(handle)}/${tail}`;
+}
+
+/**
+ * Identity of the file behind a CDN url, for deduplication.
+ *
+ * The upstream page repeats every story several times, and it hands out a fresh
+ * signed wrapper each time, so comparing the outer urls finds nothing to merge:
+ * eight distinct tokens all decode to one identical file. The token is a JWT
+ * whose payload carries the real CDN url, so that is what identifies the media.
+ * The volatile query is dropped because Instagram re-signs the same path.
+ */
+export function dedupeKey(raw: string): string {
+    try {
+        const parsed = new URL(raw);
+        const token = parsed.searchParams.get('token');
+        if (token) {
+            const parts = token.split('.');
+            if (parts.length >= 2) {
+                const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+                if (typeof payload?.url === 'string' && payload.url) {
+                    return payload.url.split('?')[0];
+                }
+            }
+            // Opaque token with no readable payload: the token is all we have,
+            // minus any cache-busting query.
+            return `${parsed.host}${parsed.pathname}${token}`;
+        }
+        // Same rule as above: the path names the file, the query only signs it.
+        return `${parsed.host}${parsed.pathname}`;
+    } catch {
+        return raw;
+    }
 }
 
 export async function fetchStoriesLocal(handle: string, storyId?: string): Promise<NormalizedStory[]> {
@@ -122,13 +168,19 @@ export async function fetchStoriesLocal(handle: string, storyId?: string): Promi
     const items = (result.data || [])
         .filter((i): i is StoryItem => Boolean(i && typeof i.url === 'string' && i.url.length > 0))
         .map((i) => ({ url: i.url as string, thumbnail: i.thumbnail || '' }));
-    if (!items.length) {
+
+    // The upstream page lists every story several times over, each with its own
+    // signed wrapper, so collapse them before touching the network: one sniff per
+    // distinct file, and one row per story in the UI.
+    const unique = dedupeByFile(items);
+
+    if (!unique.length) {
         throw new StoryError('no_stories', `${clean} has no stories right now.`);
     }
 
-    const sniffed = await mapLimited(items, 8, (i) => sniffExtension(i.url));
+    const sniffed = await mapLimited(unique, 8, (i) => sniffExtension(i.url));
 
-    return items.map((item, i) => {
+    return unique.map((item, i) => {
         const ext = sniffed[i] ?? 'mp4';
         return {
             id: `${clean}:${storyId || i}`,
