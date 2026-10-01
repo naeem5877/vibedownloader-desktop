@@ -110,6 +110,54 @@ test('the adapter deduplicates before mapping rows', () => {
     assert.match(src, /dedupeByFile\(items\)/);
 });
 
+// ---- speed: the container is free, and the scrape is worth caching ---------
+
+test('the cdn path states the container, so no request is needed', () => {
+    const a = loadAdapter();
+    assert.strictEqual(
+        a.inferExtFromPath(rapidcdn('https://instagram.fbcdn.net/o1/v/t2/f2/m78/AQNT.mp4', 0)),
+        'mp4'
+    );
+    assert.strictEqual(
+        a.inferExtFromPath(rapidcdn('https://instagram.fbcdn.net/v/t51.82787-15/8284131.jpg', 0)),
+        'jpg'
+    );
+    assert.strictEqual(
+        a.inferExtFromPath(rapidcdn('https://instagram.fbcdn.net/o1/v/t32/m78/AQNT.jpg', 0)),
+        'jpg'
+    );
+});
+
+test('an unrecognised path falls back to a probe rather than guessing', () => {
+    assert.strictEqual(loadAdapter().inferExtFromPath(rapidcdn('https://example.com/a.bin', 0)), null);
+    assert.strictEqual(loadAdapter().inferExtFromPath('not a url'), null);
+});
+
+test('the real url is readable out of the wrapper', () => {
+    const inner = loadAdapter().innerCdnUrl(rapidcdn('https://instagram.fbcdn.net/o1/v/t2/x.mp4', 0));
+    assert.strictEqual(inner, 'https://instagram.fbcdn.net/o1/v/t2/x.mp4');
+});
+
+test('the scrape is bounded and cached so reopening is instant', () => {
+    const src = read(path.join(SRC, 'utils', 'instagramStoriesLocal.ts'));
+    assert.match(src, /SCRAPE_TIMEOUT_MS\s*=\s*30_000/);
+    assert.match(src, /const CACHE_TTL_MS = 5 \* 60 \* 1000/);
+    assert.match(src, /if \(hit && Date\.now\(\) - hit\.at < CACHE_TTL_MS\)/);
+    assert.match(src, /attempt < 2/);
+});
+
+test('a cache hit does not call the scraper again', async () => {
+    const a = loadAdapter();
+    a.clearStoriesCache('cacheprobe');
+    const first = await a.fetchStoriesLocal('epicgames');
+    const t = Date.now();
+    const second = await a.fetchStoriesLocal('epicgames');
+    const elapsed = Date.now() - t;
+    assert.strictEqual(second.length, first.length);
+    assert.ok(elapsed < 500, `cached read took ${elapsed} ms, expected well under a scrape`);
+    a.clearStoriesCache('cacheprobe');
+});
+
 // ---- URL shaping -----------------------------------------------------------
 
 /**

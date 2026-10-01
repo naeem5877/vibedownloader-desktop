@@ -143,10 +143,72 @@ export function dedupeKey(raw: string): string {
     }
 }
 
+/** The real CDN url carried inside the signed wrapper, if it is readable. */
+export function innerCdnUrl(raw: string): string | null {
+    try {
+        const token = new URL(raw).searchParams.get('token');
+        if (!token) return null;
+        const parts = token.split('.');
+        if (parts.length < 2) return null;
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        return typeof payload?.url === 'string' && payload.url ? payload.url : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Instagram's own CDN path already states the container: images live under
+ * t51/t52/t32 and videos under t2. Reading it costs nothing, where asking the
+ * server for the first bytes costs a round trip per story.
+ */
+export function inferExtFromPath(raw: string): 'jpg' | 'mp4' | null {
+    const inner = innerCdnUrl(raw);
+    if (!inner) return null;
+    const path = (() => { try { return new URL(inner).pathname; } catch { return inner; } })();
+    if (/\/t5[12](\.|\/)/.test(path) || /\/t32\//.test(path)) return 'jpg';
+    if (/\/t2\//.test(path) || /\/o1\/v\/t2\//.test(path)) return 'mp4';
+    return null;
+}
+
+// Scraping a profile takes 12-16s upstream, so hold the result briefly and let
+// re-opening the same tray feel instant. Signatures expire, so keep it short.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const SCRAPE_TIMEOUT_MS = 30_000;
+const cache = new Map<string, { at: number; stories: NormalizedStory[] }>();
+
+export function clearStoriesCache(handle?: string): void {
+    if (handle) cache.delete(handle.trim().toLowerCase());
+    else cache.clear();
+}
+
+async function scrape(url: string, load: () => Promise<VendorResult>): Promise<VendorResult> {
+    // The upstream intermittently answers 500; one quick retry clears it.
+    let lastError: any;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const timeout = new Promise<never>((_resolve, reject) =>
+                setTimeout(() => reject(new Error('timed out')), SCRAPE_TIMEOUT_MS)
+            );
+            return await Promise.race([load(), timeout]);
+        } catch (e: any) {
+            lastError = e;
+            if (attempt === 0) await new Promise((r) => setTimeout(r, 700));
+        }
+    }
+    throw lastError;
+}
+
 export async function fetchStoriesLocal(handle: string, storyId?: string): Promise<NormalizedStory[]> {
     const clean = (handle || '').trim();
     if (!isPlausibleHandle(clean)) {
         throw new StoryError('not_found', `"${clean}" is not a valid Instagram username.`);
+    }
+
+    const cacheKey = `${clean.toLowerCase()}:${storyId || ''}`;
+    const hit = cache.get(cacheKey);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+        return hit.stories;
     }
 
     const vendor = loadStoryDownloader();
@@ -156,7 +218,7 @@ export async function fetchStoriesLocal(handle: string, storyId?: string): Promi
 
     let result: VendorResult;
     try {
-        result = await vendor(buildStoriesUrl(clean, storyId));
+        result = await scrape(buildStoriesUrl(clean, storyId), () => vendor(buildStoriesUrl(clean, storyId)));
     } catch (e: any) {
         throw new StoryError('upstream', `Could not reach Instagram: ${e?.message || 'network error'}`);
     }
@@ -170,18 +232,28 @@ export async function fetchStoriesLocal(handle: string, storyId?: string): Promi
         .map((i) => ({ url: i.url as string, thumbnail: i.thumbnail || '' }));
 
     // The upstream page lists every story several times over, each with its own
-    // signed wrapper, so collapse them before touching the network: one sniff per
-    // distinct file, and one row per story in the UI.
+    // signed wrapper, so collapse them before touching the network: one row per
+    // story in the UI, and at most one probe per distinct file.
     const unique = dedupeByFile(items);
 
     if (!unique.length) {
         throw new StoryError('no_stories', `${clean} has no stories right now.`);
     }
 
-    const sniffed = await mapLimited(unique, 8, (i) => sniffExtension(i.url));
+    // Trust the path, and only spend a request on the few urls that do not say.
+    const guessed = unique.map((i) => inferExtFromPath(i.url));
+    const needProbe = guessed.map((g, i) => (g ? -1 : i)).filter((i) => i >= 0);
+    const probed = needProbe.length
+        ? await mapLimited(
+              needProbe.map((i) => unique[i]),
+              4,
+              (i) => sniffExtension(i.url).then((e) => e ?? 'mp4')
+          )
+        : [];
+    const probedFor = new Map(needProbe.map((idx, n) => [idx, probed[n]]));
 
-    return unique.map((item, i) => {
-        const ext = sniffed[i] ?? 'mp4';
+    const stories = unique.map((item, i) => {
+        const ext = guessed[i] ?? probedFor.get(i) ?? 'mp4';
         return {
             id: `${clean}:${storyId || i}`,
             title: `Story ${i + 1}`,
@@ -191,4 +263,7 @@ export async function fetchStoriesLocal(handle: string, storyId?: string): Promi
             ext
         } satisfies NormalizedStory;
     });
+
+    cache.set(cacheKey, { at: Date.now(), stories });
+    return stories;
 }
