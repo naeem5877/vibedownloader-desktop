@@ -2531,7 +2531,13 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         </div>
                                     </div>
                                 )}
-                                {lyrics && <LyricsPanel lyrics={lyrics} defaultCollapsed={false} />}
+                                {/* Collapsed on arrival, like the subtitles row below it. The panel
+                                re-collapses whenever a new track's lyrics land
+                                (LyricsPanel resets itself on a title change),
+                                so fetching a result never shoves the page down
+                                with several hundred pixels of lyrics nobody
+                                asked to read yet. */}
+                                {lyrics && <LyricsPanel lyrics={lyrics} defaultCollapsed={true} />}
                                 {hasTracksPanel && (
                                     <SectionToggle
                                         open={tracksOpen}
