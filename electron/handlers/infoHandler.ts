@@ -19,6 +19,7 @@ import {
     formatSummary
 } from '../utils/youtubeStrategy';
 import { redactUrlForLog } from '../utils/redact';
+import { reportExtractionFailure, reportThinFormatList } from '../utils/sentry';
 import { getYtDlpVersion } from '../utils/binaries';
 import type { NormalizedStory } from '../utils/instagramStories';
 
@@ -227,6 +228,11 @@ export function registerInfoHandlers() {
         // Hoisted: the catch block needs to know whether cookies were actually
         // sent, so that a failure does not tell a user to add cookies again.
         let sentCookies = false;
+
+        // Which player gave up. The error text from yt-dlp rarely says, and
+        // "which client was refused" is the first question about a bot-wall
+        // report. Declared out here because the report is sent from the catch.
+        let lastAttemptLabel = 'default';
 
         try {
             const ytDlpWrap = getYtDlpWrap();
@@ -501,6 +507,7 @@ export function registerInfoHandlers() {
 
             let lastError: any;
             for (const attempt of attempts) {
+                lastAttemptLabel = attempt.label;
                 const attemptArgs = attempt.extractorArgs
                     ? [...args, '--extractor-args', attempt.extractorArgs[0]]
                     : args;
@@ -541,10 +548,27 @@ export function registerInfoHandlers() {
                     const inspection = inspectFormats(raw);
                     const isLast = attempt === attempts[attempts.length - 1];
                     if (isYoutube && isDegradedFormatList(inspection)) {
+                        const runtime = describeJsRuntime(jsRuntime);
                         console.warn(
                             `[YouTube] ${attempt.label} returned a thin format list: ${formatSummary(inspection)} ` +
-                            `(runtime: ${describeJsRuntime(jsRuntime)})`
+                            `(runtime: ${runtime})`
                         );
+                        // Reported, not just logged. This is the "I got 360p"
+                        // report, and nothing crashes: the fetch succeeded and the
+                        // answer was wrong, so no crash reporter would ever see
+                        // it. Sent only when this is what the user is left with,
+                        // not on every attempt along the way.
+                        reportThinFormatList({
+                            url,
+                            player: attempt.label,
+                            formatCount: inspection.formatCount,
+                            maxHeight: inspection.maxHeight,
+                            videoFormatCount: inspection.videoFormatCount,
+                            audioFormatCount: inspection.audioFormatCount,
+                            heights: inspection.heights,
+                            kept: isLast,
+                            jsRuntime: runtime
+                        });
                         if (!isLast && degradedRetriesLeft > 0) {
                             degradedRetriesLeft--;
                             console.log(`[YouTube] Trying the next player for a better format list (${degradedRetriesLeft} such retry left)...`);
@@ -604,12 +628,28 @@ export function registerInfoHandlers() {
             try {
                 ytdlpVersion = await getYtDlpVersion();
             } catch { /* the binary may be the thing that is broken */ }
+            const jsRuntimeDescription = describeJsRuntime(detectJsRuntime());
             console.warn(
                 `Extraction failed (${classified.kind}) | url=${redactUrlForLog(url)} | ` +
-                `yt-dlp=${ytdlpVersion || 'unknown'} | js-runtime=${describeJsRuntime(detectJsRuntime())} | ` +
+                `yt-dlp=${ytdlpVersion || 'unknown'} | js-runtime=${jsRuntimeDescription} | ` +
                 // "file sent", not "accepted": the site never tells us.
                 `cookie-file=${sentCookies ? 'sent' : 'none'} | ${String(rawFailureText).trim().split('\n')[0]}`
             );
+
+            // This is the report users actually make - "it didn't work" - and it
+            // never throws, so no crash reporter would ever see it. Reported by
+            // `kind` rather than by message, so one cause is one issue with a
+            // count on it instead of a new issue per wording yt-dlp used.
+            reportExtractionFailure({
+                url,
+                kind: classified.kind,
+                attempt: lastAttemptLabel,
+                detail: String(rawFailureText).trim().split('\n').slice(0, 3).join(' | '),
+                ytdlpVersion,
+                jsRuntime: jsRuntimeDescription,
+                cookieFile: sentCookies,
+                isYoutube: url.includes('youtube.com') || url.includes('youtu.be')
+            });
 
             // A stale yt-dlp is the usual cause of bot-protection failures, so
             // start a throttled update attempt while we report the failure.

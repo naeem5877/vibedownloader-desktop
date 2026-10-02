@@ -16,6 +16,7 @@ import { fetchYouTubeMusicAlbumArt, extractYouTubeVideoId } from '../utils/youtu
 import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv, describeJsRuntime } from '../utils/platform';
 import { preferredYoutubeClient } from '../utils/youtubeStrategy';
 import { redactUrlForLog } from '../utils/redact';
+import { reportDownloadFailure } from '../utils/sentry';
 import { classifyExtractionError } from '../utils/errorMessage';
 import { createStageReader } from '../utils/downloadStages';
 import { isWavFile, describeAudioCodec } from '../utils/audioContainer';
@@ -971,6 +972,19 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                             hasCookies: Boolean(cookiePath && fs.existsSync(cookiePath))
                         });
                         mainWindow?.webContents.send('download-progress', { error: classified.message, jobId });
+                        // A transfer that dies mid-way is a different problem from
+                        // a fetch that never worked, and the two need different
+                        // fixes. Reported separately, with the requested format,
+                        // because "asked for 1080p, format not available" is the
+                        // symptom this app has already had reports about.
+                        reportDownloadFailure({
+                            url,
+                            kind: classified.kind,
+                            formatId,
+                            attempt: isYoutube ? preferredYoutubeClient(Boolean(cookiePath && fs.existsSync(cookiePath))).label : undefined,
+                            detail: String(error?.message || error).split('\n').slice(0, 3).join(' | '),
+                            jsRuntime: describeJsRuntime(jsRuntime)
+                        });
                         if (!settled) { settled = true; reject(new Error(classified.message)); }
                     });
 

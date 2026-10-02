@@ -15,7 +15,12 @@ import { startWebSocketServer, stopWebSocketServer } from './utils/websocketServ
 import { registerNativeHost, registerUrlProtocol } from './utils/nativeHost';
 import { prepareUnpackedExtension } from './utils/extensionInstaller';
 import { loadSettings } from './utils/paths';
+import { initSentry, flushSentry } from './utils/sentry';
 import './utils/env'; // Load env vars
+
+// Before anything else can throw - including the path resolution below, which
+// reads from the user's profile. Anything that fails from here on is reported.
+initSentry();
 
 // Initialize paths and binaries state
 initPaths();
@@ -325,4 +330,9 @@ app.on('activate', () => {
 app.on('before-quit', () => {
     isQuitting = true;
     stopWebSocketServer();
+    // A quit is the one moment a queued report is guaranteed to be dropped
+    // without this - the process exits before the request finishes. `before-quit`
+    // is not async, so the flush is fired and the exit is not blocked on it;
+    // the SDK's own transport also flushes on exit.
+    void flushSentry();
 });

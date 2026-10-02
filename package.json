@@ -31,6 +31,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@sentry/electron": "^7.20.0",
     "adm-zip": "^0.6.0",
     "album-art": "^4.0.0",
     "axios": "^1.15.0",
