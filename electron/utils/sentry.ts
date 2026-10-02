@@ -34,11 +34,14 @@ import {
 const SEND_FROM_DEV = 'VD_SENTRY';
 
 /**
- * Replacement DSN, so the committed one can be swapped without a code change.
+ * The DSN comes from the environment, never from this file.
+ *
+ * `.env` is already gitignored and `utils/env.ts` loads it from the app's
+ * resources directory when packaged, so the release workflow supplies this and
+ * a checkout without one simply does not report. Nothing to rotate in git, and
+ * nothing that leaks into a diff.
  */
 const DSN_ENV = 'SENTRY_DSN';
-
-const DSN = process.env[DSN_ENV] || 'https://6c88f371c5a7714b49d595dad64def03@o4511882967121920.ingest.de.sentry.io/4512188514697296';
 
 let initialised = false;
 
@@ -56,12 +59,17 @@ export function initSentry(): boolean {
     if (initialised) return true;
     if (!app?.isPackaged && process.env[SEND_FROM_DEV] !== '1') return false;
 
+    // No DSN means no reporting, including in a packaged build: an app built
+    // without one is the normal case for a local or private build, and a
+    // half-configured reporter is worse than none.
+    const dsn = process.env[DSN_ENV]?.trim();
+    if (!dsn) return false;
+
     Sentry.init({
-        dsn: DSN,
+        dsn,
         // No accounts, no IPs, no machine identity beyond what an IP header
         // already implies.
         sendDefaultPii: false,
-        enabled: true,
         // Enough to spot a regression in startup or a download, not enough to
         // bill like a monitoring product.
         tracesSampleRate: 0.1,

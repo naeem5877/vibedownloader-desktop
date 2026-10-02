@@ -34,8 +34,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
           SPOTIFY_CLIENT_SECRET: ${{ vars.SPOTIFY_CLIENT_SECRET }}
+          # Written into the packaged .env, which lands in the app's resources and
+          # is read at startup. Without it the app builds and runs, it just does
+          # not report - a fork or a private build is unaffected.
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
         run: |
-          node -e "const fs = require('fs'); fs.writeFileSync('.env', \`SPOTIFY_CLIENT_ID=\${process.env.SPOTIFY_CLIENT_ID}\nSPOTIFY_CLIENT_SECRET=\${process.env.SPOTIFY_CLIENT_SECRET}\`);"
+          node -e "const fs = require('fs'); fs.writeFileSync('.env', \`SPOTIFY_CLIENT_ID=\${process.env.SPOTIFY_CLIENT_ID}\nSPOTIFY_CLIENT_SECRET=\${process.env.SPOTIFY_CLIENT_SECRET}\nSENTRY_DSN=\${process.env.SENTRY_DSN}\n\`);"
           npm run generate-release-notes
           npm run build
           npm run build:electron
