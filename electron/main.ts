@@ -71,6 +71,11 @@ function createWindow() {
 
     mainWindow.setMenu(null);
 
+    // Open DevTools in dev mode so console.log / console.warn are visible
+    if (isDev) {
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+    }
+
     // Close behaviour follows the "Minimize to Tray" setting:
     //  - enabled  → hide the window, keep the app (and WebSocket server) alive in the tray.
     //  - disabled → quit the app for real. The browser extension can still relaunch
