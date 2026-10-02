@@ -74,6 +74,8 @@ interface VideoMetadata {
     isLive?: boolean;
     searchQuery?: string; // For Spotify single tracks
     album?: string;
+    noStories?: boolean; // Instagram stories: the account has nothing posted
+    noStoriesMessage?: string;
 }
 
 type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud' | 'twitch';
@@ -1879,7 +1881,11 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
 
     const hasEntries = metadata && metadata.entries && metadata.entries.length > 0;
     const isPlaylist = hasEntries && metadata?.contentType === 'playlist';
-    const isStory = hasEntries && metadata?.contentType === 'story';
+    // A story tray can legitimately be empty - "nike has no stories right
+    // now" is a result, and it still belongs in the stories card, not in the
+    // single-video card that would read as a 0-second video.
+    const isStory = !!metadata && metadata?.contentType === 'story';
+    const storyCount = metadata?.entries?.length ?? 0;
     const isLive = !hasEntries && !!metadata?.isLive && metadata.duration === 0;
 
     // Subtitle tracks are hidden for music tracks (pure audio or music videos):
@@ -3203,34 +3209,39 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         </div>
                                         <div>
                                             <h2 className="font-bold text-xl text-white tracking-tight">{metadata.uploader}'s Stories</h2>
-                                            <p className="text-white/60 text-sm font-medium">{(metadata.entries?.length ?? 0)} stories available • {selectedItems.size} selected</p>
+                                            <p className="text-white/60 text-sm font-medium">{storyCount > 0 ? `${storyCount} ${storyCount === 1 ? 'story' : 'stories'} available • ${selectedItems.size} selected` : 'No active stories'}</p>
                                         </div>
                                     </div>
-                                    <button
-                                        onClick={() => {
-                                            selectAll();
-                                            handleBulkDownload('video');
-                                        }}
-                                        disabled={downloading}
-                                        className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-[#E4405F] to-[#F58529] text-white rounded-xl font-bold text-sm hover:opacity-90 transition transform active:scale-95 cursor-pointer flex items-center justify-center gap-2 shadow-xl shadow-[#E4405F]/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                        Download All
-                                    </button>
+                                    {storyCount > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                selectAll();
+                                                handleBulkDownload('video');
+                                            }}
+                                            disabled={downloading}
+                                            className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-[#E4405F] to-[#F58529] text-white rounded-xl font-bold text-sm hover:opacity-90 transition transform active:scale-95 cursor-pointer flex items-center justify-center gap-2 shadow-xl shadow-[#E4405F]/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                            Download All
+                                        </button>
+                                    )}
                                 </div>
 
-                                <div className="flex gap-2 mb-4">
+                                {storyCount > 0 && (
+                                    <div className="flex gap-2 mb-4">
                                     <button onClick={selectAll} className="flex-1 h-10 bg-white/10 rounded-xl text-xs font-bold text-white hover:bg-white/20 transition cursor-pointer border border-white/5 flex items-center justify-center gap-2">
                                         <CheckSquare className="w-4 h-4" /> Select All
                                     </button>
                                     <button onClick={deselectAll} className="flex-1 h-10 bg-white/5 rounded-xl text-xs font-bold text-white/60 hover:bg-white/10 hover:text-white transition cursor-pointer border border-white/5 flex items-center justify-center gap-2">
-                                        <Square className="w-4 h-4" /> Deselect All
-                                    </button>
-                                </div>
+                                            <Square className="w-4 h-4" /> Deselect All
+                                        </button>
+                                    </div>
+                                )}
 
-                                {/* Story Grid */}
-                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-1 pb-2 hardware-accelerated">
-                                    {(metadata.entries ?? []).map((entry: any, index: number) => {
+                                {/* Story Grid, or the reason there isn't one */}
+                                {storyCount > 0 ? (
+                                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-1 pb-2 hardware-accelerated">
+                                        {(metadata.entries ?? []).map((entry: any, index: number) => {
                                         const selected = selectedItems.has(entry.id);
                                         const isDl = downloadingId === entry.id;
                                         return (
@@ -3295,17 +3306,32 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         )
                                     })}
                                 </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center text-center py-14 px-6">
+                                        <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
+                                            <Timer className="w-6 h-6 text-white/30" />
+                                        </div>
+                                        <p className="text-white/70 text-sm font-medium">
+                                            {metadata.noStoriesMessage || `@${metadata.uploader} has no stories right now.`}
+                                        </p>
+                                        <p className="text-white/40 text-xs mt-2 max-w-[300px] leading-relaxed">
+                                            Stories only live for 24 hours, so an account goes quiet at any time. Check back later.
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* Bottom Download Action */}
-                                <div className="mt-4 pt-4 border-t border-white/10">
-                                    <button
-                                        onClick={() => handleBulkDownload('video')}
-                                        disabled={selectedItems.size === 0 || downloading}
-                                        className="w-full h-14 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl font-bold text-sm text-white transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
-                                    >
-                                        <Film className="w-5 h-5" /> Download Selected Stories ({selectedItems.size})
-                                    </button>
-                                </div>
+                                {storyCount > 0 && (
+                                    <div className="mt-4 pt-4 border-t border-white/10">
+                                        <button
+                                            onClick={() => handleBulkDownload('video')}
+                                            disabled={selectedItems.size === 0 || downloading}
+                                            className="w-full h-14 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl font-bold text-sm text-white transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                                        >
+                                            <Film className="w-5 h-5" /> Download Selected Stories ({selectedItems.size})
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     )}

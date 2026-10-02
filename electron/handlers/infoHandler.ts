@@ -9,7 +9,7 @@ import { classifyExtractionError } from '../utils/errorMessage';
 import { buildSubtitleList } from '../utils/subtitles';
 import { buildAudioTrackList } from '../utils/audioTracks';
 import { fetchYouTubeMusicAlbumArt } from '../utils/youtubeMusic';
-import { parseStoryUrl, normalizeStoryInput } from '../utils/instagramStories';
+import { parseStoryUrl, normalizeStoryInput, StoryError } from '../utils/instagramStories';
 import { fetchStoriesLocal } from '../utils/instagramStoriesLocal';
 import { youtubeClientAttempts, isClientSensitiveError } from '../utils/youtubeStrategy';
 import { getYtDlpVersion } from '../utils/binaries';
@@ -260,12 +260,26 @@ export function registerInfoHandlers() {
                 const parsed = parseStoryUrl(normalized.url);
                 if (!parsed) throw new Error("Invalid Instagram Story URL");
 
-                let stories: NormalizedStory[];
+                let stories: NormalizedStory[] = [];
+                let noStories = false;
+                let noStoriesMessage = '';
                 try {
                     stories = await fetchStoriesLocal(parsed.handle, parsed.storyId);
                 } catch (e: any) {
-                    // Every failure mode is already a user-facing sentence.
-                    throw new Error(e?.message || 'Could not read those Instagram stories.');
+                    // "This account has posted nothing" is the most ordinary
+                    // answer a stories lookup can give, not a failure. It used
+                    // to be thrown on, where the generic extractor classifier
+                    // flattened it into "could not read this link - add
+                    // cookies", which is both wrong and unactionable. So it
+                    // comes back as an empty tray the UI explains instead.
+                    if (e instanceof StoryError && e.kind === 'no_stories') {
+                        noStories = true;
+                        noStoriesMessage = e.message;
+                    } else {
+                        // Every other failure mode is already a user-facing
+                        // sentence.
+                        throw new Error(e?.message || 'Could not read those Instagram stories.');
+                    }
                 }
 
                 const entries = stories.map((s, i) => ({
@@ -288,7 +302,11 @@ export function registerInfoHandlers() {
                     duration: 0,
                     contentType: 'story',
                     entries: entries,
-                    playlist_count: entries.length
+                    playlist_count: entries.length,
+                    // Set only when the account simply has nothing posted, so
+                    // the tray can say so instead of rendering empty.
+                    noStories,
+                    noStoriesMessage
                 };
                 return { success: true, metadata };
             }

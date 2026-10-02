@@ -274,6 +274,58 @@ test('the adapter fails with a sentence a user can act on', () => {
     assert.match(src, /missing from this build/);
 });
 
+test('a raw exception from the vendor is never shown to a user', () => {
+    const { readableVendorMessage } = loadAdapter();
+    // Real strings observed from the obfuscated bundle, all unactionable.
+    assert.strictEqual(readableVendorMessage("Cannot read properties of undefined (reading 'split')"), '');
+    assert.strictEqual(readableVendorMessage('vendor.fn is not a function'), '');
+    assert.strictEqual(readableVendorMessage(undefined), '');
+    assert.strictEqual(readableVendorMessage('x'.repeat(200)), '');
+    // Instagram's own answers are worth passing through.
+    assert.strictEqual(readableVendorMessage('This account is private'), 'This account is private');
+});
+
+test('an unreadable tray still gets a sentence of its own', () => {
+    const src = read(path.join(SRC, 'utils', 'instagramStoriesLocal.ts'));
+    assert.match(src, /usable \|\| `Could not read stories for \$\{clean\} right now\.`/);
+    assert.match(src, /console\.warn\(`Story downloader could not read/);
+});
+
+// ---- an account with nothing posted is a result, not a failure -------------
+
+test('an empty tray is answered, not raised as a download error', () => {
+    const src = read(path.join(SRC, 'handlers', 'infoHandler.ts'));
+    // The one thing that must not be rethrown is `no_stories`; everything else
+    // keeps its sentence.
+    assert.match(src, /e instanceof StoryError && e\.kind === 'no_stories'/);
+    assert.match(src, /noStoriesMessage = e\.message/);
+    assert.match(src, /noStories,\s*\n\s*noStoriesMessage/);
+});
+
+test('the stories card survives an empty tray and explains it', () => {
+    const src = read(path.join(REPO, 'src', 'components', 'Downloader.tsx'));
+    // Gating `isStory` on entries used to send a storyless account to the
+    // single-video card, which rendered it as a 0-second video.
+    assert.match(src, /const isStory = !!metadata && metadata\?\.contentType === 'story'/);
+    assert.match(src, /No active stories/);
+    assert.match(src, /Stories only live for 24 hours/);
+    // The action row has to disappear, or it offers "Download All" over nothing.
+    const card = src.slice(src.indexOf('{/* Story Result (Instagram) */}'), src.indexOf('{/* Success */}'));
+    assert.strictEqual((card.match(/\{storyCount > 0 && \(/g) || []).length, 3, 'expected Download All, the select row and the footer to all be gated');
+});
+
+test('the empty state is reachable from the type the handler sends', () => {
+    const handler = read(path.join(SRC, 'handlers', 'infoHandler.ts'));
+    const ui = read(path.join(REPO, 'src', 'components', 'Downloader.tsx'));
+    const iface = ui.slice(ui.indexOf('interface VideoMetadata'), ui.indexOf('type PlatformId'));
+    // The handler sends them as object shorthand, the renderer declares them
+    // optional because every other platform's metadata lacks them.
+    for (const field of ['noStories', 'noStoriesMessage']) {
+        assert.match(handler, new RegExp(`\\n\\s*${field}\\b`), 'handler should send ' + field);
+        assert.match(iface, new RegExp(`${field}\\?:`), 'VideoMetadata should declare ' + field + ' as optional');
+    }
+});
+
 test('the api key box is gone from the UI', () => {
     const src = read(path.join(REPO, 'src', 'components', 'Downloader.tsx'));
     for (const gone of ['storiesKey', 'handleSaveStoriesKey', 'handleClearStoriesKey', 'getStoriesApiKeyStatus']) {

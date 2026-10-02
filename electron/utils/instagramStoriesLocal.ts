@@ -171,6 +171,24 @@ export function inferExtFromPath(raw: string): 'jpg' | 'mp4' | null {
     return null;
 }
 
+/**
+ * The vendor reports a failure as `status: false` plus a free-text `msg`, and
+ * that text is two different things: sometimes Instagram's own answer ("This
+ * account is private"), and sometimes an exception thrown inside the
+ * obfuscated bundle because the page did not look like what it expected. The
+ * second kind is worth exactly nothing on screen - a user cannot act on
+ * "Cannot read properties of undefined (reading 'split')" - so it is filtered
+ * out here and kept for the log instead.
+ */
+export function readableVendorMessage(msg: unknown): string {
+    if (typeof msg !== 'string') return '';
+    const text = msg.trim();
+    if (!text || text.length > 160) return '';
+    const looksLikeAnException =
+        /cannot read propert|is not a function|is not defined|undefined is not|null is not|cannot destructure|cannot convert|is not iterable/i.test(text);
+    return looksLikeAnException ? '' : text;
+}
+
 // Scraping a profile takes 12-16s upstream, so hold the result briefly and let
 // re-opening the same tray feel instant. Signatures expire, so keep it short.
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -224,7 +242,11 @@ export async function fetchStoriesLocal(handle: string, storyId?: string): Promi
     }
 
     if (!result?.status) {
-        throw new StoryError('not_found', result?.msg || `Could not read stories for ${clean}.`);
+        const usable = readableVendorMessage(result?.msg);
+        if (!usable && result?.msg) {
+            console.warn(`Story downloader could not read ${clean}'s page:`, String(result.msg).slice(0, 200));
+        }
+        throw new StoryError('not_found', usable || `Could not read stories for ${clean} right now.`);
     }
 
     const items = (result.data || [])
