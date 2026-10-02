@@ -49,8 +49,11 @@ function toDuration(value: unknown): number | undefined {
  */
 function isMusicCandidate(payload: any): boolean {
     if (payload?.isMusic === true) return true;
-    if (payload?.isMusic === false) return false;
-
+    const title = cleanField(payload?.title);
+    const artist = cleanField(payload?.artist) || cleanField(payload?.uploader);
+    if (title && (artist || title.includes(' - ') || title.includes(' – '))) {
+        return true;
+    }
     const uploader = cleanField(payload?.uploader);
     const categories = Array.isArray(payload?.categories) ? payload.categories : [];
     return (
@@ -88,12 +91,16 @@ export function registerLyricsHandlers() {
                 if (!isMusicCandidate(payload)) return null;
 
                 const title = cleanField(payload?.title);
-                const artist = cleanField(payload?.artist);
-                if (!title || !artist) return null;
+                let artist = cleanField(payload?.artist);
+                if (!artist && payload?.uploader) {
+                    artist = cleanField(payload.uploader);
+                }
+                if (!title) return null;
+                if (!artist && !title.includes(' - ') && !title.includes(' – ')) return null;
 
                 const duration = toDuration(payload?.duration);
 
-                return await withTimeout(getLyrics({ title, artist, duration }), TOTAL_TIMEOUT_MS);
+                return await withTimeout(getLyrics({ title, artist: artist || title, duration }), TOTAL_TIMEOUT_MS);
             } catch (e: any) {
                 // A lyrics lookup must never surface an error to the user.
                 console.error('lyrics lookup failed:', e?.message || e);
@@ -123,7 +130,7 @@ export function registerLyricsHandlers() {
                 }
 
                 const title = cleanField(payload?.title);
-                const artist = cleanField(payload?.artist);
+                const artist = cleanField(payload?.artist) || cleanField(payload?.uploader);
                 if (!title || !artist) {
                     return { success: false, error: 'Missing the track title or artist.' };
                 }

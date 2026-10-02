@@ -16,7 +16,7 @@ import type { LyricsResult, LyricsQuery } from './types';
 import { isEmpty } from './types';
 import { fetchLrclib } from './lrclib';
 import { fetchNetease } from './netease';
-import { normalizeTitle, normalizeArtist, titleCandidates, titleCredits } from './normalize';
+import { normalizeTitle, normalizeArtist, cleanArtist, titleCandidates, titleCredits } from './normalize';
 import { displayTitle, displayArtist } from './format';
 
 /** Per-provider budget. A hung provider must not stall the download panel. */
@@ -27,29 +27,56 @@ const ATTEMPT_BUDGET_MS = 9_000;
 
 /**
  * Upper bound on provider round trips for one track.
- *
- * Each attempt costs two concurrent HTTP calls, so this is a latency ceiling as
- * much as a correctness one. Real titles resolve on the first attempt; the
- * budget is only spent by the uploads whose title and artist are both noisy.
  */
-const MAX_ATTEMPTS = 6;
+const MAX_ATTEMPTS = 8;
 
 /**
  * The (title, artist) pairs to try, in order.
  *
- * The supplied metadata is always tried first, unchanged, so nothing that
- * already matched can regress. Only then are the title's own credits used, which
- * are frequently better than the channel-derived artist.
+ * In YouTube music, titles often follow "Artist - Title" (Ed Sheeran - Shape of You).
+ * We construct smart attempts prioritizing exact pairs, cleaned artist names,
+ * and both dash partition possibilities.
  */
 function buildAttempts(query: LyricsQuery, artist: string, credits: string) {
     const titles = titleCandidates(query.title);
-    if (!titles.length || !artist) return [];
+    const cleanedArtist = cleanArtist(query.artist);
+    const artists: string[] = [];
+    const addArtist = (a: string) => {
+        const norm = normalizeArtist(a);
+        if (norm && !artists.includes(norm)) artists.push(norm);
+    };
 
-    const artists = credits && credits !== artist ? [artist, credits] : [artist];
+    if (artist) addArtist(artist);
+    if (cleanedArtist) addArtist(cleanedArtist);
+    if (credits) addArtist(credits);
+
     const attempts: Array<{ title: string; artist: string }> = [];
+    const addAttempt = (t: string, a: string) => {
+        const title = normalizeTitle(t);
+        const art = normalizeArtist(a);
+        if (title && art && !attempts.some((x) => x.title === title && x.artist === art)) {
+            attempts.push({ title, artist: art });
+        }
+    };
+
+    // If the title contains a dash (Artist - Title), prioritizing (partB, partA) is critical!
+    const withoutChannel = query.title.split('|')[0];
+    const dashMatch = withoutChannel.match(/\s+[-–—]\s+/);
+    if (dashMatch && dashMatch.index !== undefined) {
+        const partA = withoutChannel.slice(0, dashMatch.index).trim();
+        const partB = withoutChannel.slice(dashMatch.index + dashMatch[0].length).trim();
+        // Artist - Title:
+        addAttempt(partB, partA);
+        if (cleanedArtist || artist) addAttempt(partB, cleanedArtist || artist);
+        // Title - Artist:
+        addAttempt(partA, partB);
+        if (cleanedArtist || artist) addAttempt(partA, cleanedArtist || artist);
+    }
 
     for (const title of titles) {
-        for (const a of artists) attempts.push({ title, artist: a });
+        for (const a of artists) {
+            addAttempt(title, a);
+        }
     }
 
     return attempts.slice(0, MAX_ATTEMPTS);
@@ -118,6 +145,19 @@ export async function getLyrics(query: LyricsQuery): Promise<LyricsResult | null
                 result.translation = netease.translation;
                 result.sources.translation = 'netease';
             }
+        }
+
+        // Derive line-synced lyrics from word-synced lyrics if LRCLIB didn't have synced
+        if (!result.synced && result.words?.length) {
+            result.synced = result.words.map((l) => ({ t: l.t, text: l.text }));
+            result.sources.synced = 'netease';
+        }
+
+        // Derive plain lyrics from synced or word-synced if LRCLIB didn't have plain
+        if (!result.plain && (result.synced?.length || result.words?.length)) {
+            const fallback = result.synced || result.words || [];
+            result.plain = fallback.map((l) => l.text).join('\n');
+            result.sources.plain = result.sources.synced || result.sources.words || 'netease';
         }
 
         // Nothing readable: fall through and try a cleaner title or artist.

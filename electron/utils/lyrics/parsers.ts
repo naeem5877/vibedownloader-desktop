@@ -108,22 +108,31 @@ export function parseYrc(raw: string): LyricLine[] {
         // Negative start is a credit line, not a lyric.
         if (lineStart < 0) continue;
 
+        // Clean natural text directly from the line by removing timestamp tags
+        const cleanText = line
+            .replace(/^\[-?\d+\s*,\s*\d+\]/, '')
+            .replace(/\(\d+\s*,\s*\d+\s*,\s*\d+\)/g, '')
+            .trim();
+
         const words: WordTiming[] = [];
         const wordRe = /\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)([^(]*)/g;
         let m: RegExpExecArray | null;
 
         while ((m = wordRe.exec(line)) !== null) {
-            const w = m[4].trim();
-            if (!w) continue;
-            words.push({ t: parseInt(m[1], 10), d: parseInt(m[2], 10), w });
+            const rawW = m[4];
+            if (!rawW && rawW !== ' ') continue;
+            words.push({
+                t: parseInt(m[1], 10),
+                d: parseInt(m[2], 10),
+                w: rawW
+            });
         }
 
         if (words.length === 0) continue;
 
-        // Prefer the joined words over the raw slice: the raw text still carries
-        // every `(t,d,0)` group, and the spacing between CJK characters in yrc
-        // is not meant to render literally.
-        out.push({ t: lineStart, text: words.map((w) => w.w).join(' '), words });
+        // Use natural clean line text; fallback to joined words if cleanText was empty
+        const text = cleanText || words.map((w) => w.w).join('');
+        out.push({ t: lineStart, text, words });
     }
 
     return out.sort((a, b) => a.t - b.t);

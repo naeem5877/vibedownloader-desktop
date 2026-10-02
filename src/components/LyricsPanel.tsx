@@ -1,25 +1,11 @@
 /**
- * Lyrics panel.
- *
- * Only mount this when `lyrics` is non-null - the parent enforces that, and
- * this component renders nothing at all for null. That is the whole point of
- * the rule: no match means no panel, no badge, no placeholder, because an
- * empty lyrics box is worse than no lyrics box.
- *
- * Four formats arrive independently, so each tab is shown only when its data
- * exists. The common case is LRCLIB's plain plus line-synced with no
- * word-level data, since NetEase publishes `yrc` for only about three quarters
- * of popular tracks.
- *
- * Synced lyrics highlight the current line while audio plays, and word-level
- * lyrics highlight the current word inside it. The caller passes the playback
- * position in seconds; nothing here reads the audio itself, so the panel stays
- * usable in preview and after download alike.
+ * Lyrics panel component with support for Word-Sync, Line-by-Line Synced,
+ * Plain text, and Translation modes.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Languages, Music2, Type, AlignLeft, Download, Loader2, Check } from 'lucide-react';
+import { Languages, Music2, Type, AlignLeft, Download, Loader2, Check, ChevronDown, Sparkles } from 'lucide-react';
 
 export interface LyricWord {
     t: number;
@@ -40,38 +26,27 @@ export interface LyricsData {
     translation?: LyricLine[];
     title: string;
     artist: string;
-    /**
-     * What the header shows. `title`/`artist` are the strings that matched, so
-     * they are normalized and may be a credit line - not display-ready.
-     */
     displayTitle?: string;
     displayArtist?: string;
-    /** Track length in seconds. Sent with a save so the main process can re-resolve. */
     duration?: number;
 }
 
-type Mode = 'plain' | 'synced' | 'words' | 'translation';
+type Mode = 'words' | 'synced' | 'plain' | 'translation';
 
 interface LyricsPanelProps {
     lyrics: LyricsData | null;
-    /** Playback position in seconds. Omit to disable the highlight. */
     currentTime?: number;
     isPlaying?: boolean;
+    defaultCollapsed?: boolean;
 }
 
 const TABS: { id: Mode; label: string; icon: typeof Type }[] = [
-    { id: 'words', label: 'Words', icon: Music2 },
-    { id: 'synced', label: 'Synced', icon: AlignLeft },
-    { id: 'plain', label: 'Plain', icon: Type },
+    { id: 'words', label: 'Word-Sync', icon: Sparkles },
+    { id: 'synced', label: 'Line Sync', icon: AlignLeft },
+    { id: 'plain', label: 'Plain Text', icon: Type },
     { id: 'translation', label: 'Translation', icon: Languages }
 ];
 
-/**
- * Index of the last line at or before `time`, or -1.
- *
- * Scans rather than binary-searching because lyrics lists are short (typically
- * under 100 lines) and this runs on every time update.
- */
 function activeLineIndex(lines: LyricLine[] | undefined, timeMs: number): number {
     if (!lines?.length || timeMs < 0) return -1;
     let found = -1;
@@ -89,17 +64,6 @@ function formatStamp(ms: number): string {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-/**
- * Plain lyrics split into display rows, one per line.
- *
- * The payload is already structured one lyric per line, so it is rendered that
- * way. Collapsing it into paragraphs - which is what this used to do - ran 90
- * lines of `Shape of You` together into an unreadable wall of text and threw
- * away the verse/chorus breaks the provider supplied.
- *
- * A blank line becomes `gapBefore` rather than an empty row, so stanza breaks
- * read as space instead of adding stray vertical rhythm.
- */
 function plainLines(text: string): { text: string; gapBefore: boolean }[] {
     const out: { text: string; gapBefore: boolean }[] = [];
     let gap = false;
@@ -107,8 +71,6 @@ function plainLines(text: string): { text: string; gapBefore: boolean }[] {
     for (const raw of text.split(/\r?\n/)) {
         const line = raw.trim();
         if (!line) {
-            // Only a separator if some text has already been emitted, so leading
-            // blank lines do not indent the first lyric.
             gap = out.length > 0;
             continue;
         }
@@ -119,66 +81,108 @@ function plainLines(text: string): { text: string; gapBefore: boolean }[] {
     return out;
 }
 
-export default function LyricsPanel({ lyrics, currentTime, isPlaying }: LyricsPanelProps) {
-    // The translation toggle is only relevant when a translation exists, and it
-    // starts off so it never changes the panel height until asked for.
-    const [mode, setMode] = useState<Mode>('words');
-    const [showTranslation, setShowTranslation] = useState(false);
+/**
+ * Format raw word tokens with natural punctuation and spacing.
+ * Eliminates artificial gaps before commas, periods, quotes, and parens.
+ */
+function formatWordsWithNaturalSpacing(rawWords: LyricWord[]): { word: LyricWord; spaceBefore: boolean }[] {
+    const trailingPunct = /^[,.!?:;)\]}"'\u2019\u201d]+$/;
+    const leadingPunct = /^[({\["'\u2018\u201c]+$/;
+    const isCjk = /[\u4e00-\u9fa5\u3040-\u30ff]/;
 
-    // Save state is per-panel and self-clearing: a confirmation that lingers
-    // would be reporting a file that was written seconds or minutes ago.
+    return rawWords.map((curr, i) => {
+        if (i === 0) return { word: curr, spaceBefore: false };
+        const prev = rawWords[i - 1];
+
+        // If the token already has an explicit space from parser
+        if (prev.w.endsWith(' ') || curr.w.startsWith(' ')) {
+            return { word: curr, spaceBefore: false };
+        }
+
+        const prevW = prev.w.trim();
+        const currW = curr.w.trim();
+
+        if (trailingPunct.test(currW)) {
+            return { word: curr, spaceBefore: false };
+        }
+        if (leadingPunct.test(prevW) && !trailingPunct.test(prevW)) {
+            return { word: curr, spaceBefore: false };
+        }
+        if (isCjk.test(prevW) && isCjk.test(currW)) {
+            return { word: curr, spaceBefore: false };
+        }
+        return { word: curr, spaceBefore: true };
+    });
+}
+
+export default function LyricsPanel({ lyrics, currentTime, isPlaying, defaultCollapsed = false }: LyricsPanelProps) {
+    const [mode, setMode] = useState<Mode>('words');
     const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [saveError, setSaveError] = useState('');
+    const [collapsed, setCollapsed] = useState(defaultCollapsed);
     const saveResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Compute all available modes (deriving synced and plain if word-sync exists)
     const available = useMemo<Mode[]>(() => {
         if (!lyrics) return [];
         const out: Mode[] = [];
         if (lyrics.words?.length) out.push('words');
-        if (lyrics.synced?.length) out.push('synced');
-        if (lyrics.plain?.trim()) out.push('plain');
+        if (lyrics.synced?.length || lyrics.words?.length) out.push('synced');
+        if (lyrics.plain?.trim() || lyrics.synced?.length || lyrics.words?.length) out.push('plain');
         if (lyrics.translation?.length) out.push('translation');
         return out;
     }, [lyrics]);
 
-    // Fall back to whatever this track actually has, so a lyrics-only track
-    // never opens on an empty tab.
     const active: Mode = useMemo(() => {
-        if (showTranslation && available.includes('translation')) return 'translation';
         if (available.includes(mode)) return mode;
         return available[0] || 'plain';
-    }, [available, mode, showTranslation]);
+    }, [available, mode]);
 
     const timeMs = typeof currentTime === 'number' && Number.isFinite(currentTime)
         ? Math.max(0, currentTime) * 1000
         : -1;
 
-    const syncedLines = active === 'synced' ? lyrics?.synced : undefined;
+    const isTimelineActive = timeMs >= 0;
+
+    // Line datasets with fallbacks
     const wordLines = active === 'words' ? lyrics?.words : undefined;
+
+    const syncedLines = useMemo(() => {
+        if (active !== 'synced') return undefined;
+        if (lyrics?.synced?.length) return lyrics.synced;
+        if (lyrics?.words?.length) return lyrics.words.map((l) => ({ t: l.t, text: l.text }));
+        return undefined;
+    }, [active, lyrics]);
+
     const translationLines = active === 'translation' ? lyrics?.translation : undefined;
+
+    const plainText = useMemo(() => {
+        if (lyrics?.plain?.trim()) return lyrics.plain;
+        const fallback = lyrics?.synced || lyrics?.words;
+        if (fallback?.length) return fallback.map((l) => l.text).join('\n');
+        return '';
+    }, [lyrics]);
 
     const syncedIndex = activeLineIndex(syncedLines, timeMs);
     const wordIndex = activeLineIndex(wordLines, timeMs);
     const translationIndex = activeLineIndex(translationLines, timeMs);
 
-    // A new track invalidates any previous save confirmation.
     useEffect(() => {
         setSaveState('idle');
         setSaveError('');
     }, [lyrics?.title, lyrics?.artist]);
 
+    useEffect(() => {
+        setCollapsed(defaultCollapsed);
+    }, [lyrics?.title, lyrics?.artist, defaultCollapsed]);
+
     useEffect(() => () => {
         if (saveResetRef.current) clearTimeout(saveResetRef.current);
     }, []);
 
-    /**
-     * Save whichever tab is on screen.
-     *
-     * The panel hands over only what identifies the track and which format the
-     * user is looking at; the main process re-runs the lookup so the file always
-     * matches what was displayed. A dismissed dialog reports `cancelled`, which
-     * is not an error and must not leave an error message on screen.
-     */
+    const showTitle = lyrics?.displayTitle || lyrics?.title || '';
+    const showArtist = lyrics?.displayArtist ?? lyrics?.artist ?? '';
+
     const handleSave = async () => {
         if (!lyrics || saveState === 'saving') return;
 
@@ -186,10 +190,6 @@ export default function LyricsPanel({ lyrics, currentTime, isPlaying }: LyricsPa
         setSaveError('');
 
         try {
-            // `title`/`artist` are the strings that matched, which is what the main
-            // process needs to re-resolve the track. The display strings travel
-            // alongside so the file is named for the track rather than for the
-            // raw upload title.
             const res = await window.electron.saveLyrics({
                 title: lyrics.title,
                 artist: lyrics.artist,
@@ -223,7 +223,6 @@ export default function LyricsPanel({ lyrics, currentTime, isPlaying }: LyricsPa
         }, 4000);
     };
 
-    // Keep the active line in view without yanking the page around.
     const scrollRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         const container = scrollRef.current;
@@ -236,231 +235,278 @@ export default function LyricsPanel({ lyrics, currentTime, isPlaying }: LyricsPa
 
     if (!lyrics || available.length === 0) return null;
 
-    const hasTranslation = Boolean(lyrics.translation?.length);
     const timeline = wordLines || syncedLines || translationLines;
-
-    // The match strings are normalized and may be a credit line; these are the
-    // cleaned ones the main process derived from the original metadata.
-    const showTitle = lyrics.displayTitle || lyrics.title;
-    const showArtist = lyrics.displayArtist ?? lyrics.artist;
 
     return (
         <motion.section
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="rounded-xl border border-white/10 bg-black/20 backdrop-blur-sm overflow-hidden"
+            className="rounded-2xl border border-purple-500/25 bg-gradient-to-b from-purple-950/30 via-black/50 to-black/70 backdrop-blur-xl overflow-hidden shadow-2xl shadow-purple-950/30 transition-all duration-300"
             aria-label="Lyrics"
         >
-            <header className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
-                <Type className="w-3.5 h-3.5 text-white/50 shrink-0" />
-                <span className="text-[11px] font-semibold text-white/70 truncate" title={showTitle}>
-                    {showTitle}
-                </span>
-                {showArtist && (
-                    <span className="text-[11px] text-white/35 truncate" title={showArtist}>
-                        - {showArtist}
-                    </span>
-                )}
+            {/* Header: Title, Artist, Badges, Save, and Toggle */}
+            <header className={`flex items-center justify-between gap-3 px-4 py-3 ${collapsed ? '' : 'border-b border-white/10 bg-white/[0.02]'}`}>
+                <button
+                    type="button"
+                    onClick={() => setCollapsed((v) => !v)}
+                    aria-expanded={!collapsed}
+                    aria-label={collapsed ? 'Expand lyrics' : 'Collapse lyrics'}
+                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left group cursor-pointer"
+                >
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-500/30 to-pink-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 shadow-sm shrink-0 group-hover:scale-105 transition-transform">
+                        <Music2 className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex items-center gap-2 overflow-hidden">
+                        <span className="text-xs font-bold text-white tracking-wide shrink-0">Lyrics</span>
+                        {available.includes('words') && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-purple-500/25 text-purple-300 border border-purple-500/35 whitespace-nowrap shrink-0 flex items-center gap-1">
+                                <Sparkles className="w-2.5 h-2.5" />
+                                Word-Sync
+                            </span>
+                        )}
+                        {available.includes('synced') && !available.includes('words') && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-blue-500/25 text-blue-300 border border-blue-500/35 whitespace-nowrap shrink-0">
+                                Synced
+                            </span>
+                        )}
+                        <span className="text-[11px] text-white/50 truncate min-w-0 hidden sm:inline" title={showTitle}>
+                            • {showTitle}{showArtist && ` (${showArtist})`}
+                        </span>
+                    </div>
+                </button>
 
-                <div className="ml-auto flex items-center gap-1">
+                {/* Right Header Action Controls */}
+                <div className="flex items-center gap-2 shrink-0">
                     <button
                         type="button"
                         onClick={handleSave}
                         disabled={saveState === 'saving'}
-                        title={`Save ${TABS.find((t) => t.id === active)?.label.toLowerCase() || 'plain'} lyrics to a file`}
+                        title={`Save ${TABS.find((t) => t.id === active)?.label.toLowerCase() || 'lyrics'} to a file`}
                         aria-label="Save lyrics"
-                        className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold uppercase text-white/40 hover:text-white/70 disabled:opacity-50 transition-all"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 transition-all cursor-pointer shadow-sm hover:border-purple-400/30"
                     >
                         {saveState === 'saving' ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" />
                         ) : saveState === 'saved' ? (
-                            <Check className="w-3 h-3 text-emerald-400" />
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
                         ) : saveState === 'error' ? (
-                            <span className="text-red-400" title={saveError}>!</span>
+                            <span className="text-red-400 font-bold" title={saveError}>!</span>
                         ) : (
-                            <Download className="w-3 h-3" />
+                            <Download className="w-3.5 h-3.5 text-purple-300" />
                         )}
-                        <span className="hidden sm:inline">
+                        <span className="hidden sm:inline whitespace-nowrap">
                             {saveState === 'saved' ? 'Saved' : 'Save'}
                         </span>
                     </button>
 
-                    {TABS.filter((t) => available.includes(t.id)).map((tab) => {
-                        const Icon = tab.icon;
-                        const isActive = active === tab.id;
-                        return (
-                            <button
-                                key={tab.id}
-                                type="button"
-                                onClick={() => {
-                                    setShowTranslation(tab.id === 'translation');
-                                    setMode(tab.id);
-                                }}
-                                title={`${tab.label} lyrics`}
-                                aria-pressed={isActive}
-                                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold uppercase transition-all ${
-                                    isActive
-                                        ? 'bg-blue-500 text-white shadow-sm'
-                                        : 'text-white/40 hover:text-white/70'
-                                }`}
-                            >
-                                <Icon className="w-3 h-3" />
-                                <span className="hidden sm:inline">{tab.label}</span>
-                            </button>
-                        );
-                    })}
+                    <button
+                        type="button"
+                        onClick={() => setCollapsed((v) => !v)}
+                        aria-label={collapsed ? 'Expand lyrics' : 'Collapse lyrics'}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                    >
+                        <ChevronDown
+                            className={`w-4 h-4 transition-transform duration-200 ${collapsed ? '' : 'rotate-180 text-white/70'}`}
+                        />
+                    </button>
                 </div>
             </header>
 
-            {hasTranslation && active !== 'translation' && (
-                <button
-                    type="button"
-                    onClick={() => setShowTranslation((v) => !v)}
-                    className="w-full text-left px-3 py-1.5 text-[10px] font-semibold uppercase text-white/40 hover:text-white/70 border-b border-white/5 transition-colors"
-                >
-                    {showTranslation ? 'Hide translation' : 'Show translation'}
-                </button>
-            )}
-
-            {saveState === 'error' && saveError && (
-                <p
-                    role="alert"
-                    className="px-3 py-1.5 text-[11px] text-red-400 border-b border-white/5"
-                >
-                    {saveError}
-                </p>
-            )}
-
-            <div ref={scrollRef} className="max-h-64 overflow-y-auto px-3 py-2.5">
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={active}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.15 }}
-                    >
-                        {active === 'plain' && lyrics.plain && (
-                            <div className="text-[13px] leading-relaxed text-white/70">
-                                {plainLines(lyrics.plain).map((line, i) => (
-                                    <p
-                                        key={i}
-                                        className={line.gapBefore ? 'mt-3' : undefined}
+            {/* Expanded Body: Segmented Tab Bar & Lyrics Content */}
+            {!collapsed && (
+                <React.Fragment>
+                    {/* Segmented Control Bar */}
+                    <div className="px-4 pt-3 pb-2 border-b border-white/5 bg-white/[0.01] flex items-center justify-between gap-2 flex-wrap">
+                        <div className="inline-flex p-1 rounded-xl bg-white/[0.04] border border-white/10 shadow-inner">
+                            {TABS.filter((t) => available.includes(t.id)).map((tab) => {
+                                const Icon = tab.icon;
+                                const isActive = active === tab.id;
+                                return (
+                                    <button
+                                        key={tab.id}
+                                        type="button"
+                                        onClick={() => setMode(tab.id)}
+                                        title={`${tab.label} lyrics`}
+                                        aria-pressed={isActive}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                                            isActive
+                                                ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-md shadow-purple-500/25 border border-purple-400/40'
+                                                : 'text-white/55 hover:text-white hover:bg-white/5 border border-transparent'
+                                        }`}
                                     >
-                                        {line.text}
-                                    </p>
-                                ))}
-                            </div>
+                                        <Icon className="w-3.5 h-3.5" />
+                                        <span>{tab.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Format Indicator / Timing info */}
+                        <div className="text-[11px] text-white/40 hidden md:block">
+                            {active === 'words' && `${wordLines?.length ?? 0} word-timed lines`}
+                            {active === 'synced' && `${syncedLines?.length ?? 0} synced lines`}
+                            {active === 'plain' && 'Full plain lyrics'}
+                            {active === 'translation' && `${translationLines?.length ?? 0} translated lines`}
+                        </div>
+                    </div>
+
+                    {saveState === 'error' && saveError && (
+                        <p role="alert" className="px-4 py-2 text-xs text-red-400 bg-red-500/10 border-b border-red-500/20">
+                            {saveError}
+                        </p>
+                    )}
+
+                    {/* Scrollable Lyrics Container with expanded height */}
+                    <div
+                        ref={scrollRef}
+                        className="max-h-[380px] min-h-[220px] overflow-y-auto px-4 py-3 custom-scrollbar"
+                    >
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={active}
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -4 }}
+                                transition={{ duration: 0.15 }}
+                            >
+                                {/* Plain Lyrics */}
+                                {active === 'plain' && plainText && (
+                                    <div className="text-[14px] leading-loose text-white/80 space-y-1">
+                                        {plainLines(plainText).map((line, i) => (
+                                            <p key={i} className={line.gapBefore ? 'pt-3' : undefined}>
+                                                {line.text}
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Line-by-Line Synced Lyrics */}
+                                {active === 'synced' && (
+                                    <ol className="space-y-1.5 text-[14px] leading-relaxed">
+                                        {(syncedLines || []).map((line, i) => {
+                                            const isActive = i === syncedIndex && isPlaying !== false;
+                                            return (
+                                                <li
+                                                    key={`${line.t}-${i}`}
+                                                    data-active={isActive}
+                                                    className={`flex items-start gap-3 rounded-xl px-2.5 py-1.5 transition-all duration-200 ${
+                                                        isActive
+                                                            ? 'text-purple-300 bg-purple-500/20 border border-purple-500/35 font-semibold shadow-sm'
+                                                            : isTimelineActive
+                                                                ? 'text-white/40'
+                                                                : 'text-white/80 hover:text-white'
+                                                    }`}
+                                                >
+                                                    <span className="text-[11px] tabular-nums text-white/35 pt-0.5 shrink-0 w-9 text-right font-mono">
+                                                        {formatStamp(line.t)}
+                                                    </span>
+                                                    <span className="flex-1">{line.text}</span>
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                )}
+
+                                {/* Word-by-Word Synced Lyrics */}
+                                {active === 'words' && (
+                                    <ol className="space-y-1.5 text-[14.5px] leading-relaxed">
+                                        {(wordLines || []).map((line, i) => {
+                                            const isActive = i === wordIndex && isPlaying !== false;
+                                            return (
+                                                <li
+                                                    key={`${line.t}-${i}`}
+                                                    data-active={isActive}
+                                                    className={`rounded-xl px-2.5 py-1.5 transition-all duration-200 ${
+                                                        isActive
+                                                            ? 'bg-purple-500/20 border border-purple-500/35 text-white font-medium shadow-sm'
+                                                            : isTimelineActive
+                                                                ? 'text-white/40'
+                                                                : 'text-white/80 hover:text-white'
+                                                    }`}
+                                                >
+                                                    {line.words?.length ? (
+                                                        <span className="inline whitespace-pre-wrap">
+                                                            {formatWordsWithNaturalSpacing(line.words).map(
+                                                                ({ word, spaceBefore }, wi) => {
+                                                                    const wordActive =
+                                                                        isActive &&
+                                                                        timeMs >= word.t &&
+                                                                        timeMs < word.t + Math.max(word.d, 120);
+                                                                    return (
+                                                                        <React.Fragment key={`${word.t}-${wi}`}>
+                                                                            {spaceBefore && ' '}
+                                                                            <span
+                                                                                className={`transition-colors duration-150 ${
+                                                                                    wordActive
+                                                                                        ? 'text-purple-300 font-bold drop-shadow-[0_0_10px_rgba(192,132,252,0.7)]'
+                                                                                        : ''
+                                                                                }`}
+                                                                            >
+                                                                                {word.w.trim()}
+                                                                            </span>
+                                                                        </React.Fragment>
+                                                                    );
+                                                                }
+                                                            )}
+                                                        </span>
+                                                    ) : (
+                                                        <span>{line.text}</span>
+                                                    )}
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                )}
+
+                                {/* Translation Lyrics */}
+                                {active === 'translation' && (
+                                    <ol className="space-y-1.5 text-[14px] leading-relaxed">
+                                        {(translationLines || []).map((line, i) => {
+                                            const isActive = i === translationIndex && isPlaying !== false;
+                                            return (
+                                                <li
+                                                    key={`${line.t}-${i}`}
+                                                    data-active={isActive}
+                                                    className={`rounded-xl px-2.5 py-1.5 transition-all duration-200 ${
+                                                        isActive
+                                                            ? 'text-purple-300 bg-purple-500/20 border border-purple-500/35 font-semibold'
+                                                            : isTimelineActive
+                                                                ? 'text-white/40'
+                                                                : 'text-white/80 hover:text-white'
+                                                    }`}
+                                                >
+                                                    {line.text}
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                )}
+                            </motion.div>
+                        </AnimatePresence>
+
+                        {/* Simultaneous original lyric hint in translation tab */}
+                        {active === 'translation' && syncedIndex >= 0 && syncedLines?.[syncedIndex] && (
+                            <p className="mt-3 pt-2.5 border-t border-white/10 text-xs text-white/40 italic">
+                                {syncedLines[syncedIndex].text}
+                            </p>
                         )}
+                    </div>
 
-                        {active === 'synced' && (
-                            <ol className="space-y-1 text-[13px] leading-relaxed">
-                                {(syncedLines || []).map((line, i) => {
-                                    const isActive = i === syncedIndex && isPlaying !== false;
-                                    return (
-                                        <li
-                                            key={`${line.t}-${i}`}
-                                            data-active={isActive}
-                                            className={`flex gap-2.5 rounded px-1.5 py-0.5 transition-colors duration-200 ${
-                                                isActive
-                                                    ? 'text-blue-400 bg-blue-500/10 font-semibold'
-                                                    : 'text-white/45'
-                                            }`}
-                                        >
-                                            <span className="text-[10px] tabular-nums text-white/25 pt-0.5 shrink-0 w-8 text-right">
-                                                {formatStamp(line.t)}
-                                            </span>
-                                            <span>{line.text}</span>
-                                        </li>
-                                    );
-                                })}
-                            </ol>
-                        )}
-
-                        {active === 'words' && (
-                            <ol className="space-y-1.5 text-[14px] leading-relaxed">
-                                {(wordLines || []).map((line, i) => {
-                                    const isActive = i === wordIndex && isPlaying !== false;
-                                    return (
-                                        <li
-                                            key={`${line.t}-${i}`}
-                                            data-active={isActive}
-                                            className={`rounded px-1.5 py-0.5 transition-colors duration-200 ${
-                                                isActive
-                                                    ? 'bg-blue-500/10 text-white'
-                                                    : 'text-white/45'
-                                            }`}
-                                        >
-                                            {line.words?.length ? (
-                                                <span className="flex flex-wrap gap-x-1.5">
-                                                    {line.words.map((word, wi) => {
-                                                        const wordActive =
-                                                            isActive &&
-                                                            timeMs >= word.t &&
-                                                            timeMs < word.t + Math.max(word.d, 120);
-                                                        return (
-                                                            <span
-                                                                key={`${word.t}-${wi}`}
-                                                                className={`transition-colors duration-150 ${
-                                                                    wordActive
-                                                                        ? 'text-blue-400 font-semibold'
-                                                                        : ''
-                                                                }`}
-                                                            >
-                                                                {word.w}
-                                                            </span>
-                                                        );
-                                                    })}
-                                                </span>
-                            ) : (
-                                                <span>{line.text}</span>
-                                            )}
-                                        </li>
-                                    );
-                                })}
-                            </ol>
-                        )}
-
-                        {active === 'translation' && (
-                            <ol className="space-y-1 text-[13px] leading-relaxed">
-                                {(translationLines || []).map((line, i) => {
-                                    const isActive = i === translationIndex && isPlaying !== false;
-                                    return (
-                                        <li
-                                            key={`${line.t}-${i}`}
-                                            data-active={isActive}
-                                            className={`rounded px-1.5 py-0.5 transition-colors duration-200 ${
-                                                isActive
-                                                    ? 'text-blue-400 bg-blue-500/10'
-                                                    : 'text-white/45'
-                                            }`}
-                                        >
-                                            {line.text}
-                                        </li>
-                                    );
-                                })}
-                            </ol>
-                        )}
-                    </motion.div>
-                </AnimatePresence>
-
-                {active === 'translation' && syncedIndex >= 0 && syncedLines?.[syncedIndex] && (
-                    <p className="mt-3 pt-2.5 border-t border-white/5 text-[12px] text-white/35 italic">
-                        {syncedLines[syncedIndex].text}
-                    </p>
-                )}
-            </div>
-
-            {timeline && timeline.length > 0 && timeMs >= 0 && (
-                <footer className="px-3 py-1.5 border-t border-white/5 text-[10px] text-white/25 flex items-center justify-between">
-                    <span>
-                        {active === 'words'
-                            ? `${wordLines?.length ?? 0} word-timed lines`
-                            : `${timeline.length} lines`}
-                    </span>
-                    <span className="tabular-nums">{formatStamp(timeMs)}</span>
-                </footer>
+                    {/* Footer Info */}
+                    {timeline && timeline.length > 0 && (
+                        <footer className="px-4 py-2 border-t border-white/5 text-[11px] text-white/30 flex items-center justify-between bg-black/20">
+                            <span>
+                                {active === 'words'
+                                    ? `${wordLines?.length ?? 0} word-timed lines`
+                                    : `${timeline.length} lines`}
+                            </span>
+                            {timeMs >= 0 && (
+                                <span className="tabular-nums font-mono text-purple-300/70">{formatStamp(timeMs)}</span>
+                            )}
+                        </footer>
+                    )}
+                </React.Fragment>
             )}
         </motion.section>
     );

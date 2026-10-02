@@ -45,7 +45,7 @@ const VARIANT_MARKERS: RegExp = new RegExp(
         'remaster(?:ed)?',
         'reissue',
         'demo',
-        'radio',
+        'radio\\s+(?:edit|mix|version)',
         'sped',
         'slowed',
         'reverb',
@@ -59,13 +59,14 @@ const VARIANT_MARKERS: RegExp = new RegExp(
  * Markers that mean "this is a different song", as opposed to a different
  * recording. A candidate titled `Shape of You (Acoustic)` is a variant worth
  * rejecting; one titled `Shape of You (feat. Someone)` is the same song.
+ * Supports round (), square [], curly {}, or bare tags.
  */
 const NON_TITLE_NOISE: RegExp =
-    /\((?:official\s*(?:music\s*)?(?:video|audio)|official|lyric\s*video|lyrics?|visualizer|hd|hq|4k|remastered\s*\d{4}|full\s*video)\)/gi;
+    /[([{\s]*(?:official\s*(?:music\s*)?(?:video|audio)|official|lyric\s*video|lyrics?|visualizer|audio\s*track|hd|hq|4k|remastered\s*\d{4}|full\s*video)[)\]}\s]*/gi;
 
 /** `feat.`, `ft.`, `featuring` and friends, including bracketed or bare forms. */
 const FEAT_RE =
-    /\((?:feat|ft|featuring|ft\.)[^)]*\)|\b(?:feat|ft|featuring)\.?\s+[^-]+$/gi;
+    /[([{\[](?:feat|ft|featuring|ft\.)[^)\]}]*[)\]}]|\b(?:feat|ft|featuring)\.?\s+[^-]+$/gi;
 
 /** Trailing dashes and separators left behind after the above removals. */
 const EDGE_NOISE_RE = /^[\s\-–—_,.:;|/\\]+|[\s\-–—_,.:;|/\\]+$/g;
@@ -90,6 +91,24 @@ export function isVariantTitle(rawTitle: string): boolean {
 }
 
 /**
+ * Clean artist name by stripping common channel artefacts and formatting.
+ * Handles `- Topic`, `VEVO`, `Official`, and PascalCase spacing (TaylorSwift -> Taylor Swift).
+ */
+export function cleanArtist(raw: string): string {
+    if (!raw) return '';
+    let s = raw.trim();
+    s = s.replace(/\s*[-–—]\s*Topic$/i, '');
+    s = s.replace(/\s*VEVO$/i, '');
+    s = s.replace(/VEVO$/i, '');
+    s = s.replace(/\s*Official(?:\s*(?:Channel|Music|Page))?$/i, '');
+    s = s.replace(/Official$/i, '');
+    s = s.replace(/\s*Music$/i, '');
+    // PascalCase / camelCase name separation (e.g. JustinBieber -> Justin Bieber)
+    s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
+    return s.trim();
+}
+
+/**
  * Reduce a title to its identifying core for comparison.
  *
  * Only removes decoration - official-video markers, featured-artist tails and
@@ -107,7 +126,7 @@ export function normalizeTitle(raw: string): string {
 
     // Bracketed "feat." groups, then a trailing unbracketed one.
     t = t.replace(FEAT_RE, ' ');
-    t = t.replace(/\((?:with)\s+[^)]*\)/gi, ' ');
+    t = t.replace(/[([{\[](?:with)\s+[^)\]}]*[)\]}]/gi, ' ');
 
     // Any remaining bracket content is usually a version tag we already
     // rejected; keeping it would block a legitimate match.
@@ -123,20 +142,12 @@ export function normalizeTitle(raw: string): string {
 /**
  * Ordered normalized title candidates for one raw upload title.
  *
- * YouTube's upload convention packs credits and the channel into the title:
- * `Ae Ajnabee (Official Music Video) - Aditya Rikhari, Ravator, Kutle Khan |
- * Coke Studio Bharat`. Only the first segment is the track name, and the extra
- * words are enough to sink the title score even when the artist is right - that
- * exact URL matched nothing until the title was cut down to `Ae Ajnabee`.
+ * YouTube uploads frequently use either:
+ * - "Artist - Title" (Ed Sheeran - Shape of You)
+ * - "Title - Artist / Credits" (Ae Ajnabee - Aditya Rikhari)
  *
- * The variants are ordered safest-first and the caller stops at the first
- * confident match, so a title that already works is never second-guessed.
- * Truncating also cannot invent a match: every variant still has to clear the
- * same threshold and the same variant guards, and it is only ever tried when the
- * fuller title already failed. A wrong cut costs a lyric, never fakes one.
- *
- * The dash is the risky cut - `Ed Sheeran - Perfect` would truncate to
- * `Ed Sheeran` - which is exactly why the untruncated title is tried first.
+ * We produce both sides of the dash as candidates, along with the full title
+ * and channel-stripped title.
  */
 export function titleCandidates(raw: string): string[] {
     const variants: string[] = [];
@@ -151,9 +162,16 @@ export function titleCandidates(raw: string): string[] {
     const withoutChannel = raw.split('|')[0];
     add(withoutChannel);
 
-    // Everything after the first ` - ` is the credit line, when there is one.
-    const dashIndex = withoutChannel.indexOf(' - ');
-    if (dashIndex > 0) add(withoutChannel.slice(0, dashIndex));
+    // Split on dash: could be "Artist - Title" OR "Title - Credits"
+    const dashMatch = withoutChannel.match(/\s+[-–—]\s+/);
+    if (dashMatch && dashMatch.index !== undefined) {
+        const partA = withoutChannel.slice(0, dashMatch.index).trim();
+        const partB = withoutChannel.slice(dashMatch.index + dashMatch[0].length).trim();
+        // In YouTube, "Artist - Title" is overwhelmingly common -> partB is the title
+        add(partB);
+        // In "Title - Credits", partA is the title
+        add(partA);
+    }
 
     return variants;
 }
@@ -161,18 +179,17 @@ export function titleCandidates(raw: string): string[] {
 /**
  * The artist credits the upload put in its own title, normalized.
  *
- * Worth harvesting because the noisy channel-derived artist is often worse than
- * nothing. On `youtu.be/ut1rfURWyCo` yt-dlp reported `Coke Studio India,
- * Aditya Rikhari, Ravator Music, Kutle Khan Project` - a label, two artists and a
- * project name, none of which match a catalogue as a single string, while the
- * title's own credit line (`Aditya Rikhari, Ravator, Kutle Khan`) matches
- * immediately. Empty string when the title carries no credits.
+ * Returns the potential artist portion of a dash-separated title.
  */
 export function titleCredits(raw: string): string {
     const withoutChannel = raw.split('|')[0];
-    const dashIndex = withoutChannel.indexOf(' - ');
-    if (dashIndex <= 0) return '';
-    return normalizeTitle(withoutChannel.slice(dashIndex + 3));
+    const dashMatch = withoutChannel.match(/\s+[-–—]\s+/);
+    if (!dashMatch || dashMatch.index === undefined) return '';
+    const partA = withoutChannel.slice(0, dashMatch.index).trim();
+    const partB = withoutChannel.slice(dashMatch.index + dashMatch[0].length).trim();
+    // In Artist - Title, partA is the artist. In Title - Credits, partB has credits.
+    const cleanA = cleanArtist(partA);
+    return cleanA || normalizeTitle(partB);
 }
 
 /**
@@ -185,7 +202,8 @@ export function titleCredits(raw: string): string {
 export function normalizeArtist(raw: string): string {
     if (!raw) return '';
 
-    const normalized = raw
+    const cleaned = cleanArtist(raw);
+    const normalized = cleaned
         .toLowerCase()
         .replace(/\((?:feat|ft|featuring)\.?\s*[^)]*\)/gi, ' ')
         .replace(/[._]+/g, ' ')
@@ -195,15 +213,6 @@ export function normalizeArtist(raw: string): string {
         .replace(/\s+/g, ' ')
         .trim();
 
-    // Repeated names are a metadata artefact rather than a collaboration.
-    // YouTube Music reports `"A, A"` on single-artist tracks, and a doubled
-    // artist matches no catalogue, so the repeat is collapsed here as well as
-    // at the source.
-    //
-    // Only a genuine repeat rewrites the string. Re-joining an unchanged list
-    // would quietly turn "simon and garfunkel" into "simon, garfunkel" and
-    // change what `artistScore` compares, so the separator style the caller
-    // supplied is preserved unless there is something to fix.
     const parts = normalized.split(/\s*(?:,|;|&|\band\b)\s*/).filter(Boolean);
     if (new Set(parts).size === parts.length) return normalized;
 

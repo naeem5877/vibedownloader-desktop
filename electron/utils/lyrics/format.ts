@@ -14,6 +14,7 @@
  */
 
 import type { LyricLine, LyricsResult } from './types';
+import { cleanArtist } from './normalize';
 
 export type ExportMode = 'plain' | 'synced' | 'words' | 'translation';
 
@@ -57,28 +58,30 @@ function safeName(value: string, max = 80): string {
  */
 export function displayTitle(raw: string, artist = ''): string {
     const channelStripped = (raw || '').split('|')[0].trim();
-
     let title = channelStripped;
 
-    // `Ed Sheeran - Perfect (Official Music Video)` is Artist - Title, and
-    // cutting at the dash would leave just the artist - producing
-    // "Ed Sheeran - Ed Sheeran.lrc". `Ae Ajnabee (Official Music Video) -
-    // Aditya Rikhari, Ravator | Coke Studio` is Track - Credits, and the cut is
-    // exactly right.
-    //
-    // Those two are told apart by the artist: cutting is only safe when the left
-    // side is known *not* to be the artist. With no artist to compare against,
-    // the dash is left alone rather than guessed at.
-    const artistName = artist.trim().toLowerCase();
-    if (artistName) {
-        const dashIndex = title.indexOf(' - ');
-        if (dashIndex > 0 && title.slice(0, dashIndex).trim().toLowerCase() !== artistName) {
-            title = title.slice(0, dashIndex).trim();
+    const artistName = cleanArtist(artist).toLowerCase();
+    const dashMatch = title.match(/\s+[-–—]\s+/);
+    if (dashMatch && dashMatch.index !== undefined) {
+        const left = title.slice(0, dashMatch.index).trim();
+        const right = title.slice(dashMatch.index + dashMatch[0].length).trim();
+        const leftClean = cleanArtist(left).toLowerCase();
+        const rightClean = cleanArtist(right).toLowerCase();
+
+        if (artistName && (leftClean.includes(artistName) || artistName.includes(leftClean))) {
+            // Left is artist, right is title
+            title = right;
+        } else if (artistName && (rightClean.includes(artistName) || artistName.includes(rightClean))) {
+            // Right is artist/credits, left is title
+            title = left;
+        } else if (right) {
+            // In standard uploads (Artist - Title), right is usually the title
+            title = right;
         }
     }
 
     return (title
-        .replace(/\((?:official\s+)?(?:music\s+)?(?:video|audio|lyric\s+video|visualizer|hd|hq|4k|official)\)/gi, '')
+        .replace(/[([{\s]*(?:official\s+)?(?:music\s+)?(?:video|audio|lyric\s+video|visualizer|hd|hq|4k|official)[)\]}\s]*/gi, '')
         .replace(/\s+/g, ' ')
         .trim()) || channelStripped || raw.trim();
 }
@@ -88,12 +91,10 @@ export function displayTitle(raw: string, artist = ''): string {
  *
  * The matched `artist` is lowercased by normalization, which is right for
  * matching and wrong for a header or a filename (`ed sheeran - Perfect.lrc`).
- * This keeps the full credit list rather than shortening it: the panel header
- * clamps it with CSS, and every real credit stays in a saved file.
+ * Cleans YouTube channel suffixes like `- Topic`, `VEVO`, etc.
  */
 export function displayArtist(raw: string): string {
-    return (raw || '')
-        .replace(/\s*[-–]\s*Topic\s*$/i, '')
+    return cleanArtist(raw || '')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -235,7 +236,7 @@ export function buildLyricsFile(
     }
 
     if (mode === 'synced') {
-        const lines = lyrics.synced;
+        const lines = lyrics.synced || (lyrics.words ? lyrics.words.map((l) => ({ t: l.t, text: l.text })) : undefined);
         if (!lines?.length) return null;
         return {
             filename: fileNameFor(title, artist, 'lrc'),
@@ -253,20 +254,15 @@ export function buildLyricsFile(
     }
 
     if (mode === 'plain') {
-        if (lyrics.plain?.trim()) {
+        const plainContent = lyrics.plain?.trim() || (lyrics.synced || lyrics.words)?.map((l) => l.text).join('\n');
+        if (plainContent) {
             const meta: string[] = [];
             if (title) meta.push(displayTitle(title, artist));
             if (artist) meta.push(artist);
             const headerText = meta.length ? `${meta.join(' - ')}\n\n` : '';
             return {
                 filename: fileNameFor(title, artist, 'txt'),
-                content: `${headerText}${lyrics.plain}\n`
-            };
-        }
-        if (lyrics.synced?.length) {
-            return {
-                filename: fileNameFor(title, artist, 'txt'),
-                content: toPlainText(lyrics.synced, title, artist)
+                content: `${headerText}${plainContent}\n`
             };
         }
         return null;
