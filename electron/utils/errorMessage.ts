@@ -188,10 +188,14 @@ export function classifyExtractionError(rawError: unknown, url = '', ctx: ErrorC
         if (rule.test.test(output)) {
             let message = rule.message;
 
-            // Facebook Stories are scraped from a private endpoint that keeps
-            // changing, so calling it "unsupported" is clearer than a 404.
+            // Stories are fetched by our own code, not yt-dlp, so anything that
+            // reaches this branch with a story URL is a fallback path. Saying
+            // "not supported" here is now a lie that also hides the one thing
+            // the user can fix, which is usually their cookies.
             if (rule.kind === 'unsupported' && /facebook\.com\/(stories|story)/i.test(url)) {
-                message = '⚠️ Facebook Stories are not supported by the downloader right now.';
+                message = ctx.hasCookies
+                    ? '⚠️ This Facebook story could not be read even with cookies sent. It may have expired (stories are gone after 24 hours), or Facebook changed the page. Updating the app is the best next step.'
+                    : '🔒 Facebook needs your login cookies to read a story. Add them in Settings, then try again.';
             }
             return { kind: rule.kind, message: contextualize(rule.kind, message, ctx), suggestYtDlpUpdate: false };
         }

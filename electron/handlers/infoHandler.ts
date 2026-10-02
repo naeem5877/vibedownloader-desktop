@@ -19,6 +19,7 @@ import {
     formatSummary
 } from '../utils/youtubeStrategy';
 import { redactUrlForLog } from '../utils/redact';
+import { fetchFacebookStory, isFacebookStoryUrl, cookieHeaderFromNetscape, buildFacebookStoryMetadata } from '../utils/facebookStories';
 import { reportExtractionFailure, reportThinFormatList } from '../utils/sentry';
 import { getYtDlpVersion } from '../utils/binaries';
 import type { NormalizedStory } from '../utils/instagramStories';
@@ -348,94 +349,23 @@ export function registerInfoHandlers() {
             // =============================================
             // Facebook Stories handler (yt-dlp can't handle these)
             // =============================================
-            if (isFacebook && (url.includes('/stories/') || url.includes('story_tray'))) {
-                console.log('Using HTTP scraping for Facebook Stories...');
+            //
+            // The fetching and the parsing live in utils/facebookStories.ts. It
+            // used to sit inline here, which made it impossible to exercise
+            // without Electron - and the one thing that actually mattered, that
+            // Facebook needs a `Sec-Fetch-Site` header or answers 400, was a line
+            // among many and therefore invisible.
+            if (isFacebook && isFacebookStoryUrl(url)) {
+                console.log('Fetching Facebook story page directly (yt-dlp has no story extractor)...');
 
-                // Build cookie header from the cookies file
                 let cookieHeader = '';
                 if (cookiePath && fs.existsSync(cookiePath)) {
-                    const cookieText = fs.readFileSync(cookiePath, 'utf8');
-                    const pairs: string[] = [];
-                    for (const line of cookieText.split('\n')) {
-                        if (!line.startsWith('#') && line.trim()) {
-                            const parts = line.split('\t');
-                            if (parts.length >= 7) {
-                                pairs.push(`${parts[5].trim()}=${parts[6].trim()}`);
-                            }
-                        }
-                    }
-                    cookieHeader = pairs.join('; ');
+                    cookieHeader = cookieHeaderFromNetscape(fs.readFileSync(cookiePath, 'utf8'));
                 }
 
-                if (!cookieHeader) {
-                    throw new Error('🔒 Facebook cookies are required to download stories. Please add your Facebook cookies in Settings.');
-                }
+                const story = await fetchFacebookStory(url, cookieHeader);
 
-                const resp = await fetch(url, {
-                    headers: {
-                        'User-Agent': defaultUserAgent(),
-                        'Cookie': cookieHeader,
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Sec-Fetch-Dest': 'document',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Referer': 'https://www.facebook.com/'
-                    }
-                });
-
-                if (!resp.ok) {
-                    throw new Error(`Facebook returned HTTP ${resp.status}. Try refreshing your Facebook cookies.`);
-                }
-
-                const html = await resp.text();
-
-                // Extract video URLs from Facebook's JSON blob in the page
-                const extractFbUrl = (pattern: RegExp) => {
-                    const m = html.match(pattern);
-                    if (!m) return null;
-                    try {
-                        return JSON.parse(`"${m[1]}"`);  // Unescape \u0026 etc
-                    } catch { return m[1]; }
-                };
-
-                const hdUrl = extractFbUrl(/"browser_native_hd_url"\s*:\s*"([^"]+)"/) ||
-                    extractFbUrl(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/);
-                const sdUrl = extractFbUrl(/"browser_native_sd_url"\s*:\s*"([^"]+)"/) ||
-                    extractFbUrl(/"playable_url"\s*:\s*"([^"]+)"/);
-                const thumbnailUrl = extractFbUrl(/"preferred_thumbnail"\s*.*?"uri"\s*:\s*"([^"]+)"/) ||
-                    extractFbUrl(/"thumbnail_image"\s*.*?"uri"\s*:\s*"([^"]+)"/);
-
-                const videoUrl = hdUrl || sdUrl;
-                if (!videoUrl) {
-                    throw new Error('Could not find video URL in Facebook Story page. The story may have expired or your cookies may be outdated.');
-                }
-
-                const uploaderMatch = html.match(/"story_actor"\s*.*?"name"\s*:\s*"([^"]+)"/);
-                const uploaderName = uploaderMatch ? uploaderMatch[1] : 'Facebook';
-
-                const entry = {
-                    id: `fb-story-${Date.now()}`,
-                    title: `Story by ${uploaderName.replace(/\s+/g, '')}`,
-                    thumbnail: thumbnailUrl || '',
-                    duration: 0,
-                    url: videoUrl,
-                    ext: 'mp4'
-                };
-
-                const metadata = {
-                    id: `fb-story-${Date.now()}`,
-                    title: `Story by ${uploaderName.replace(/\s+/g, '')}`,
-                    thumbnail: thumbnailUrl || '',
-                    uploader: uploaderName,
-                    uploader_url: `https://facebook.com`,
-                    view_count: 0,
-                    duration: 0,
-                    contentType: 'story',
-                    entries: [entry],
-                    playlist_count: 1
-                };
-
-                return { success: true, metadata };
+                return { success: true, metadata: buildFacebookStoryMetadata(story) };
             }
 
             // Add User-Agent to help with Facebook/Instagram/YouTube

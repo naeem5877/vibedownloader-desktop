@@ -76,6 +76,11 @@ interface VideoMetadata {
     album?: string;
     noStories?: boolean; // Instagram stories: the account has nothing posted
     noStoriesMessage?: string;
+    /**
+     * Facebook stories: a single URL resolves one story, which is one video.
+     * Instagram returns a whole tray, so the two need different result cards.
+     */
+    singleStory?: boolean;
 }
 
 type PlatformId = 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'spotify' | 'x' | 'pinterest' | 'soundcloud' | 'twitch';
@@ -1591,6 +1596,10 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                 cutEnd: cut?.end,
                 audioTrack: selectedAudioTrack?.formatId,
                 audioLangLabel: selectedAudioTrack?.langLabel,
+                // Needed for CDN media: a story tray hands over a bare
+                // fbcdn.net URL with no trace of where it came from, and without
+                // this the backend files a Facebook story under Instagram.
+                platform: currentPlatform.id,
                 mediaExt: itemId
                     ? (metadata?.entries?.find((e: PlaylistEntry) => e.id === itemId)?.ext as 'jpg' | 'mp4' | undefined)
                     : undefined
@@ -1885,6 +1894,9 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
     // now" is a result, and it still belongs in the stories card, not in the
     // single-video card that would read as a 0-second video.
     const isStory = !!metadata && metadata?.contentType === 'story';
+    // Facebook resolves one URL to one story, which is one video, so it gets the
+    // ordinary single-video card. Only a tray of several stories is a tray.
+    const isSingleStory = isStory && !!metadata?.singleStory;
     const storyCount = metadata?.entries?.length ?? 0;
     const isLive = !hasEntries && !!metadata?.isLive && metadata.duration === 0;
 
@@ -2406,12 +2418,21 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                         </motion.div>
                     )}
                     {/* Single Video/Track Result */}
-                    {metadata && !loading && !complete && !isPlaylist && !isStory && (
+                    {metadata && !loading && !complete && !isPlaylist && (!isStory || isSingleStory) && (
                         <motion.div key="video" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
                             {/* Thumbnail */}
-                            <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-white/5 to-white/10 mb-5">
+                            <div className={`relative rounded-2xl overflow-hidden mb-5 ${isSingleStory ? 'bg-black' : 'bg-gradient-to-br from-white/5 to-white/10'}`}>
                                 {metadata.thumbnail ? (
-                                    <img src={metadata.thumbnail} alt="" onError={handleImgError} className="w-full aspect-video object-cover" referrerPolicy="no-referrer" />
+                                    /* A story is a portrait frame. Cropping it to 16:9 the way a
+                                       landscape thumbnail is cropped would show a letterbox slit
+                                       of the middle of the video, so it is fitted whole instead. */
+                                    <img
+                                        src={metadata.thumbnail}
+                                        alt=""
+                                        onError={handleImgError}
+                                        className={isSingleStory ? 'max-h-[60vh] w-auto max-w-full mx-auto object-contain block' : 'w-full aspect-video object-cover'}
+                                        referrerPolicy="no-referrer"
+                                    />
                                 ) : (
                                     <div className="w-full aspect-video flex items-center justify-center bg-gradient-to-br from-green-900/30 to-green-600/20">
                                         <Disc className="w-20 h-20 text-green-500/50" />
@@ -2489,7 +2510,10 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     <h2 className="text-lg font-bold leading-snug mb-2">{metadata.title}</h2>
                                     <div className="flex items-center gap-4 text-white/40 text-sm">
                                         <span className="flex items-center gap-1.5"><User className="w-4 h-4" /> {metadata.uploader}</span>
-                                        {!isSpotify && <span className="flex items-center gap-1.5"><Eye className="w-4 h-4" /> {formatNumber(metadata.view_count)}</span>}
+                                        {/* A story has no view count to report. Showing "0" would read as
+                                            "nobody has watched this" rather than "this number is not a thing
+                                            we know", so it is left out entirely. */}
+                                        {!isSpotify && !isSingleStory && metadata.view_count > 0 && <span className="flex items-center gap-1.5"><Eye className="w-4 h-4" /> {formatNumber(metadata.view_count)}</span>}
                                         {isSpotify && metadata.view_count > 0 && <span>Popularity: {metadata.view_count}</span>}
                                     </div>
                                 </div>
@@ -2734,9 +2758,63 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                             <div className="border-t border-white/10 pt-5">
                                 <div className="flex items-center justify-between mb-3.5">
                                     <p className="text-white/40 text-xs font-bold uppercase tracking-wider">Download Options</p>
-                                    <span className="text-[10px] text-white/30 font-medium">Select format &amp; quality</span>
+                                    <span className="text-[10px] text-white/30 font-medium">
+                                        {isSingleStory ? 'One video, nothing to choose' : 'Select format &amp; quality'}
+                                    </span>
                                 </div>
                                 <div className="grid gap-3">
+                                    {/* Facebook story: the media is already resolved, so there is
+                                        no format list to pick from and no reason to offer audio
+                                        renditions of a clip the user came here to watch whole. */}
+                                    {isSingleStory && (
+                                        <>
+                                            <button
+                                                onClick={() => handleDownload('best')}
+                                                disabled={downloading}
+                                                className="group relative w-full flex items-center justify-between p-4 rounded-2xl border transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                                                style={{
+                                                    background: `linear-gradient(to right, ${currentPlatform.color}22, transparent)`,
+                                                    borderColor: `${currentPlatform.color}55`
+                                                }}
+                                            >
+                                                <div className="flex items-center gap-3.5">
+                                                    <div
+                                                        className="w-11 h-11 rounded-xl border flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
+                                                        style={{ background: `${currentPlatform.color}33`, borderColor: `${currentPlatform.color}66` }}
+                                                    >
+                                                        <Film className="w-5 h-5" style={{ color: currentPlatform.color }} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="font-semibold text-sm text-white">Download Story</p>
+                                                            <span
+                                                                className="text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider border"
+                                                                style={{ background: `${currentPlatform.color}26`, color: currentPlatform.color, borderColor: `${currentPlatform.color}59` }}
+                                                            >
+                                                                MP4
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-white/40 mt-0.5">
+                                                            Saved as-is to your {currentPlatform.name} folder
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div
+                                                    className="w-9 h-9 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-white/40 group-hover:text-white transition-all group-hover:scale-110 shrink-0"
+                                                    style={{ background: `${currentPlatform.color}00` }}
+                                                >
+                                                    <Download className="w-4 h-4" />
+                                                </div>
+                                            </button>
+                                            <p className="flex items-start gap-2 text-[11px] leading-relaxed text-white/40 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2">
+                                                <Timer className="w-3.5 h-3.5 mt-[1px] shrink-0" />
+                                                Stories are deleted by Facebook 24 hours after they are posted, so
+                                                the link stops working after that. A link can only ever resolve
+                                                the one story it points at.
+                                            </p>
+                                        </>
+                                    )}
+
                                     {/* Spotify Audio */}
                                     {isSpotify && metadata.searchQuery && (
                                         <div className="mb-2">
@@ -2903,7 +2981,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     )}
 
                                     {/* Audio Only Section */}
-                                    {!isSpotify && !isLive && (
+                                    {!isSpotify && !isLive && !isSingleStory && (
                                         <div className="mb-2">
                                             <h3 className="text-xs font-bold uppercase tracking-wider text-white/50 mb-2 pl-1 flex items-center gap-2">
                                                 <Music className="w-3.5 h-3.5 text-emerald-400" /> Audio Only
@@ -3197,7 +3275,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                     )}
 
                     {/* Story Result (Instagram) */}
-                    {metadata && !loading && !complete && isStory && (
+                    {metadata && !loading && !complete && isStory && !isSingleStory && (
                         <motion.div key="story" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
                             <div className="mb-4 p-5 bg-gradient-to-br from-[#E4405F]/10 via-[#F56040]/10 to-[#FCAF45]/10 rounded-3xl border border-[#E4405F]/20 backdrop-blur-sm">
                                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
