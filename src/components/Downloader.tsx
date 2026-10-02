@@ -2747,7 +2747,9 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                                 <p className="font-semibold text-sm text-white group-hover:text-sky-300 transition-colors">Spotify Audio (WAV)</p>
                                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase tracking-wider">Uncompressed</span>
                                                             </div>
-                                                            <p className="text-xs text-white/40 mt-0.5">Uncompressed PCM • No re-encode loss, largest file</p>
+                                                            {/* No cover art: a WAV container has nowhere to put it, which is
+                                                                why the MP3 cards are the ones that carry artwork. */}
+                                                            <p className="text-xs text-white/40 mt-0.5">Uncompressed PCM • No re-encode loss • No cover art</p>
                                                         </div>
                                                     </div>
                                                     <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-sky-400 group-hover:border-sky-300 transition-all shrink-0">
@@ -2910,7 +2912,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                                 <p className="font-semibold text-sm text-white group-hover:text-sky-300 transition-colors">Audio (WAV)</p>
                                                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase tracking-wider">Uncompressed</span>
                                                             </div>
-                                                            <p className="text-xs text-white/40 mt-0.5">Uncompressed PCM • No re-encode loss, largest file</p>
+                                                            <p className="text-xs text-white/40 mt-0.5">Uncompressed PCM • No re-encode loss • No cover art</p>
                                                         </div>
                                                     </div>
                                                     <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-sky-400 group-hover:border-sky-300 transition-all shrink-0">

@@ -17,6 +17,7 @@ import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/p
 import { preferredYoutubeClient } from '../utils/youtubeStrategy';
 import { classifyExtractionError } from '../utils/errorMessage';
 import { createStageReader } from '../utils/downloadStages';
+import { isWavFile, describeAudioCodec } from '../utils/audioContainer';
 
 // Download an image URL to a unique temp file (used for MP3 cover embedding
 // and the Windows completion notification).
@@ -797,8 +798,14 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 if (!wantsWav) args.push('--audio-quality', quality);
                 // Let yt-dlp write + embed the best thumbnail (for music /
                 // "Topic" videos this is the square album cover). node-id3 is
-                // no longer used for the YouTube path.
-                args.push('--write-thumbnail', '--convert-thumbnails', 'jpg', '--embed-thumbnail');
+                // no longer used for the YouTube path. A WAV cannot carry cover
+                // art: yt-dlp's thumbnail postprocessor accepts only
+                // mp3/mkv/ogg/opus/flac/m4a/mp4, and it checks that *after*
+                // writing the converted file, so asking for it failed the whole
+                // download over a WAV that was already correct.
+                if (!wantsWav) {
+                    args.push('--write-thumbnail', '--convert-thumbnails', 'jpg', '--embed-thumbnail');
+                }
             } else {
                 // Ensure FFmpeg is available for merging video/audio
                 sendStage('Preparing FFmpeg', false);
@@ -851,8 +858,11 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             // with the true square album art via node-id3.
             let thumbPath: string | undefined;
             let artPromise: Promise<string | null> | null = null;
-            const isYoutubeAudio = isYoutube && formatId && formatId.startsWith('audio_');
-            if (isYoutubeAudio) {
+            // Only an MP3 can be given the art: node-id3 writes MP3 tags and a
+            // WAV has nowhere to put a picture, so looking art up for a WAV
+            // download is a request whose answer is thrown away.
+            const isYoutubeMp3 = isYoutube && finalExt === 'mp3' && formatId && formatId.startsWith('audio_');
+            if (isYoutubeMp3) {
                 const videoId = extractYouTubeVideoId(url);
                 if (videoId) {
                     artPromise = fetchYouTubeMusicAlbumArt(videoId).catch(() => null);
@@ -1068,6 +1078,20 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                                     }
                                 }
                             }
+                        }
+
+                        // A WAV that is not a WAV would make the format a lie, and
+                        // the user has no way to see the difference before opening
+                        // the file in an editor. The container is checked before
+                        // the download is reported as done.
+                        if (finalExt === 'wav' && !isWavFile(displayPath)) {
+                            const actual = await describeAudioCodec(displayPath);
+                            const message = `Saved as ${actual ? `${actual} audio` : 'an unknown format'}, not a true WAV.`;
+                            console.error('WAV download did not produce a WAV:', displayPath, actual);
+                            mainWindow?.webContents.send('download-progress', { error: message, jobId });
+                            if (!suppressNotifications) showNotification('Download Failed', message);
+                            if (!settled) { settled = true; reject(new Error(message)); }
+                            return;
                         }
 
                         // Captions are downloaded separately by the user through
@@ -1349,6 +1373,18 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         }
                     } catch (e: any) {
                         console.warn('Failed to embed Spotify thumbnail (non-fatal):', e.message || e);
+                    }
+
+                    // Same promise as the YouTube path: a `.wav` that is not a
+                    // WAV cannot be reported as a finished WAV.
+                    if (audioExt === 'wav' && !isWavFile(finalFilePath)) {
+                        const actual = await describeAudioCodec(finalFilePath);
+                        const message = `Saved as ${actual ? `${actual} audio` : 'an unknown format'}, not a true WAV.`;
+                        console.error('Spotify WAV download did not produce a WAV:', finalFilePath, actual);
+                        mainWindow?.webContents.send('download-progress', { error: message, jobId });
+                        if (!suppressNotifications) showNotification('Download Failed', message);
+                        if (!settled) { settled = true; reject(new Error(message)); }
+                        return;
                     }
 
                     mainWindow?.webContents.send('download-progress', {
