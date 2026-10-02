@@ -18,6 +18,7 @@ import { preferredYoutubeClient } from '../utils/youtubeStrategy';
 import { classifyExtractionError } from '../utils/errorMessage';
 import { createStageReader } from '../utils/downloadStages';
 import { isWavFile, describeAudioCodec } from '../utils/audioContainer';
+import { fetchMusicTags, buildNodeId3Tags, embedTagsWithFfmpeg, type MusicTags } from '../utils/musicTags';
 
 // Download an image URL to a unique temp file (used for MP3 cover embedding
 // and the Windows completion notification).
@@ -869,6 +870,15 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 }
             }
 
+            // The artist, album and year yt-dlp already resolved for this
+            // track, asked for in parallel so the file arrives tagged. Both
+            // audio formats want it: a WAV cannot hold the cover art, but it
+            // can hold everything else.
+            let tagsPromise: Promise<MusicTags | null> | null = null;
+            if (isYoutube && formatId && formatId.startsWith('audio_')) {
+                tagsPromise = fetchMusicTags(url).catch(() => null);
+            }
+
             if (thumbnail) {
                 const info = await saveThumbnailTemp(thumbnail);
                 if (info) { thumbPath = info.path; }
@@ -1045,39 +1055,59 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         // Upgrade the embedded cover to the true square YouTube Music
                         // album art when the parallel lookup succeeded.
                         const isAudioDownload = formatId && (formatId.startsWith('audio_') || formatId === 'audio');
-                        // node-id3 only writes MP3 tags, so a WAV download is
-                        // left with whatever yt-dlp embedded instead of being
-                        // handed to a tagger that cannot parse it.
-                        if (isAudioDownload && finalExt === 'mp3' && artPromise && fs.existsSync(finalFilePath)) {
+                        // Whatever this turned out to be: a song we can name, or
+                        // something whose credits we must not guess at.
+                        const musicTags = isAudioDownload && tagsPromise ? await tagsPromise : null;
+
+                        // The MP3 is tagged and covered in one node-id3 pass -
+                        // two passes would rewrite the same ID3 header twice for
+                        // nothing. The cover is the square YouTube Music artwork
+                        // when that lookup found one.
+                        if (isAudioDownload && finalExt === 'mp3' && fs.existsSync(finalFilePath)) {
+                            let image: any;
                             // The lookup runs in parallel with the download, but a
                             // network miss here still costs the user a visible wait.
-                            sendStage('Fetching album art');
-                            const art = await artPromise;
-                            if (art) {
-                                console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
-                                sendStage('Embedding album art');
-                                const info = await saveThumbnailTemp(art);
-                                if (info) {
-                                    // The earlier candidate is superseded by the real
-                                    // album art, so drop it instead of leaking it.
-                                    discardTempThumbnail(thumbPath);
-                                    thumbPath = info.path;
-                                    try {
-                                        const tags = {
-                                            title: safeTitle,
-                                            image: {
-                                                mime: info.mime,
-                                                type: { id: 3, name: "front cover" },
-                                                description: "Cover",
-                                                imageBuffer: fs.readFileSync(info.path)
-                                            }
+                            if (artPromise) {
+                                sendStage('Fetching album art');
+                                const art = await artPromise;
+                                if (art) {
+                                    console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
+                                    sendStage('Embedding album art');
+                                    const info = await saveThumbnailTemp(art);
+                                    if (info) {
+                                        // The earlier candidate is superseded by the real
+                                        // album art, so drop it instead of leaking it.
+                                        discardTempThumbnail(thumbPath);
+                                        thumbPath = info.path;
+                                        image = {
+                                            mime: info.mime,
+                                            type: { id: 3, name: "front cover" },
+                                            description: "Cover",
+                                            imageBuffer: fs.readFileSync(info.path)
                                         };
-                                        console.log("Embedding YouTube Music album art:", NodeID3.update(tags, finalFilePath));
-                                    } catch (e) {
-                                        console.error("Failed to write album art tags (non-fatal):", e);
                                     }
                                 }
                             }
+
+                            const patch: Record<string, any> | null = musicTags
+                                ? buildNodeId3Tags(musicTags)
+                                : (image ? { title: safeTitle } : null);
+                            if (image && patch) patch.image = image;
+                            if (patch) {
+                                sendStage('Writing music tags');
+                                try {
+                                    console.log("Writing MP3 tags:", NodeID3.update(patch, finalFilePath));
+                                } catch (e) {
+                                    console.error("Failed to write MP3 tags (non-fatal):", e);
+                                }
+                            }
+                        } else if (isAudioDownload && finalExt === 'wav' && musicTags && fs.existsSync(finalFilePath)) {
+                            // A WAV has nowhere to put a picture, but its LIST/INFO
+                            // chunk can hold the track, the artist, the album and
+                            // the year - which is how a WAV stops being an
+                            // anonymous recording of something.
+                            sendStage('Writing music tags');
+                            await embedTagsWithFfmpeg(finalFilePath, musicTags);
                         }
 
                         // A WAV that is not a WAV would make the format a lie, and
@@ -1385,6 +1415,14 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         if (!suppressNotifications) showNotification('Download Failed', message);
                         if (!settled) { settled = true; reject(new Error(message)); }
                         return;
+                    }
+
+                    // The MP3 above is already tagged and covered; a WAV can
+                    // hold neither picture nor ID3, so it is the one Spotify
+                    // format that arrives anonymous without this.
+                    if (audioExt === 'wav' && fs.existsSync(finalFilePath)) {
+                        sendStage('Writing music tags');
+                        await embedTagsWithFfmpeg(finalFilePath, { title, artist });
                     }
 
                     mainWindow?.webContents.send('download-progress', {
