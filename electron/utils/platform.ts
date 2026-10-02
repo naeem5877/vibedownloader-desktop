@@ -104,7 +104,11 @@ export function whichSync(command: string): string | null {
         const out = execFileSync(probe, [command], {
             encoding: 'utf-8',
             timeout: 10000,
-            windowsHide: true
+            windowsHide: true,
+            // Not-found is the normal answer here, and `where.exe` writes
+            // "Could not find files for the given pattern(s)" to stderr. Left
+            // alone that line surfaces in the console as if something broke.
+            stdio: ['ignore', 'pipe', 'ignore']
         });
         const first = (out || '').split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean)[0];
         if (first && fs.existsSync(first)) return first;
@@ -138,8 +142,50 @@ export interface JsRuntime {
     source: 'bundled-node' | 'system-deno' | 'system-node';
     /** Value for `--js-runtimes`. */
     flag: string;
+    /** The executable itself, for a version probe. */
+    exe: string;
     /** Extra environment for the spawned yt-dlp process. */
     env: NodeJS.ProcessEnv;
+}
+
+/**
+ * Minimum runtime yt-dlp's EJS challenge solver supports. The EJS guide asks
+ * for Node 22 or newer; an older runtime is accepted by yt-dlp but cannot solve
+ * the challenge, which shows up as missing formats rather than as an error.
+ */
+const MIN_RUNTIME_MAJOR = 22;
+
+/**
+ * Version of a candidate runtime, or null if it will not say.
+ *
+ * Never fatal. The point is the log line: "which runtime, which version" is the
+ * single most useful fact when a report says the downloader gave 360p, because a
+ * runtime too old to run the challenge solver produces exactly that, silently.
+ */
+function runtimeVersion(runtime: JsRuntime): string | null {
+    if (runtime.source === 'bundled-node') return process.versions.node || null;
+    try {
+        const out = execFileSync(runtime.exe, ['--version'], {
+            encoding: 'utf-8',
+            timeout: 5000,
+            windowsHide: true
+        });
+        return (out || '').trim().split(/\s+/).pop() || null;
+    } catch {
+        return null;
+    }
+}
+
+function runtimeMajor(runtime: JsRuntime, version: string | null): number | null {
+    if (!version) return null;
+    const m = version.match(/(\d+)(?:\.\d+)*/);
+    return m ? Number(m[1]) : null;
+}
+
+/** `node`/`deno`/anything else, with its version. Safe to log. */
+export function describeJsRuntime(runtime: JsRuntime | null): string {
+    if (!runtime) return 'none';
+    return `${runtime.source} ${runtimeVersion(runtime) || 'version unknown'}`;
 }
 
 /**
@@ -165,6 +211,7 @@ function bundledNodeRuntime(): JsRuntime | null {
         return {
             source: 'bundled-node',
             flag: `node:${exe}`,
+            exe,
             env: {
                 ELECTRON_RUN_AS_NODE: '1',
                 // Keeps the child from trying to attach to our devtools port.
@@ -193,18 +240,39 @@ let cachedJsRuntime: JsRuntime | null | undefined;
  */
 export function detectJsRuntime(): JsRuntime | null {
     if (cachedJsRuntime !== undefined) return cachedJsRuntime;
-    cachedJsRuntime = bundledNodeRuntime();
-    if (!cachedJsRuntime) {
-        const deno = whichSync('deno');
-        const node = whichSync('node');
-        if (deno) cachedJsRuntime = { source: 'system-deno', flag: `deno:${deno}`, env: {} };
-        else if (node) cachedJsRuntime = { source: 'system-node', flag: `node:${node}`, env: {} };
-        else cachedJsRuntime = null;
+
+    const candidates: (JsRuntime | null)[] = [bundledNodeRuntime()];
+    const deno = whichSync('deno');
+    const node = whichSync('node');
+    if (deno) candidates.push({ source: 'system-deno', flag: `deno:${deno}`, exe: deno, env: {} });
+    if (node) candidates.push({ source: 'system-node', flag: `node:${node}`, exe: node, env: {} });
+
+    // First candidate that is new enough wins. Deno leads the system list
+    // because yt-dlp enables it by default and it can pull the EJS scripts
+    // itself; Node is the fallback.
+    cachedJsRuntime = null;
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const major = runtimeMajor(candidate, runtimeVersion(candidate));
+        if (major !== null && major < MIN_RUNTIME_MAJOR) {
+            console.warn(
+                `JS runtime ${candidate.source} is v${major}, below the v${MIN_RUNTIME_MAJOR} yt-dlp's ` +
+                `challenge solver needs; trying the next one`
+            );
+            continue;
+        }
+        cachedJsRuntime = candidate;
+        break;
     }
+
     if (cachedJsRuntime) {
-        console.log(`JS runtime for yt-dlp: ${cachedJsRuntime.source} (${cachedJsRuntime.flag})`);
+        console.log(`JS runtime for yt-dlp: ${describeJsRuntime(cachedJsRuntime)} (${cachedJsRuntime.flag})`);
     } else {
-        console.warn('No JavaScript runtime available for yt-dlp; YouTube extraction may be degraded');
+        console.warn(
+            'No JavaScript runtime available for yt-dlp. YouTube extraction will still work, but ' +
+            'high-resolution formats can go missing without any error - this is the documented ' +
+            'deprecation notice in yt-dlp, not a download failure.'
+        );
     }
     return cachedJsRuntime;
 }
@@ -217,6 +285,12 @@ export function __resetJsRuntimeCache() {
 /**
  * Environment for spawning yt-dlp with the given runtime. Spread over
  * `process.env` so the child keeps PATH and everything else it normally needs.
+ *
+ * That spread is load-bearing on Windows. A hand-built environment here would
+ * drop `SystemRoot`/`windir`, and without them Windows cannot load system DLLs or
+ * run its own `taskkill`, so the runtime that works on a developer's machine
+ * fails on a clean install - which is exactly the class of bug this file already
+ * had once with PATH resolution.
  */
 export function jsRuntimeSpawnEnv(runtime: JsRuntime | null): NodeJS.ProcessEnv | undefined {
     return runtime ? { ...process.env, ...runtime.env } : undefined;

@@ -13,8 +13,9 @@ import { getOrganizedPath, getCookiePath, loadSettings } from '../utils/paths';
 import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
 import { fetchYouTubeMusicAlbumArt, extractYouTubeVideoId } from '../utils/youtubeMusic';
-import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/platform';
+import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv, describeJsRuntime } from '../utils/platform';
 import { preferredYoutubeClient } from '../utils/youtubeStrategy';
+import { redactUrlForLog } from '../utils/redact';
 import { classifyExtractionError } from '../utils/errorMessage';
 import { createStageReader } from '../utils/downloadStages';
 import { isWavFile, describeAudioCodec } from '../utils/audioContainer';
@@ -688,7 +689,6 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
 
             const args = [
                 url,
-                '--no-check-certificates',
                 '-o', outputTemplate,
                 '--no-playlist'
             ];
@@ -731,6 +731,15 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 if (preferred.extractorArgs) {
                     args.push('--extractor-args', preferred.extractorArgs[0]);
                 }
+                // Which player is pinned, which runtime will solve the challenge
+                // and which format was asked for. When a report says "I got 360p",
+                // this line is the difference between a YouTube answer, a stale
+                // format id and an unsolved challenge.
+                console.log(
+                    `[YouTube] download via ${preferred.label} | ` +
+                    `js-runtime=${describeJsRuntime(jsRuntime)} | format=${formatId || 'best'} | ` +
+                    `cookie-file=${preferred.extractorArgs && cookiePath && fs.existsSync(cookiePath) ? 'sent' : 'none'}`
+                );
             }
 
             if (cookiePath && fs.existsSync(cookiePath)) {
@@ -893,7 +902,10 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             // over a single un-chunked connection and crawl.
             args.push('--http-chunk-size', '10M');
 
-            console.log("Starting download with args:", args);
+            // Redacted: args[0] is the URL, which carries a signature and, for
+            // stories, the handle and story id. The rest is our own flags and is
+            // the part worth reading when a download misbehaves.
+            console.log("Starting download with args:", [redactUrlForLog(args[0]), ...args.slice(1)]);
             console.log("Saving to:", downloadPath);
 
             const jobHandle: ActiveJob = { cancelled: false };
@@ -1260,10 +1272,20 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             const audioExt = formatId === 'audio_wav' ? 'wav' : 'mp3';
             const audioQuality = formatId === 'audio_standard' ? '5' : formatId === 'audio_low' ? '9' : '0';
 
+            // The player used to be pinned to `tv_embedded` unconditionally. That client is
+            // only the right choice with an age-verified session: without cookies
+            // it is the embed player, and YouTube answers an embed player with
+            // no session by refusing outright ("Sign in to confirm your age").
+            // So a cookieless Spotify download could fail for a reason that had
+            // nothing to do with Spotify. Same rule as every other YouTube
+            // request: pin only when there are cookies.
+            const spotifyCookiePath = getCookiePath('youtube');
+            const spotifyClient = preferredYoutubeClient(fs.existsSync(spotifyCookiePath));
+            const spotifyJsRuntime = detectJsRuntime();
+
             const args = [
                 ytSearchUrl,
-                '--extractor-args', 'youtube:player_client=tv_embedded',
-                '--no-check-certificates',
+                ...(spotifyClient.extractorArgs ? ['--extractor-args', spotifyClient.extractorArgs[0]] : []),
                 '-x', '--audio-format', audioExt,
                 '-o', outputTemplate,
                 '--no-playlist',
@@ -1271,11 +1293,17 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 '--progress', '--newline',
                 '--concurrent-fragments', '16'
             ];
+            if (spotifyCookiePath && fs.existsSync(spotifyCookiePath)) {
+                args.push('--cookies', spotifyCookiePath);
+            }
+            console.log(
+                `[Spotify] YouTube match via ${spotifyClient.label} | ` +
+                `js-runtime=${describeJsRuntime(spotifyJsRuntime)} | format=${audioExt} ${audioQuality}`
+            );
 
             // WAV is uncompressed PCM, where an MP3 VBR digit means nothing.
             if (audioExt === 'mp3') args.push('--audio-quality', audioQuality);
 
-            const spotifyJsRuntime = detectJsRuntime();
             if (spotifyJsRuntime) args.splice(1, 0, '--js-runtimes', spotifyJsRuntime.flag);
 
             // Pass ffmpeg location to yt-dlp so it can find ffprobe/ffmpeg

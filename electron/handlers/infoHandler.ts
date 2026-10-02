@@ -4,16 +4,33 @@ import path from 'path';
 import { getYtDlpWrap } from '../utils/binaries';
 import { getCookiePath } from '../utils/paths';
 import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
-import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/platform';
+import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv, describeJsRuntime } from '../utils/platform';
 import { classifyExtractionError } from '../utils/errorMessage';
 import { buildSubtitleList } from '../utils/subtitles';
 import { buildAudioTrackList } from '../utils/audioTracks';
 import { fetchYouTubeMusicAlbumArt } from '../utils/youtubeMusic';
 import { parseStoryUrl, normalizeStoryInput, StoryError } from '../utils/instagramStories';
 import { fetchStoriesLocal } from '../utils/instagramStoriesLocal';
-import { youtubeClientAttempts, isClientSensitiveError } from '../utils/youtubeStrategy';
+import {
+    youtubeClientAttempts,
+    isClientSensitiveError,
+    inspectFormats,
+    isDegradedFormatList,
+    formatSummary
+} from '../utils/youtubeStrategy';
+import { redactUrlForLog } from '../utils/redact';
 import { getYtDlpVersion } from '../utils/binaries';
 import type { NormalizedStory } from '../utils/instagramStories';
+
+/**
+ * Wall-clock ceiling for one metadata extraction.
+ *
+ * Covers every client attempt of a single request in total, which is what the
+ * user experiences as "the app is thinking". It aborts the child process rather
+ * than abandoning the wait, so a stuck extraction cannot leave a yt-dlp running
+ * after the UI has given up.
+ */
+const EXTRACTION_TIMEOUT_MS = 60_000;
 
 /** Separators YouTube uses between artist names in a single credit string. */
 const ARTIST_SPLIT = /\s*(?:,|;|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\band\b)\s*/i;
@@ -190,16 +207,22 @@ export async function buildMetadataFromRaw(raw: any, url: string, isYoutube: boo
 
 export function registerInfoHandlers() {
     ipcMain.handle('get-video-info', async (event: any, url: any) => {
-        if (!url) return { success: false, error: "No URL provided" };
+        // Type first. Everything below calls `url.includes`, so a non-string
+        // from the renderer used to throw a TypeError here and surface as a
+        // generic failure, hiding the real cause (a bad argument, not the link).
+        if (typeof url !== 'string' || !url.trim()) {
+            return { success: false, error: "No URL provided" };
+        }
+        url = url.trim();
 
         // TikTok tracking params (is_from_webapp, sender_device) can cause
         // yt-dlp's webpage request to fail. The video ID lives in the path,
         // so strip all query params for TikTok video URLs.
-        if (typeof url === 'string' && url.includes('tiktok.com') && /\/video\/\d+/.test(url)) {
+        if (url.includes('tiktok.com') && /\/video\/\d+/.test(url)) {
             url = url.split('?')[0];
         }
 
-        console.log(`Fetching info for ${url}...`);
+        console.log(`Fetching info for ${redactUrlForLog(url)}...`);
 
         // Hoisted: the catch block needs to know whether cookies were actually
         // sent, so that a failure does not tell a user to add cookies again.
@@ -211,12 +234,17 @@ export function registerInfoHandlers() {
             const isRadioMix = url.includes('start_radio=1') || url.includes('list=RD') || url.includes('list=RDMM');
             const isRegularPlaylist = hasListParam && !isRadioMix && (url.includes('/playlist') || !url.includes('watch?v='));
 
+            // `--no-check-certificates` used to sit here. It disabled TLS
+            // verification for every site the app can open, to work around one
+            // machine's certificate problem - which is also what would let a
+            // proxy present a forged certificate unnoticed. A machine that
+            // cannot verify a site needs its trust store fixed, not the check
+            // turned off for everything, so it is gone.
             const args = [
                 url,
                 '--dump-single-json',
                 '--no-warnings',
-                '--socket-timeout', '30',
-                '--no-check-certificates'
+                '--socket-timeout', '30'
             ];
 
             // yt-dlp needs a JavaScript runtime to get past YouTube's challenges, and
@@ -421,7 +449,11 @@ export function registerInfoHandlers() {
                 args.push('--cookies', cookiePath);
                 sentCookies = true;
                 const platformName = isInstagram ? 'Instagram' : isFacebook ? 'Facebook' : isYoutube ? 'YouTube' : isTiktok ? 'TikTok' : 'Platform';
-                console.log(`Using custom cookies for ${platformName} (Path: ${cookiePath})`);
+                // "Cookie file found" and "cookies accepted" are different facts.
+                // Only the site can say the second one, so the log claims only the
+                // first, and a later failure that mentions a login wall is read
+                // against it rather than as a missing-cookie problem.
+                console.log(`Cookie file present for ${platformName} (Path: ${cookiePath}); whether ${platformName} accepts it is not known yet`);
             } else if (!cookiePath && fs.existsSync(path.join(app.getPath('userData'), 'cookies.txt'))) {
                 // Only fall back to legacy cookies.txt if strict platform cookies are NOT expected
                 // For generic sites, we can use legacy. For FB/Insta, we rely on their specific files.
@@ -456,6 +488,17 @@ export function registerInfoHandlers() {
             const hasCookies = sentCookies;
             const attempts = isYoutube ? youtubeClientAttempts(hasCookies) : [{ label: 'default', extractorArgs: null }];
 
+            // One retry is allowed for a *successful but degraded* answer, and
+            // only one. A second thin reply means the answer really is that thin,
+            // and looping here would turn a 2s fetch into an 8s one for every
+            // genuinely low-resolution video.
+            let degradedRetriesLeft = 1;
+
+            // One budget for the whole request, not per attempt. A user who
+            // clicked once waits at most this long however many players are
+            // tried; the remaining slice is what the next attempt gets.
+            const deadline = Date.now() + EXTRACTION_TIMEOUT_MS;
+
             let lastError: any;
             for (const attempt of attempts) {
                 const attemptArgs = attempt.extractorArgs
@@ -463,39 +506,93 @@ export function registerInfoHandlers() {
                     : args;
 
                 try {
-                    const ytDlpPromise = ytDlpWrap.execPromise(attemptArgs, { env: jsRuntimeEnv });
-                    const timeoutPromise = new Promise((_, reject) => {
-                        setTimeout(() => reject(new Error('Request timed out')), 60000);
-                    });
-
-                    const metadataString = await Promise.race([ytDlpPromise, timeoutPromise]) as string;
+                    // A real deadline. `Promise.race` against a bare timer - which
+                    // is what this used to be - stops the *wait* but not yt-dlp:
+                    // the process keeps running to its own conclusion, and its
+                    // timer stays armed for the full 60s on requests that finish
+                    // in one. An AbortSignal is wired to `taskkill /T /F` by
+                    // yt-dlp-wrap, so a timeout now ends the child too.
+                    const controller = new AbortController();
+                    let timedOut = false;
+                    const timer = setTimeout(() => {
+                        timedOut = true;
+                        controller.abort();
+                    }, Math.max(1000, deadline - Date.now()));
+                    let metadataString: string;
+                    try {
+                        metadataString = await ytDlpWrap.execPromise(attemptArgs, { env: jsRuntimeEnv }, controller.signal) as string;
+                    } catch (e: any) {
+                        // The abort kills the child, and the wrapper then rejects
+                        // with whatever partial stderr it collected. Report the
+                        // deadline instead, so the message is the one the
+                        // classifier already knows how to explain.
+                        if (timedOut) throw new Error('Request timed out');
+                        throw e;
+                    } finally {
+                        clearTimeout(timer);
+                    }
                     const raw = JSON.parse(metadataString);
 
-                    if (attempts.length > 1) {
-                        console.log(`YouTube extraction succeeded via ${attempt.label}`);
+                    // Judge the answer, not just the exit code. This is the line
+                    // that decides a "successful" 320p is not the end of the
+                    // story: see isDegradedFormatList for why these rules are
+                    // narrow, and why a video that simply tops out below 1080p
+                    // is left alone.
+                    const inspection = inspectFormats(raw);
+                    const isLast = attempt === attempts[attempts.length - 1];
+                    if (isYoutube && isDegradedFormatList(inspection)) {
+                        console.warn(
+                            `[YouTube] ${attempt.label} returned a thin format list: ${formatSummary(inspection)} ` +
+                            `(runtime: ${describeJsRuntime(jsRuntime)})`
+                        );
+                        if (!isLast && degradedRetriesLeft > 0) {
+                            degradedRetriesLeft--;
+                            console.log(`[YouTube] Trying the next player for a better format list (${degradedRetriesLeft} such retry left)...`);
+                            continue;
+                        }
+                        // Out of retries, or nothing left to try. Say so in the
+                        // log, because this is the answer to "why was my video
+                        // only 360p": the platform gave us this list.
+                        console.warn(`[YouTube] Keeping the thin format list from ${attempt.label}: ${formatSummary(inspection)}`);
+                    } else if (isYoutube && attempts.length > 1) {
+                        console.log(`[YouTube] Extraction succeeded via ${attempt.label}: ${formatSummary(inspection)}`);
                     }
 
                     const { metadata } = await buildMetadataFromRaw(raw, url, isYoutube);
                     return { success: true, metadata };
                 } catch (e: any) {
                     lastError = e;
-                    console.warn(`YouTube extraction failed via ${attempt.label}:`, String(e?.message || e).split('\n')[0]);
+                    // stderr carries the reason the player was refused; `message`
+                    // is often just "ERROR: unable to extract video data".
+                    console.warn(
+                        `Extraction failed via ${attempt.label}: ` +
+                        `${String(e?.stderr || e?.message || e).trim().split('\n')[0]}`
+                    );
 
                     const isLast = attempt === attempts[attempts.length - 1];
                     if (isLast || !isClientSensitiveError(e)) throw e;
-                    console.log('Retrying YouTube extraction with a different player...');
+                    console.log('Retrying extraction with a different player...');
                 }
             }
 
             throw lastError;
-        } catch (e: any) {
-            console.error("Info fetch error:", e);
+} catch (e: any) {
+            // The whole error object is not logged: yt-dlp embeds the URL it was
+            // given in its message, and these lines end up in pasted bug reports.
+            console.error(`Info fetch error (${String(e?.message || e).split('\n')[0]})`);
 
             // `hasCookies` matters: without it every age/login failure says "add
             // cookies", which is useless advice for a user who already did, and
             // actively wrong when YouTube's bot wall was reported as an age
             // gate.
-            const classified = classifyExtractionError(e.message || e.stderr || String(e), url, {
+            //
+            // Both `message` and `stderr` go in, rather than the first one that
+            // exists. yt-dlp puts the actual refusal ("Sign in to confirm your
+            // age", "HTTP Error 429") on stderr while `message` stays a generic
+            // "unable to extract video data", so preferring the message
+            // classified every failure as the same unknown thing.
+            const rawFailureText = [e?.stderr, e?.message].filter(Boolean).join('\n') || String(e);
+            const classified = classifyExtractionError(rawFailureText, url, {
                 hasCookies: sentCookies
             });
 
@@ -508,8 +605,10 @@ export function registerInfoHandlers() {
                 ytdlpVersion = await getYtDlpVersion();
             } catch { /* the binary may be the thing that is broken */ }
             console.warn(
-                `Extraction failed (${classified.kind}) | url=${url} | yt-dlp=${ytdlpVersion || 'unknown'} | ` +
-                `cookies=${sentCookies ? 'yes' : 'no'} | ${String(e).split('\n')[0]}`
+                `Extraction failed (${classified.kind}) | url=${redactUrlForLog(url)} | ` +
+                `yt-dlp=${ytdlpVersion || 'unknown'} | js-runtime=${describeJsRuntime(detectJsRuntime())} | ` +
+                // "file sent", not "accepted": the site never tells us.
+                `cookie-file=${sentCookies ? 'sent' : 'none'} | ${String(rawFailureText).trim().split('\n')[0]}`
             );
 
             // A stale yt-dlp is the usual cause of bot-protection failures, so
