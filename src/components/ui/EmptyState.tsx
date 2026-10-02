@@ -7,11 +7,9 @@ import {
     Clipboard,
     Youtube,
     Instagram,
-    Facebook,
-    Twitter,
-    Pin
+    Facebook
 } from 'lucide-react';
-import { FaSpotify, FaTiktok, FaSoundcloud, FaTwitch } from 'react-icons/fa6';
+import { FaSpotify, FaTiktok, FaSoundcloud, FaTwitch, FaPinterest, FaXTwitter } from 'react-icons/fa6';
 
 interface EmptyStateProps {
     currentPlatform: {
@@ -71,7 +69,9 @@ const EmptyState: React.FC<EmptyStateProps> = memo(({ currentPlatform, hasCookie
             title: 'X Downloader',
             subtitle: 'Videos & Photos',
             features: ['🎬 4K Video', '🖼️ HD Photos', '🏃 Fast Sync', '📂 GIFs'],
-            icon: <Twitter className="w-12 h-12" />,
+            // The X mark from the same brand set the platform picker uses, not
+            // lucide's `Twitter`, which still draws the old bird.
+            icon: <FaXTwitter className="w-12 h-12" />,
             color: '#FFFFFF'
         },
         twitch: {
@@ -85,7 +85,10 @@ const EmptyState: React.FC<EmptyStateProps> = memo(({ currentPlatform, hasCookie
             title: 'Pinterest Downloader',
             subtitle: 'Pins & Videos',
             features: ['📌 Pins', '🎬 Videos', '🖼️ HD', '🎨 Save'],
-            icon: <Pin className="w-12 h-12" />,
+            // The round brand badge, not lucide's `Pin` (a thumbtack) and not
+            // `FaPinterestP` (the bare "P"), so it matches the circular marks
+            // the other platforms use here.
+            icon: <FaPinterest className="w-12 h-12" />,
             color: '#E60023'
         }
     }), []);

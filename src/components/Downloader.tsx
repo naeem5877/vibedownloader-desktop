@@ -1,7 +1,7 @@
-﻿import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions, Loader2
 } from 'lucide-react';
 import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
 import { Settings } from './Settings';
@@ -278,7 +278,7 @@ const PlaylistItem = memo(({
             <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate" title={entry.title}>{entry.title}</p>
                 <p className="text-xs text-white/40">
-                    {entry.artist && <span>{entry.artist} â€¢ </span>}
+                    {entry.artist && <span>{entry.artist} • </span>}
                     {formatDuration(entry.duration)}
                 </p>
             </div>
@@ -381,7 +381,7 @@ const BatchQueueItem = memo(({
                     </div>
                     <div className="flex items-center gap-3 text-xs">
                         <p className="text-white/40 truncate max-w-[200px]">{item.url}</p>
-                        {item.error && <span className="text-red-400 truncate max-w-[150px]">â€¢ {item.error}</span>}
+                        {item.error && <span className="text-red-400 truncate max-w-[150px]">• {item.error}</span>}
                     </div>
 
                     {/* Progress Bar (Slim) */}
@@ -397,7 +397,7 @@ const BatchQueueItem = memo(({
                                 <span>{item.speed && item.speed !== '...' ? item.speed : 'Downloading...'}</span>
                                 <div className="flex items-center gap-2">
                                     {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
-                                    {item.eta && item.eta !== '...' && <span>â€¢ {item.eta} left</span>}
+                                    {item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
                                 </div>
                             </div>
                         </>
@@ -492,6 +492,7 @@ const FetchTimer = memo(({ start, elapsed, failed }: { start: number | null; ela
 FetchTimer.displayName = 'FetchTimer';
 
 // One selectable caption language. Memoized because the picker can render
+// One selectable caption language. Memoized because the picker can render
 // 150+ of these and a search keystroke would otherwise re-render every row.
 const SubtitleChoice = memo(({
     track,
@@ -504,39 +505,134 @@ const SubtitleChoice = memo(({
     disabled: boolean;
     onPick: () => void;
 }) => (
-    // A dense single-line row: this list can be 150+ entries long, so every
-    // pixel of height spent on icons and padding is scrolling the user has to
-    // undo. The language code doubles as the identity and the scan anchor.
     <button
         onClick={onPick}
         disabled={disabled}
         aria-pressed={active}
-        className={`group relative w-full flex items-center gap-2.5 h-9 pl-3 pr-2.5 text-left transition
-            ${active ? 'bg-blue-500/15' : 'hover:bg-white/[0.04]'}`}
+        className={`group relative w-full flex items-center gap-3 h-10 px-3 text-left transition-all duration-150 cursor-pointer
+            ${active
+                ? 'bg-gradient-to-r from-blue-500/20 via-blue-500/10 to-transparent border-l-2 border-blue-400 text-white font-medium'
+                : 'hover:bg-white/[0.05] text-white/80'}`}
     >
-        {active && <span className="absolute left-0 inset-y-0 w-[2px] bg-blue-400" />}
-        <span className={`w-10 shrink-0 text-center text-[10px] font-semibold uppercase tracking-wide rounded py-[3px] transition
-            ${active ? 'bg-blue-500/25 text-blue-200' : 'bg-white/[0.06] text-white/45 group-hover:text-white/70'}`}>
+        <span className={`w-11 shrink-0 text-center text-[10px] font-mono font-bold uppercase tracking-wider rounded-md py-1 border transition
+            ${active
+                ? 'bg-blue-500/30 border-blue-400/40 text-blue-200 shadow-sm'
+                : 'bg-white/[0.05] border-white/10 text-white/50 group-hover:text-white/80 group-hover:border-white/20'}`}>
             {track.lang}
         </span>
-        <span className={`text-[13px] truncate flex-1 ${active ? 'text-white' : 'text-white/80'}`}>
+        <span className="text-[13px] truncate flex-1 leading-none">
             {track.langLabel}
         </span>
-        {track.isAuto && (
-            <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-white/30 transition group-hover:text-white/50">
+        {!track.isAuto ? (
+            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                Creator
+            </span>
+        ) : (
+            <span className="shrink-0 text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/[0.04] text-white/30 group-hover:text-white/50">
                 Auto
             </span>
         )}
-        <span className="w-3.5 shrink-0 flex items-center justify-center">
-            {active && <Check className="w-3.5 h-3.5 text-blue-400" />}
-        </span>
+        <div className="w-5 h-5 shrink-0 flex items-center justify-center">
+            {active ? (
+                <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center text-white shadow-sm shadow-blue-500/50">
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                </div>
+            ) : (
+                <div className="w-4 h-4 rounded-full border border-white/15 group-hover:border-white/35 transition-colors" />
+            )}
+        </div>
     </button>
 ));
 SubtitleChoice.displayName = 'SubtitleChoice';
 
-// One audio language. Same row shape as SubtitleChoice so the two pickers read
-// as one control, with the codec and bitrate that will actually be downloaded
-// shown instead of the auto/generated badge captions carry.
+// Two of these sit on the same screen and mean different things, so the shape
+// and the colour are part of the label: captions are a wide blue card, the
+// audio language is a slim emerald strip. Sharing only the chevron keeps the
+// "tap to expand" affordance identical without making the two look alike.
+const TOGGLE_TONE = {
+    blue: {
+        open: 'bg-gradient-to-r from-blue-950/30 via-black/40 to-black/60 border-blue-500/30 shadow-blue-950/20',
+        badge: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+        chip: 'bg-blue-500/20 text-blue-300',
+    },
+    emerald: {
+        open: 'bg-gradient-to-r from-emerald-950/30 via-black/40 to-black/60 border-emerald-500/30 shadow-emerald-950/20',
+        badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        chip: 'bg-emerald-500/20 text-emerald-300',
+    },
+} as const;
+
+/**
+ * A collapsed summary row that expands into a track picker.
+ */
+function SectionToggle({
+    open,
+    onToggle,
+    icon,
+    title,
+    meta,
+    badge,
+    accent = 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+    tone = 'blue',
+    variant = 'card',
+}: {
+    open: boolean;
+    onToggle: () => void;
+    icon: React.ReactNode;
+    title: string;
+    meta?: string;
+    badge?: string;
+    accent?: string;
+    tone?: keyof typeof TOGGLE_TONE;
+    variant?: 'card' | 'compact';
+}) {
+    const palette = TOGGLE_TONE[tone];
+    const compact = variant === 'compact';
+
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            className={`w-full flex items-center justify-between gap-3 ${compact ? 'rounded-xl px-3.5 py-2' : 'rounded-2xl px-4 py-3'} border transition-all duration-200 text-left cursor-pointer group shadow-sm ${
+                open ? palette.open : 'bg-white/[0.02] border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
+            }`}
+        >
+            <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'} min-w-0 flex-1`}>
+                <div className={`${compact ? 'w-6 h-6 rounded-lg' : 'w-9 h-9 rounded-xl'} ${accent} flex items-center justify-center shadow-sm shrink-0 group-hover:scale-105 transition-transform`}>
+                    {icon}
+                </div>
+                {compact ? (
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-white/70 shrink-0">{title}</span>
+                        <span className="w-px h-3 bg-white/10 shrink-0" />
+                        {meta && <p className="text-[11px] text-white/45 truncate">{meta}</p>}
+                    </div>
+                ) : (
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-white tracking-wide">{title}</span>
+                            {badge && (
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${palette.badge} whitespace-nowrap`}>
+                                    {badge}
+                                </span>
+                            )}
+                        </div>
+                        {meta && <p className="text-[11px] text-white/45 truncate mt-0.5">{meta}</p>}
+                    </div>
+                )}
+            </div>
+            <div className={`${compact ? 'w-5 h-5' : 'w-7 h-7'} ${compact ? 'rounded-md' : 'rounded-lg'} flex items-center justify-center transition-all ${open ? `${palette.chip} rotate-90` : 'text-white/40 group-hover:text-white/70'}`}>
+                <ChevronRight className={`${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} transition-transform duration-200`} />
+            </div>
+        </button>
+    );
+}
+
+// One audio language. Same row shape as SubtitleChoice so the two lists stay
+// easy to scan, but keyed to emerald where the caption rows are blue, and it
+// shows the codec and bitrate that will actually be downloaded instead of the
+// auto/generated badge captions carry.
 const AudioTrackChoice = memo(({
     track,
     active,
@@ -552,28 +648,37 @@ const AudioTrackChoice = memo(({
         onClick={onPick}
         disabled={disabled}
         aria-pressed={active}
-        className={`group relative w-full flex items-center gap-2.5 h-9 pl-3 pr-2.5 text-left transition
-            ${active ? 'bg-emerald-500/15' : 'hover:bg-white/[0.04]'}`}
+        className={`group relative w-full flex items-center gap-3 h-10 px-3.5 text-left transition-all duration-150 cursor-pointer
+            ${active
+                ? 'bg-gradient-to-r from-emerald-500/20 via-emerald-500/10 to-transparent border-l-2 border-emerald-400 text-white font-medium'
+                : 'hover:bg-white/[0.05] text-white/80'}`}
     >
-        {active && <span className="absolute left-0 inset-y-0 w-[2px] bg-emerald-400" />}
-        <span className={`w-12 shrink-0 text-center text-[10px] font-semibold uppercase tracking-wide rounded py-[3px] transition
-            ${active ? 'bg-emerald-500/25 text-emerald-200' : 'bg-white/[0.06] text-white/45 group-hover:text-white/70'}`}>
+        <span className={`w-12 shrink-0 text-center text-[10px] font-mono font-bold uppercase tracking-wider rounded-md py-1 border transition
+            ${active
+                ? 'bg-emerald-500/30 border-emerald-400/40 text-emerald-200 shadow-sm'
+                : 'bg-white/[0.05] border-white/10 text-white/50 group-hover:text-white/80 group-hover:border-white/20'}`}>
             {track.lang.split('-')[0]}
         </span>
-        <span className={`text-[13px] truncate flex-1 ${active ? 'text-white' : 'text-white/80'}`}>
+        <span className="text-[13px] truncate flex-1 leading-none">
             {track.langLabel}
         </span>
         {track.isOriginal && (
-            <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-white/30 transition group-hover:text-white/50">
+            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 Original
             </span>
         )}
-        <span className="shrink-0 text-[10px] tabular-nums text-white/25 transition group-hover:text-white/45">
-            {track.abr ? `${track.abr}k` : track.ext}
+        <span className="shrink-0 text-[10px] font-mono font-medium text-white/40 group-hover:text-white/60">
+            {track.abr ? `${track.abr}kbps` : track.ext?.toUpperCase()}
         </span>
-        <span className="w-3.5 shrink-0 flex items-center justify-center">
-            {active && <Check className="w-3.5 h-3.5 text-emerald-400" />}
-        </span>
+        <div className="w-5 h-5 shrink-0 flex items-center justify-center">
+            {active ? (
+                <div className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-sm shadow-emerald-500/50">
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                </div>
+            ) : (
+                <div className="w-4 h-4 rounded-full border border-white/15 group-hover:border-white/35 transition-colors" />
+            )}
+        </div>
     </button>
 ));
 AudioTrackChoice.displayName = 'AudioTrackChoice';
@@ -616,6 +721,10 @@ export function Downloader() {
     const [subtitleKey, setSubtitleKey] = useState<string | null>(null);
     const [subtitleFormat, setSubtitleFormat] = useState<'srt' | 'vtt'>('srt');
     const [subtitleSearch, setSubtitleSearch] = useState('');
+    const [subtitleFilter, setSubtitleFilter] = useState<'all' | 'creator' | 'auto'>('all');
+    // Starts closed. The picker sits above the download options, so an expanded
+    // panel would push the formats the user opened the result for off-screen.
+    const [tracksOpen, setTracksOpen] = useState(false);
     // A caption download is its own action with its own outcome, so it gets its
     // own status rather than borrowing the media download's progress or error.
     const [subtitleDownloading, setSubtitleDownloading] = useState(false);
@@ -626,11 +735,16 @@ export function Downloader() {
     // which is the signal LyricsPanel uses to render nothing at all - a track
     // with no lyrics must not leave an empty box behind.
     const [lyrics, setLyrics] = useState<LyricsData | null>(null);
+    const [lyricsLoading, setLyricsLoading] = useState(false);
 
     // Audio language choice. Only dubbed videos offer a choice at all, and the
     // selection applies to both audio-only downloads and the audio muxed into a
     // video, so it is held here once and read by both paths.
     const [audioTrackKey, setAudioTrackKey] = useState<string | null>(null);
+    // Starts closed, like the caption picker. A dubbed video's language list
+    // sits above the download formats, so leaving it open pushes the formats
+    // the user actually came for off-screen.
+    const [audioLangOpen, setAudioLangOpen] = useState(false);
 
     const audioTracks = useMemo<AudioTrack[]>(
         () => ((metadata as any)?.audioTracks as AudioTrack[]) || [],
@@ -645,6 +759,12 @@ export function Downloader() {
         () => audioTracks.find((t) => t.key === audioTrackKey) || null,
         [audioTracks, audioTrackKey]
     );
+
+    // The chosen language has to stay readable while the list is folded, since
+    // folding it hides the row that was picked.
+    const audioLangMeta = selectedAudioTrack
+        ? `${selectedAudioTrack.langLabel || selectedAudioTrack.lang}${selectedAudioTrack.isOriginal ? ' · original' : ''} · ${audioTracks.length} tracks`
+        : `${audioTracks.length} audio tracks`;
 
     // Default to the language the video was recorded in. The owning video id is
     // remembered separately because a fetch clears metadata before it starts, so
@@ -674,14 +794,16 @@ export function Downloader() {
         [metadata]
     );
 
-    // A typical video publishes well over a hundred languages, so the picker
-    // filters on both the language name and its raw code.
+    // Filter on language name/code as well as creator vs auto category
     const subtitleVisibleTracks = useMemo(() => {
         const q = subtitleSearch.trim().toLowerCase();
-        const matches = (t: SubtitleTrack) =>
-            !q || t.langLabel.toLowerCase().includes(q) || t.lang.toLowerCase().includes(q);
-        return subtitleTracks.filter(matches);
-    }, [subtitleTracks, subtitleSearch]);
+        return subtitleTracks.filter((t) => {
+            if (subtitleFilter === 'creator' && t.isAuto) return false;
+            if (subtitleFilter === 'auto' && !t.isAuto) return false;
+            if (!q) return true;
+            return t.langLabel.toLowerCase().includes(q) || t.lang.toLowerCase().includes(q);
+        });
+    }, [subtitleTracks, subtitleSearch, subtitleFilter]);
 
     const subtitleAuthored = useMemo(
         () => subtitleVisibleTracks.filter((t) => !t.isAuto),
@@ -697,12 +819,12 @@ export function Downloader() {
     // max-height alone collapses this to its borders and 159 rows vanish. The
     // height is therefore derived from the real row and header sizes, which
     // also lets a two-track video stay short.
-    const SUBTITLE_ROW_H = 36;
-    const SUBTITLE_GROUP_H = 28;
+    const SUBTITLE_ROW_H = 40;
+    const SUBTITLE_GROUP_H = 32;
     const subtitleListHeight = useMemo(() => {
         const groups = (subtitleAuthored.length ? 1 : 0) + (subtitleAutomatic.length ? 1 : 0);
         const natural = subtitleVisibleTracks.length * SUBTITLE_ROW_H + groups * SUBTITLE_GROUP_H;
-        return Math.min(264, natural);
+        return Math.min(320, natural);
     }, [subtitleVisibleTracks.length, subtitleAuthored.length, subtitleAutomatic.length]);
 
     // A track is only offered if the format we would ask for is actually
@@ -735,6 +857,24 @@ export function Downloader() {
         setSubtitleNotice(null);
     }, []);
 
+    // Auto-select English or top subtitle track if available and none selected
+    useEffect(() => {
+        if (!subtitleTracks.length) {
+            setSubtitleKey(null);
+            return;
+        }
+        if (!subtitleKey || !subtitleTracks.some((t) => t.key === subtitleKey)) {
+            const bestDefault =
+                subtitleTracks.find((t) => !t.isAuto && t.lang.toLowerCase().startsWith('en')) ||
+                subtitleTracks.find((t) => t.lang.toLowerCase().startsWith('en')) ||
+                subtitleTracks.find((t) => !t.isAuto) ||
+                subtitleTracks[0];
+            if (bestDefault) {
+                setSubtitleKey(bestDefault.key);
+            }
+        }
+    }, [subtitleTracks, subtitleKey]);
+
     const isSpotify = currentPlatform.id === 'spotify';
 
     // Whether the loaded item is a music track. Spotify is always one; YouTube
@@ -748,7 +888,7 @@ export function Downloader() {
     // user has already navigated away from cannot overwrite the current one.
     const lyricsTarget = useMemo(() => {
         const m = metadata as any;
-        if (!m || !isMusicTrack) return null;
+        if (!m) return null;
 
         // A live stream has no end, so it has no track to match lyrics against.
         if (m.isLive) return null;
@@ -757,45 +897,39 @@ export function Downloader() {
         // A `-Topic` suffixed uploader names the artist plus a marker, it is not
         // a collaboration, so the marker is stripped before matching.
         const artist = String(m.artist || m.uploader || '')
-            .replace(/\s*-\s*Topic\s*$/i, '')
+            .replace(/\s*[–—-]\s*Topic\s*$/i, '')
             .trim();
 
-        // A lyric search needs both halves. Without an artist name the match
-        // would be loose enough to return the wrong song.
-        if (!title || !artist) return null;
+        if (!title) return null;
+        if (!artist && !title.includes(' - ') && !title.includes(' – ')) return null;
 
-        return { id: `${m.id}|${title}|${artist}`, title, artist, duration: m.duration };
-    }, [metadata, isMusicTrack]);
+        return { id: `${m.id}|${title}|${artist}`, title, artist: artist || title, duration: m.duration };
+    }, [metadata]);
 
     useEffect(() => {
-        // Cleared first so the previous track's lyrics disappear as soon as the
-        // new one loads rather than lingering over it.
         setLyrics(null);
-        if (!lyricsTarget) return;
-
+        if (!lyricsTarget) {
+            console.log('[Lyrics] No target, skipping. metadata title=', (metadata as any)?.title);
+            setLyricsLoading(false);
+            return;
+        }
+        console.log('[Lyrics] Fetching for:', lyricsTarget.title, '/', lyricsTarget.artist);
         let cancelled = false;
+        setLyricsLoading(true);
         window.electron
-            .getLyrics({
-                title: lyricsTarget.title,
-                artist: lyricsTarget.artist,
-                duration: lyricsTarget.duration,
-                isMusic: true
-            })
+            .getLyrics({ title: lyricsTarget.title, artist: lyricsTarget.artist, duration: lyricsTarget.duration, isMusic: true })
             .then((result) => {
-                if (cancelled || !result) return;
-                // No cast: the preload's declared return type is deliberately
-                // precise, so the compiler checks this assignment against the
-                // shape the panel actually renders.
-                //
-                // `title`/`artist` on the result are the strings that matched,
-                // so they are normalized; `displayTitle`/`displayArtist` are
-                // cleaned for a human. Both are already set here by the main
-                // process - the renderer must not substitute the raw upload
-                // title, which carries the credits and channel.
+                console.log('[Lyrics] Result:', result ? result.title + ' / ' + result.artist : 'null', 'cancelled=', cancelled);
+                if (cancelled) return;
+                setLyricsLoading(false);
+                if (!result) { console.warn('[Lyrics] No match found'); return; }
                 setLyrics({ ...result, duration: lyricsTarget.duration });
+                console.log('[Lyrics] Set! synced=', result.synced?.length, 'plain=', !!result.plain);
             })
-            .catch((e) => console.warn('Lyrics lookup failed:', e?.message || e));
-
+            .catch((e) => {
+                console.error('[Lyrics] Error:', e?.message || e);
+                if (!cancelled) setLyricsLoading(false);
+            });
         return () => { cancelled = true; };
     }, [lyricsTarget]);
 
@@ -1316,6 +1450,7 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                 setSubtitleKey(null);
                 setSubtitleSearch('');
                 setSubtitleNotice(null);
+                setTracksOpen(false);
 
                 // Show the result first, then swap in the proxied thumbnail when
                 // it lands. Awaiting the proxy used to add 100-600ms of dead time
@@ -1464,8 +1599,10 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
         setCutEnd(e);
     }, []);
 
-    // Spotify track download (via YouTube)
-    const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string, playlistTitle?: string, externalThumbnail?: string) => {
+    // Spotify track download (via YouTube). The format id decides the container
+    // and bitrate the matched YouTube stream is converted to, and defaults to
+    // the 320k MP3 that playlist rows and the queue have always sent.
+    const handleSpotifyDownload = useCallback(async (searchQuery: string, title: string, artist: string, itemId?: string, playlistTitle?: string, externalThumbnail?: string, formatId: 'audio_wav' | 'audio_best' | 'audio_standard' | 'audio_low' = 'audio_best') => {
         if (downloading) return;
 
         setDownloading(true);
@@ -1479,7 +1616,8 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                 title,
                 artist,
                 thumbnail: externalThumbnail || metadata?.thumbnail,
-                playlistTitle
+                playlistTitle,
+                formatId
             });
         } catch (err: any) {
             setError(err.message);
@@ -1489,8 +1627,8 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
         }
     }, [downloading, metadata]);
 
-    // Listen for Spotify search from browser extension (title/artist â†’ YouTube download).
-    // NOTE: this does NOT auto-start the download â€” it opens the app and shows the
+    // Listen for Spotify search from browser extension (title/artist → YouTube download).
+    // NOTE: this does NOT auto-start the download → it opens the app and shows the
     // track card (like the URL flow) so the user clicks the Download button manually.
     useEffect(() => {
         const handler = (data: { searchQuery: string; title: string; artist: string; thumbnail: string }) => {
@@ -1670,6 +1808,18 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
     const isStory = hasEntries && metadata?.contentType === 'story';
     const isLive = !hasEntries && !!metadata?.isLive && metadata.duration === 0;
 
+    // Subtitle tracks are hidden for music tracks (pure audio or music videos):
+    // YouTube auto-generates captions from the vocal which read worse than the
+    // lyrics panel, so showing both only splits attention. Live streams have no
+    // static caption list to speak of.
+    const hasTracksPanel = !isLive && !isMusicTrack && subtitleTracks.length > 0;
+
+    // Summary for the collapsed subtitle row: the current pick if there is one,
+    // otherwise the shape of what is on offer.
+    const tracksMeta = subtitleSelection
+        ? `${subtitleSelection.langLabel || subtitleSelection.lang} · ${subtitleFormat.toUpperCase()}`
+        : `${subtitleTracks.length} language${subtitleTracks.length === 1 ? '' : 's'} · ${subtitleTracks.filter((t) => !t.isAuto).length} by creator · ${subtitleTracks.filter((t) => t.isAuto).length} auto`;
+
     // Bulk download (Playlist)
     const handleBulkDownload = async (type: 'video' | 'audio_best' | 'audio_standard' | 'audio_low') => {
         if (downloading || selectedItems.size === 0) return;
@@ -1694,6 +1844,8 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                 // Pass the playlist title to organize files into a subfolder
                 const playlistTitle = metadata?.title;
 
+                // A chosen bulk bitrate has to reach the Spotify path, which converts the
+                // matched stream itself instead of going through downloadVideo.
                 if (isSpotify) {
                     await window.electron.downloadSpotifyTrack({
                         searchQuery: item.searchQuery || `${item.title} ${item.artist || ''}`,
@@ -1701,7 +1853,8 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                         artist: item.artist || '',
                         thumbnail: item.thumbnail,
                         playlistTitle, // This will create the /playlists/{title}/ folder
-                        suppressNotifications: true
+                        suppressNotifications: true,
+                        formatId: (formatId === 'best' ? 'audio_best' : formatId) as 'audio_wav' | 'audio_best' | 'audio_standard' | 'audio_low'
                     });
                 } else {
                     await window.electron.downloadVideo({
@@ -1814,7 +1967,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                     </h1>
                     <p className="text-white/40">
                         Download from {currentPlatform.name}
-                        {isSpotify && <span className="text-green-400 text-xs ml-2">â€¢ via YouTube</span>}
+                        {isSpotify && <span className="text-green-400 text-xs ml-2">• via YouTube</span>}
                     </p>
                 </div>
 
@@ -2239,7 +2392,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                     </p>
                                                     <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
                                                         {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
-                                                        {progress?.eta && progress.eta !== '...' && <span>â€¢ {progress.eta} left</span>}
+                                                        {progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
                                                     </div>
                                                 </div>
                                             </>
@@ -2281,23 +2434,321 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                 </div>
                             </div>
 
+                            {/* Lyrics and subtitle tracks sit above the download
+                                options, each folded to a single row. They are the
+                                reason to come back to a result after the file is
+                                already saved, not the reason to open one, so neither
+                                takes space until asked. */}
+                            <div className="grid gap-2 mb-4">
+                                {lyricsLoading && (
+                                    <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-200 text-xs backdrop-blur-md animate-pulse">
+                                        <Loader2 className="w-4 h-4 animate-spin text-purple-400 shrink-0" />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-semibold text-purple-200">Finding synchronized lyrics...</p>
+                                            <p className="text-[10px] text-purple-300/60 truncate">Looking up LRCLIB &amp; NetEase</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {lyrics && <LyricsPanel lyrics={lyrics} defaultCollapsed={false} />}
+                                {hasTracksPanel && (
+                                    <SectionToggle
+                                        open={tracksOpen}
+                                        onToggle={() => setTracksOpen((v) => !v)}
+                                        icon={<Captions className="w-4 h-4" />}
+                                        title="Subtitles"
+                                        meta={tracksMeta}
+                                        accent="bg-blue-500/20"
+                                    />
+                                )}
+                                {/* Subtitle picker body. It lives with its header so
+                                    expanding the card grows the list downward from
+                                    here, instead of dropping it to the bottom of
+                                    the download options. */}
+                                {hasTracksPanel && tracksOpen && (
+                                    <div>
+                                        <div data-subtitle-panel className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+                                            <div className="p-2.5">
+                                                <div className="relative">
+                                                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+                                                    <input
+                                                        type="text"
+                                                        value={subtitleSearch}
+                                                        onChange={(e) => setSubtitleSearch(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' && subtitleVisibleTracks.length) {
+                                                                pickSubtitle(subtitleVisibleTracks[0].key);
+                                                            } else if (e.key === 'Escape') {
+                                                                setSubtitleSearch('');
+                                                            }
+                                                        }}
+                                                        placeholder={`Search ${subtitleTracks.length} languages...`}
+                                                        disabled={downloading}
+                                                        className="w-full h-9 pl-9 pr-9 rounded-lg bg-white/5 border border-white/10 text-white text-[13px] placeholder-white/25 outline-none transition focus:border-blue-400/40 focus:bg-white/[0.07] disabled:opacity-50"
+                                                    />
+                                                    {subtitleSearch && (
+                                                        <button
+                                                            onClick={() => setSubtitleSearch('')}
+                                                            aria-label="Clear language search"
+                                                            className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition"
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[10px] text-white/35">
+                                                    <span className="truncate">
+                                                        {subtitleSearch.trim()
+                                                            ? `${subtitleVisibleTracks.length} of ${subtitleTracks.length} languages`
+                                                            : `${subtitleTracks.filter((t) => !t.isAuto).length} by creator · ${subtitleTracks.filter((t) => t.isAuto).length} auto-generated`}
+                                                    </span>
+                                                    {subtitleSearch.trim() && subtitleVisibleTracks.length === 0 && (
+                                                        <span className="shrink-0 text-white/50">No match</span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Deliberately not .smooth-scroll: that class
+                                                sets content-visibility: auto, which
+                                                lets Chromium skip the offscreen rows
+                                                while the group headers inside are
+                                                position: sticky. The list is long
+                                                enough that keeping it rendered is
+                                                cheaper than debugging sticky
+                                                headers that land in the wrong place. */}
+                                            <div
+                                                data-subtitle-list
+                                                className="overflow-y-auto custom-scrollbar border-y border-white/10 bg-[#0d0d0f]"
+                                                // With no visible rows there is nothing to cap,
+                                                // and a derived height of 0 would clip the
+                                                // empty-state message, so let the message size
+                                                // the box instead.
+                                                style={{ height: subtitleVisibleTracks.length > 0 ? subtitleListHeight : undefined }}
+                                            >
+                                                {subtitleVisibleTracks.length === 0 ? (
+                                                    <p className="px-4 py-10 text-center text-xs text-white/40">
+                                                        {subtitleSearch.trim()
+                                                            ? <>No language matches &ldquo;{subtitleSearch.trim()}&rdquo;.</>
+                                                            : <>No track offers a {subtitleFormat.toUpperCase()} file.</>}
+                                                    </p>
+                                                ) : (
+                                                    <>
+                                                        {subtitleAuthored.length > 0 && (
+                                                            <div>
+                                                                <div className="sticky top-0 z-10 flex items-center gap-2 h-7 px-3 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-white/[0.06]">
+                                                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">By creator</span>
+                                                                    <span className="text-[10px] text-white/25">{subtitleAuthored.length}</span>
+                                                                </div>
+                                                                <div className="divide-y divide-white/[0.04]">
+                                                                    {subtitleAuthored.map((t) => (
+                                                                        <SubtitleChoice
+                                                                            key={t.key}
+                                                                            track={t}
+                                                                            active={subtitleKey === t.key}
+                                                                            disabled={downloading}
+                                                                            onPick={() => pickSubtitle(subtitleKey === t.key ? null : t.key)}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {subtitleAutomatic.length > 0 && (
+                                                            <div>
+                                                                <div className="sticky top-0 z-10 flex items-center gap-2 h-7 px-3 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-white/[0.06]">
+                                                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-white/45">Auto-generated &amp; translated</span>
+                                                                    <span className="text-[10px] text-white/25">{subtitleAutomatic.length}</span>
+                                                                </div>
+                                                                <div className="divide-y divide-white/[0.04]">
+                                                                    {subtitleAutomatic.map((t) => (
+                                                                        <SubtitleChoice
+                                                                            key={t.key}
+                                                                            track={t}
+                                                                            active={subtitleKey === t.key}
+                                                                            disabled={downloading}
+                                                                            onPick={() => pickSubtitle(subtitleKey === t.key ? null : t.key)}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            {/* Pinned action bar. It is always present at a
+                                                fixed height, so choosing a
+                                                language never reflows the
+                                                page under the pointer. */}
+                                            <div className="p-2.5">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`flex h-10 p-0.5 rounded-lg bg-white/5 border border-white/10 transition-opacity ${subtitleSelection ? '' : 'opacity-40'}`}>
+                                                        {(['srt', 'vtt'] as const).map((fmt) => (
+                                                            <button
+                                                                key={fmt}
+                                                                onClick={() => pickSubtitleFormat(fmt)}
+                                                                disabled={!subtitleSelection || subtitleDownloading}
+                                                                title={fmt === 'srt' ? 'Converted to SRT with FFmpeg' : 'Saved exactly as published'}
+                                                                className={`h-full px-3 rounded-md text-xs font-medium transition disabled:cursor-not-allowed ${
+                                                                    subtitleFormat === fmt
+                                                                        ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                                                                        : 'text-white/45 hover:text-white/80'
+                                                                }`}
+                                                            >
+                                                                {fmt.toUpperCase()}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <button
+                                                        onClick={handleSubtitleDownload}
+                                                        disabled={!subtitleSelection || subtitleDownloading}
+                                                        className="flex-1 h-10 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-400 font-medium text-[13px] flex items-center justify-center gap-2 transition hover:bg-blue-500/30 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                                                    >
+                                                        {subtitleDownloading ? (
+                                                            <>
+                                                                <span className="w-3.5 h-3.5 rounded-full border-2 border-blue-400/30 border-t-blue-400 animate-spin shrink-0" />
+                                                                Downloading
+                                                            </>
+                                                        ) : subtitleSelection ? (
+                                                            <>
+                                                                <Download className="w-4 h-4 shrink-0" />
+                                                                <span className="truncate">Download {subtitleSelection.langLabel || subtitleSelection.lang}</span>
+                                                            </>
+                                                        ) : (
+                                                            'Select a language'
+                                                        )}
+                                                    </button>
+                                                </div>
+                                                <p className="mt-2 px-1 text-[10px] leading-relaxed text-white/30 text-center">
+                                                    {subtitleSelection
+                                                        ? `${subtitleSelection.lang} saved to ${currentPlatform.name} › Subtitles${subtitleFormat === 'srt' ? ' · converted with FFmpeg' : ' · no conversion'}`
+                                                        : `Saved on its own to ${currentPlatform.name} › Subtitles`}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {subtitleNotice && (
+                                            <p className="mt-2 flex items-start gap-2 text-[11px] leading-relaxed text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2">
+                                                <span className="w-1 h-1 rounded-full bg-amber-400/70 mt-[6px] shrink-0" />
+                                                {subtitleNotice}
+                                            </p>
+                                        )}
+
+                                        {subtitleResult && (
+                                            <p className="mt-2 flex items-center gap-2 text-[11px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-3 py-2">
+                                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                                <span className="truncate" title={subtitleResult}>{subtitleResult}</span>
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
                             {/* Download Options */}
                             <div className="border-t border-white/10 pt-5">
-                                <p className="text-white/30 text-xs uppercase tracking-widest mb-3">Download Options</p>
-                                <div className="grid gap-2">
-                                    {/* Spotify Download */}
+                                <div className="flex items-center justify-between mb-3.5">
+                                    <p className="text-white/40 text-xs font-bold uppercase tracking-wider">Download Options</p>
+                                    <span className="text-[10px] text-white/30 font-medium">Select format &amp; quality</span>
+                                </div>
+                                <div className="grid gap-3">
+                                    {/* Spotify Audio */}
                                     {isSpotify && metadata.searchQuery && (
-                                        <button
-                                            onClick={() => handleSpotifyDownload(metadata.searchQuery!, metadata.title, metadata.uploader)}
-                                            disabled={downloading}
-                                            className="flex items-center justify-between p-3.5 bg-green-500/10 border border-green-500/20 rounded-xl cursor-pointer hover:bg-green-500/20 transition group disabled:opacity-40"
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-lg bg-green-500/30 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
-                                                <div className="text-left"><p className="font-medium text-sm text-green-400">Download MP3</p><p className="text-xs text-white/40">via YouTube Audio</p></div>
+                                        <div className="mb-2">
+                                            <h3 className="text-xs font-bold uppercase tracking-wider text-white/50 mb-2 pl-1 flex items-center gap-2">
+                                                <Music className="w-3.5 h-3.5 text-[#1DB954]" /> Spotify Audio
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {/* Spotify WAV */}
+                                                <button
+                                                    onClick={() => handleSpotifyDownload(metadata.searchQuery!, metadata.title, metadata.uploader, undefined, undefined, undefined, 'audio_wav')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-sky-500/[0.07] via-white/[0.02] to-transparent border border-sky-500/20 hover:border-sky-500/40 hover:bg-sky-500/[0.12] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-sky-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500/25 to-indigo-500/10 border border-sky-500/30 flex items-center justify-center shadow-md shadow-sky-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-sky-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-sky-300 transition-colors">Spotify Audio (WAV)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase tracking-wider">Uncompressed</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">Uncompressed PCM • No re-encode loss, largest file</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-sky-400 group-hover:border-sky-300 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
+
+                                                {/* Spotify Best */}
+                                                <button
+                                                    onClick={() => handleSpotifyDownload(metadata.searchQuery!, metadata.title, metadata.uploader, undefined, undefined, undefined, 'audio_best')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-[#1DB954]/[0.08] via-white/[0.02] to-transparent border border-[#1DB954]/20 hover:border-[#1DB954]/40 hover:bg-[#1DB954]/[0.12] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-[#1DB954]/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#1DB954]/25 to-emerald-500/10 border border-[#1DB954]/30 flex items-center justify-center shadow-md shadow-[#1DB954]/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-[#1DB954]" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-[#1DB954] transition-colors">Spotify Audio (Best)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-[#1DB954]/20 text-[#1DB954] border border-[#1DB954]/30 uppercase tracking-wider">320kbps MP3</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">~320kbps • High Bitrate MP3 from the matched stream</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-[#1DB954] group-hover:border-[#1DB954] transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
+
+                                                {/* Spotify Standard */}
+                                                <button
+                                                    onClick={() => handleSpotifyDownload(metadata.searchQuery!, metadata.title, metadata.uploader, undefined, undefined, undefined, 'audio_standard')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-teal-500/[0.05] via-white/[0.02] to-transparent border border-white/10 hover:border-teal-500/30 hover:bg-teal-500/[0.08] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-teal-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/10 border border-teal-500/25 flex items-center justify-center shadow-md shadow-teal-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-teal-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-teal-300 transition-colors">Spotify Audio (Standard)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-teal-500/15 text-teal-300 border border-teal-500/25 uppercase tracking-wider">128kbps</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">~128kbps • Balanced Size &amp; Quality</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-teal-400 group-hover:border-teal-400 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
+
+                                                {/* Spotify Low */}
+                                                <button
+                                                    onClick={() => handleSpotifyDownload(metadata.searchQuery!, metadata.title, metadata.uploader, undefined, undefined, undefined, 'audio_low')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/[0.04] via-white/[0.02] to-transparent border border-white/10 hover:border-amber-500/30 hover:bg-amber-500/[0.08] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-amber-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 border border-amber-500/25 flex items-center justify-center shadow-md shadow-amber-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-amber-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-amber-300 transition-colors">Spotify Audio (Low)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/25 uppercase tracking-wider">64kbps</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">~64kbps • Save Data &amp; Storage</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-amber-400 group-hover:border-amber-400 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
                                             </div>
-                                            <Download className="w-4 h-4 text-green-400/50 group-hover:text-green-400" />
-                                        </button>
+                                        </div>
                                     )}
 
                                     {/* Live recording */}
@@ -2305,313 +2756,249 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         <button
                                             onClick={() => handleDownload('best')}
                                             disabled={downloading}
-                                            className="w-full flex items-center justify-between p-3.5 bg-red-500/10 border border-red-500/25 rounded-xl cursor-pointer hover:bg-red-500/20 transition group disabled:opacity-40"
+                                            className="group relative w-full flex items-center justify-between p-4 bg-gradient-to-r from-red-500/15 via-white/[0.03] to-transparent border border-red-500/30 hover:border-red-500/60 hover:bg-red-500/20 rounded-2xl cursor-pointer transition-all duration-200 shadow-sm hover:shadow-xl hover:shadow-red-500/10 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 text-left"
                                         >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-lg bg-red-500/20 flex items-center justify-center"><Radio className="w-4 h-4 text-red-400" /></div>
-                                                <div className="text-left">
-                                                    <p className="font-medium text-sm text-red-400">Record live stream</p>
-                                                    <p className="text-xs text-white/40">Saves the ongoing broadcast until you stop it</p>
+                                            <div className="flex items-center gap-3.5">
+                                                <div className="w-11 h-11 rounded-xl bg-red-500/25 border border-red-500/40 flex items-center justify-center shadow-lg shadow-red-500/15 group-hover:scale-105 transition-transform shrink-0">
+                                                    <Radio className="w-5 h-5 text-red-400 animate-pulse" />
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-semibold text-sm text-white group-hover:text-red-300 transition-colors">Record Live Stream</p>
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-red-500/20 text-red-300 border border-red-500/30 uppercase tracking-wider">Broadcast</span>
+                                                    </div>
+                                                    <p className="text-xs text-white/40 mt-0.5">Captures the ongoing broadcast until you stop it</p>
                                                 </div>
                                             </div>
-                                            <Download className="w-4 h-4 text-red-400/60 group-hover:text-red-400" />
+                                            <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-white group-hover:bg-red-500 group-hover:border-red-400 transition-all shrink-0">
+                                                <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                            </div>
                                         </button>
                                     )}
 
                                     {/* Audio Options */}
-                                    {/* Audio language. Absent unless the video
-                                        publishes more than one language, so a
-                                        normal single-audio video is unchanged.
-                                        Sits above both output sections because it
-                                        governs each of them. */}
                                     {hasAudioChoice && !isSpotify && !isLive && (
-                                        <div data-audio-language-panel className="mb-4 rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
-                                            <div className="h-7 px-3 flex items-center justify-between border-b border-white/10 bg-white/[0.03] sticky top-0 z-10 backdrop-blur-sm">
-                                                <h3 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/50">
-                                                    <Globe className="w-3 h-3" /> Audio Language
-                                                </h3>
-                                                <span className="text-[9px] uppercase tracking-wider text-white/30 tabular-nums">{audioTracks.length} tracks</span>
-                                            </div>
-                                            <div data-audio-language-list className="max-h-[264px] overflow-y-auto">
-                                                {audioTracks.map((track) => (
-                                                    <AudioTrackChoice
-                                                        key={track.key}
-                                                        track={track}
-                                                        active={audioTrackKey === track.key}
-                                                        disabled={downloading}
-                                                        onPick={() => setAudioTrackKey(track.key)}
-                                                    />
-                                                ))}
-                                            </div>
-                                            <div className="px-3 py-2 border-t border-white/10 bg-white/[0.03]">
-                                                <p className="text-[10px] leading-snug text-white/35">
-                                                    Used for audio-only downloads and for the audio merged into video downloads.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {!isSpotify && !isLive && (
-                                        <div className="mb-4">
-                                            <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
-                                                <Music className="w-4 h-4" /> Audio Only
-                                            </h3>
-                                            <div className="space-y-2">
-                                                <button onClick={() => handleDownload('audio_best')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-9 h-9 rounded-lg bg-green-500/20 flex items-center justify-center"><Music className="w-4 h-4 text-green-400" /></div>
-                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Best)</p><p className="text-xs text-white/40">~320kbps â€¢ High Quality</p></div>
+                                        <>
+                                            <SectionToggle
+                                                open={audioLangOpen}
+                                                onToggle={() => setAudioLangOpen((v) => !v)}
+                                                icon={<Globe className="w-3 h-3" />}
+                                                title="Audio Language"
+                                                meta={audioLangMeta}
+                                                accent="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                                tone="emerald"
+                                                variant="compact"
+                                            />
+                                            {audioLangOpen && (
+                                                <div data-audio-language-panel className="mb-2 rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+                                                    <div data-audio-language-list className="max-h-[220px] overflow-y-auto">
+                                                        {audioTracks.map((track) => (
+                                                            <AudioTrackChoice
+                                                                key={track.key}
+                                                                track={track}
+                                                                active={audioTrackKey === track.key}
+                                                                disabled={downloading}
+                                                                onPick={() => setAudioTrackKey(track.key)}
+                                                            />
+                                                        ))}
                                                     </div>
-                                                    <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                                </button>
-                                                <button onClick={() => handleDownload('audio_standard')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-green-400/80" /></div>
-                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Standard)</p><p className="text-xs text-white/40">~128kbps â€¢ Balanced</p></div>
-                                                    </div>
-                                                    <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                                </button>
-                                                <button onClick={() => handleDownload('audio_low')} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-9 h-9 rounded-lg bg-yellow-500/10 flex items-center justify-center"><Music className="w-4 h-4 text-yellow-400" /></div>
-                                                        <div className="text-left"><p className="font-medium text-sm">Audio (Low)</p><p className="text-xs text-white/40">~64kbps â€¢ Save Data</p></div>
-                                                    </div>
-                                                    <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-
-
-                                    {/* Video Options */}
-                                    {!isSpotify && !isLive && formats.length > 0 && (
-                                        <div>
-                                            <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
-                                                <Film className="w-4 h-4" /> Video Quality
-                                            </h3>
-                                            <div className="space-y-2">
-                                                {formats.map((f, i) => (
-                                                    <button key={i} onClick={() => handleDownload(f.format_id)} disabled={downloading} className="w-full flex items-center justify-between p-3.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/8 transition group disabled:opacity-40">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center"><Film className="w-4 h-4 text-blue-400" /></div>
-                                                            <div className="text-left">
-                                                                <p className="font-medium text-sm flex items-center gap-2">
-                                                                    {f.height}p
-                                                                    {i === 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">Best</span>}
-                                                                    {f.height && f.height >= 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300">4K</span>}
-                                                                    {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
-                                                                </p>
-                                                                <p className="text-xs text-white/40">{f.ext?.toUpperCase() || 'MP4'} {f.format_note && `â€¢ ${f.format_note}`}</p>
-                                </div>
-                                                        </div>
-                                                        <Download className="w-4 h-4 text-white/30 group-hover:text-white/60" />
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {/* Subtitles. Suppressed for music: a song's
-                                        YouTube captions are either auto-generated
-                                        from the vocal or hand-typed karaoke text, and
-                                        either way they are a worse read on the words
-                                        than the lyrics panel above, so offering both
-                                        only splits the user's attention. */}
-                                    {!isMusicTrack && !isLive && subtitleTracks.length > 0 && (
-                                        <div>
-                                            <h3 className="text-sm font-bold text-white/50 mb-2 pl-1 flex items-center gap-2">
-                                                <Captions className="w-4 h-4" /> Subtitles
-                                                <span className="text-[10px] font-normal text-white/30">
-                                                    {subtitleTracks.length} language{subtitleTracks.length === 1 ? '' : 's'}
-                                                </span>
-                                            </h3>
-                                            {/* One panel holds the filter, the list and the
-                                                action, so picking a language never moves
-                                                the download button out from under the
-                                                cursor and the whole control reads as a
-                                                single unit. */}
-                                            <div data-subtitle-panel className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
-                                                <div className="p-2.5">
-                                                    <div className="relative">
-                                                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
-                                                        <input
-                                                            type="text"
-                                                            value={subtitleSearch}
-                                                            onChange={(e) => setSubtitleSearch(e.target.value)}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter' && subtitleVisibleTracks.length) {
-                                                                    pickSubtitle(subtitleVisibleTracks[0].key);
-                                                                } else if (e.key === 'Escape') {
-                                                                    setSubtitleSearch('');
-                                                                }
-                                                            }}
-                                                            placeholder={`Search ${subtitleTracks.length} languages...`}
-                                                            disabled={downloading}
-                                                            className="w-full h-9 pl-9 pr-9 rounded-lg bg-white/5 border border-white/10 text-white text-[13px] placeholder-white/25 outline-none transition focus:border-blue-400/40 focus:bg-white/[0.07] disabled:opacity-50"
-                                                        />
-                                                        {subtitleSearch && (
-                                                            <button
-                                                                onClick={() => setSubtitleSearch('')}
-                                                                aria-label="Clear language search"
-                                                                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition"
-                                                            >
-                                                                <X className="w-3 h-3" />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[10px] text-white/35">
-                                                        <span className="truncate">
-                                                            {subtitleSearch.trim()
-                                                                ? `${subtitleVisibleTracks.length} of ${subtitleTracks.length} languages`
-                                                                : `${subtitleTracks.filter((t) => !t.isAuto).length} by creator Â· ${subtitleTracks.filter((t) => t.isAuto).length} auto-generated`}
-                                                        </span>
-                                                        {subtitleSearch.trim() && subtitleVisibleTracks.length === 0 && (
-                                                            <span className="shrink-0 text-white/50">No match</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {/* Deliberately not .smooth-scroll: that class
-                                                    sets content-visibility: auto, which
-                                                    lets Chromium skip the offscreen rows
-                                                    while the group headers inside are
-                                                    position: sticky. The list is long
-                                                    enough that keeping it rendered is
-                                                    cheaper than debugging sticky
-                                                    headers that land in the wrong place. */}
-                                                <div
-                                                    data-subtitle-list
-                                                    className="overflow-y-auto custom-scrollbar border-y border-white/10 bg-[#0d0d0f]"
-                                                    // With no visible rows there is nothing to cap,
-                                                    // and a derived height of 0 would clip the
-                                                    // empty-state message, so let the message size
-                                                    // the box instead.
-                                                    style={{ height: subtitleVisibleTracks.length > 0 ? subtitleListHeight : undefined }}
-                                                >
-                                                    {subtitleVisibleTracks.length === 0 ? (
-                                                        <p className="px-4 py-10 text-center text-xs text-white/40">
-                                                            {subtitleSearch.trim()
-                                                                ? <>No language matches &ldquo;{subtitleSearch.trim()}&rdquo;.</>
-                                                                : <>No track offers a {subtitleFormat.toUpperCase()} file.</>}
+                                                    <div className="px-3.5 py-2 border-t border-white/10 bg-white/[0.02]">
+                                                        <p className="text-[10px] leading-snug text-white/40">
+                                                            Used for audio-only downloads and for the audio merged into video downloads.
                                                         </p>
-                                                    ) : (
-                                                        <>
-                                                            {subtitleAuthored.length > 0 && (
-                                                                <div>
-                                                                    <div className="sticky top-0 z-10 flex items-center gap-2 h-7 px-3 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-white/[0.06]">
-                                                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">By creator</span>
-                                                                        <span className="text-[10px] text-white/25">{subtitleAuthored.length}</span>
-                                                                    </div>
-                                                                    <div className="divide-y divide-white/[0.04]">
-                                                                        {subtitleAuthored.map((t) => (
-                                                                            <SubtitleChoice
-                                                                                key={t.key}
-                                                                                track={t}
-                                                                                active={subtitleKey === t.key}
-                                                                                disabled={downloading}
-                                                                                onPick={() => pickSubtitle(subtitleKey === t.key ? null : t.key)}
-                                                                            />
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            {subtitleAutomatic.length > 0 && (
-                                                                <div>
-                                                                    <div className="sticky top-0 z-10 flex items-center gap-2 h-7 px-3 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-white/[0.06]">
-                                                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-white/45">Auto-generated &amp; translated</span>
-                                                                        <span className="text-[10px] text-white/25">{subtitleAutomatic.length}</span>
-                                                                    </div>
-                                                                    <div className="divide-y divide-white/[0.04]">
-                                                                        {subtitleAutomatic.map((t) => (
-                                                                            <SubtitleChoice
-                                                                                key={t.key}
-                                                                                track={t}
-                                                                                active={subtitleKey === t.key}
-                                                                                disabled={downloading}
-                                                                                onPick={() => pickSubtitle(subtitleKey === t.key ? null : t.key)}
-                                                                            />
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
-
-                                                {/* Pinned action bar. It is always present at a
-                                                    fixed height, so choosing a
-                                                    language never reflows the
-                                                    page under the pointer. */}
-                                                <div className="p-2.5">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={`flex h-10 p-0.5 rounded-lg bg-white/5 border border-white/10 transition-opacity ${subtitleSelection ? '' : 'opacity-40'}`}>
-                                                            {(['srt', 'vtt'] as const).map((fmt) => (
-                                                                <button
-                                                                    key={fmt}
-                                                                    onClick={() => pickSubtitleFormat(fmt)}
-                                                                    disabled={!subtitleSelection || subtitleDownloading}
-                                                                    title={fmt === 'srt' ? 'Converted to SRT with FFmpeg' : 'Saved exactly as published'}
-                                                                    className={`h-full px-3 rounded-md text-xs font-medium transition disabled:cursor-not-allowed ${
-                                                                        subtitleFormat === fmt
-                                                                            ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-                                                                            : 'text-white/45 hover:text-white/80'
-                                                                    }`}
-                                                                >
-                                                                    {fmt.toUpperCase()}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                        <button
-                                                            onClick={handleSubtitleDownload}
-                                                            disabled={!subtitleSelection || subtitleDownloading}
-                                                            className="flex-1 h-10 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-400 font-medium text-[13px] flex items-center justify-center gap-2 transition hover:bg-blue-500/30 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
-                                                        >
-                                                            {subtitleDownloading ? (
-                                                                <>
-                                                                    <span className="w-3.5 h-3.5 rounded-full border-2 border-blue-400/30 border-t-blue-400 animate-spin shrink-0" />
-                                                                    Downloading
-                                                                </>
-                                                            ) : subtitleSelection ? (
-                                                                <>
-                                                                    <Download className="w-4 h-4 shrink-0" />
-                                                                    <span className="truncate">Download {subtitleSelection.langLabel || subtitleSelection.lang}</span>
-                                                                </>
-                                                            ) : (
-                                                                'Select a language'
-                                                            )}
-                                                        </button>
                                                     </div>
-                                                    <p className="mt-2 px-1 text-[10px] leading-relaxed text-white/30 text-center">
-                                                        {subtitleSelection
-                                                            ? `${subtitleSelection.lang} saved to ${currentPlatform.name} â€º Subtitles${subtitleFormat === 'srt' ? ' Â· converted with FFmpeg' : ' Â· no conversion'}`
-                                                            : `Saved on its own to ${currentPlatform.name} â€º Subtitles`}
-                                                    </p>
                                                 </div>
+                                            )}
+                                        </>
+                                    )}
+
+                                    {/* Audio Only Section */}
+                                    {!isSpotify && !isLive && (
+                                        <div className="mb-2">
+                                            <h3 className="text-xs font-bold uppercase tracking-wider text-white/50 mb-2 pl-1 flex items-center gap-2">
+                                                <Music className="w-3.5 h-3.5 text-emerald-400" /> Audio Only
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {/* Audio WAV */}
+                                                <button
+                                                    onClick={() => handleDownload('audio_wav')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-sky-500/[0.07] via-white/[0.02] to-transparent border border-sky-500/20 hover:border-sky-500/40 hover:bg-sky-500/[0.12] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-sky-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500/25 to-indigo-500/10 border border-sky-500/30 flex items-center justify-center shadow-md shadow-sky-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-sky-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-sky-300 transition-colors">Audio (WAV)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase tracking-wider">Uncompressed</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">Uncompressed PCM • No re-encode loss, largest file</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-sky-400 group-hover:border-sky-300 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
+
+                                                {/* Audio Best */}
+                                                <button
+                                                    onClick={() => handleDownload('audio_best')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/[0.08] via-white/[0.02] to-transparent border border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/[0.12] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-emerald-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/25 to-teal-500/10 border border-emerald-500/30 flex items-center justify-center shadow-md shadow-emerald-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-emerald-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-emerald-300 transition-colors">Audio (Best Quality)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">320kbps MP3</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">~320kbps • Studio Grade High Bitrate MP3</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-emerald-400 group-hover:border-emerald-300 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
+
+                                                {/* Audio Standard */}
+                                                <button
+                                                    onClick={() => handleDownload('audio_standard')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-teal-500/[0.05] via-white/[0.02] to-transparent border border-white/10 hover:border-teal-500/30 hover:bg-teal-500/[0.08] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-teal-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500/20 to-cyan-500/10 border border-teal-500/25 flex items-center justify-center shadow-md shadow-teal-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-teal-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-teal-300 transition-colors">Audio (Standard)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-teal-500/15 text-teal-300 border border-teal-500/25 uppercase tracking-wider">128kbps</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">~128kbps • Balanced Size &amp; Quality</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-teal-400 group-hover:border-teal-300 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
+
+                                                {/* Audio Low */}
+                                                <button
+                                                    onClick={() => handleDownload('audio_low')}
+                                                    disabled={downloading}
+                                                    className="group relative w-full flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/[0.04] via-white/[0.02] to-transparent border border-white/10 hover:border-amber-500/30 hover:bg-amber-500/[0.08] transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-amber-500/10 hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                                                >
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 border border-amber-500/25 flex items-center justify-center shadow-md shadow-amber-500/10 group-hover:scale-105 transition-transform shrink-0">
+                                                            <Music className="w-5 h-5 text-amber-400" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-semibold text-sm text-white group-hover:text-amber-300 transition-colors">Audio (Low)</p>
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/25 uppercase tracking-wider">64kbps</span>
+                                                            </div>
+                                                            <p className="text-xs text-white/40 mt-0.5">~64kbps • Save Data &amp; Storage</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 group-hover:text-black group-hover:bg-amber-400 group-hover:border-amber-300 transition-all shrink-0">
+                                                        <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                    </div>
+                                                </button>
                                             </div>
-
-                                            {subtitleNotice && (
-                                                <p className="mt-2 flex items-start gap-2 text-[11px] leading-relaxed text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2">
-                                                    <span className="w-1 h-1 rounded-full bg-amber-400/70 mt-[6px] shrink-0" />
-                                                    {subtitleNotice}
-                                                </p>
-                                            )}
-
-                                            {subtitleResult && (
-                                                <p className="mt-2 flex items-center gap-2 text-[11px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-3 py-2">
-                                                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                                                    <span className="truncate" title={subtitleResult}>{subtitleResult}</span>
-                                                </p>
-                                            )}
                                         </div>
                                     )}
 
-                                    {/* Lyrics. Renders nothing unless a provider
-                                        matched, so a track with no lyrics leaves
-                                        no trace - not even an empty box. Placed
-                                        outside the Spotify guards above because a
-                                        Spotify link is always music. */}
-                                    {lyrics && (
-                                        <div className="mt-3">
-                                            <LyricsPanel lyrics={lyrics} />
+                                    {/* Video Quality Section */}
+                                    {!isSpotify && !isLive && formats.length > 0 && (
+                                        <div className="mb-2">
+                                            <h3 className="text-xs font-bold uppercase tracking-wider text-white/50 mb-2 pl-1 flex items-center justify-between">
+                                                <span className="flex items-center gap-2">
+                                                    <Film className="w-3.5 h-3.5 text-blue-400" /> Video Quality
+                                                </span>
+                                                <span className="text-[10px] text-white/30 uppercase tracking-wider">{formats.length} options</span>
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {formats.map((f, i) => {
+                                                    const is4K = f.height && f.height >= 2160;
+                                                    const is2K = f.height && f.height >= 1440 && f.height < 2160;
+                                                    const is1080 = f.height && f.height >= 1080 && f.height < 1440;
+                                                    const is720 = f.height && f.height >= 720 && f.height < 1080;
+
+                                                    const colorClass = is4K
+                                                        ? 'border-purple-500/30 hover:border-purple-400/60 bg-gradient-to-r from-purple-500/[0.10] via-purple-500/[0.04] to-transparent hover:bg-purple-500/[0.16] shadow-purple-500/5'
+                                                        : is2K
+                                                        ? 'border-indigo-500/25 hover:border-indigo-400/50 bg-gradient-to-r from-indigo-500/[0.08] via-indigo-500/[0.03] to-transparent hover:bg-indigo-500/[0.14] shadow-indigo-500/5'
+                                                        : is1080
+                                                        ? 'border-blue-500/20 hover:border-blue-400/50 bg-gradient-to-r from-blue-500/[0.07] via-blue-500/[0.02] to-transparent hover:bg-blue-500/[0.12] shadow-blue-500/5'
+                                                        : 'border-white/10 hover:border-white/25 bg-gradient-to-r from-white/[0.03] to-transparent hover:bg-white/[0.07]';
+
+                                                    const iconColor = is4K ? 'text-purple-400' : is2K ? 'text-indigo-400' : is1080 ? 'text-blue-400' : 'text-cyan-400';
+                                                    const hoverBtnColor = is4K
+                                                        ? 'group-hover:bg-purple-400 group-hover:text-black group-hover:border-purple-300'
+                                                        : is2K
+                                                        ? 'group-hover:bg-indigo-400 group-hover:text-black group-hover:border-indigo-300'
+                                                        : 'group-hover:bg-blue-400 group-hover:text-black group-hover:border-blue-300';
+
+                                                    return (
+                                                        <button
+                                                            key={i}
+                                                            onClick={() => handleDownload(f.format_id)}
+                                                            disabled={downloading}
+                                                            className={`group relative w-full flex items-center justify-between p-3.5 rounded-2xl border transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 ${colorClass}`}
+                                                        >
+                                                            <div className="flex items-center gap-3.5">
+                                                                <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0">
+                                                                    <Film className={`w-5 h-5 ${iconColor}`} />
+                                                                </div>
+                                                                <div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <p className="font-semibold text-sm text-white group-hover:text-white transition-colors">
+                                                                            {f.height ? `${f.height}p` : 'Standard'}
+                                                                        </p>
+                                                                        {i === 0 && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-white/15 text-white/90 border border-white/20 uppercase tracking-wider">
+                                                                                Best Quality
+                                                                            </span>
+                                                                        )}
+                                                                        {is4K && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-purple-500/25 text-purple-300 border border-purple-500/40 uppercase tracking-wider">
+                                                                                4K Ultra HD
+                                                                            </span>
+                                                                        )}
+                                                                        {is2K && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-500/25 text-indigo-300 border border-indigo-500/40 uppercase tracking-wider">
+                                                                                2K QHD
+                                                                            </span>
+                                                                        )}
+                                                                        {is1080 && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/30 uppercase tracking-wider">
+                                                                                1080p FHD
+                                                                            </span>
+                                                                        )}
+                                                                        {is720 && (
+                                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase tracking-wider">
+                                                                                720p HD
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className="text-xs text-white/40 mt-0.5">
+                                                                        {f.ext?.toUpperCase() || 'MP4'} {f.format_note && `• ${f.format_note}`}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <div className={`w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40 transition-all shrink-0 ${hoverBtnColor}`}>
+                                                                <Download className="w-4 h-4 transition-transform group-hover:scale-110" />
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -2738,7 +3125,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         </div>
                                         <div>
                                             <h2 className="font-bold text-xl text-white tracking-tight">{metadata.uploader}'s Stories</h2>
-                                            <p className="text-white/60 text-sm font-medium">{(metadata.entries?.length ?? 0)} stories available â€¢ {selectedItems.size} selected</p>
+                                            <p className="text-white/60 text-sm font-medium">{(metadata.entries?.length ?? 0)} stories available • {selectedItems.size} selected</p>
                                         </div>
                                     </div>
                                     <button
@@ -3000,7 +3387,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                     </div>
                                                     <div className="flex-1">
                                                         <h4 className="text-sm font-bold text-white">Easier with the Extension</h4>
-                                                        <p className="text-[11px] text-white/40">Sync your session automatically â€” no copy-paste needed.</p>
+                                                        <p className="text-[11px] text-white/40">Sync your session automatically → no copy-paste needed.</p>
                                                     </div>
                                                 </div>
                                                 <button
@@ -3268,7 +3655,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                 </div>
                             </div>
 
-                            {/* Body â€” horizontal split */}
+                            {/* Body → horizontal split */}
                             <div className="flex flex-col md:flex-row md:items-stretch overflow-y-auto custom-scrollbar">
                                 {/* Left: preview */}
                                 <div className="md:w-[38%] md:max-w-[340px] shrink-0 md:border-r border-white/[0.07] p-5 pb-4">
@@ -3307,7 +3694,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                             <div className="flex items-center justify-between">
                                                 <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Range</span>
                                                 <span className="text-[11px] font-mono font-bold text-purple-300/80">
-                                                    {formatDuration(cutStart)} â†’ {formatDuration(cutEnd)}
+                                                    {formatDuration(cutStart)} → {formatDuration(cutEnd)}
                                                 </span>
                                             </div>
                                             <div className="flex items-center justify-between">
@@ -3367,7 +3754,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         </div>
                                     </div>
 
-                            {/* Type toggle â€” segmented control */}
+                            {/* Type toggle → segmented control */}
                             <div className="flex p-1 bg-white/[0.04] border border-white/10 rounded-xl mb-4">
                                 <button
                                     onClick={() => setCutType('video')}
@@ -3430,7 +3817,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                     {cutVideoFormat === f.format_id && <Check className="w-4 h-4 text-purple-300" />}
                                                 </div>
                                                 <p className="text-[10px] text-white/40 mt-0.5">
-                                                    {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` â€¢ ${formatBytes(f.filesize)}` : f.format_note ? ` â€¢ ${f.format_note}` : ''}
+                                                    {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` • ${formatBytes(f.filesize)}` : f.format_note ? ` • ${f.format_note}` : ''}
                                                 </p>
                                             </button>
                                         ))}

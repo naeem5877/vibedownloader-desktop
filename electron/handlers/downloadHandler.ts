@@ -544,7 +544,9 @@ export function registerDownloadHandlers() {
             // Get organized download path
             const downloadPath = getOrganizedPath(detectedPlatform, detectedContentType, playlistTitle);
             const safeTitle = title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
-            const ext = (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4');
+            // WAV is the one audio target that is not an MP3, so it has to be
+            // named here as well or the app waits on a `.mp3` that never lands.
+            const ext = (formatId === 'audio_wav' ? 'wav' : (formatId && formatId.startsWith('audio_') ? 'mp3' : 'mp4'));
             const isCutDownload = typeof cutStart === 'number' && typeof cutEnd === 'number' && cutEnd > cutStart;
             const isLiveDownload = isTwitch && detectedContentType === 'live';
 
@@ -740,6 +742,11 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 // Ensure FFmpeg is available for conversion
                 await ensureFFmpeg();
 
+                // WAV is uncompressed PCM, so an MP3 VBR digit has nothing to
+                // mean here. ffmpeg only repackages the chosen source stream,
+                // which is why no `--audio-quality` is passed for it.
+                const wantsWav = formatId === 'audio_wav';
+
                 let quality = '5'; // Standard default
                 if (formatId === 'audio_best') quality = '0';
                 if (formatId === 'audio_low') quality = '9';
@@ -753,7 +760,8 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                     console.log(`Extracting ${audioLangLabel || audioTrack} audio (format ${audioTrack})`);
                 }
 
-                args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality);
+                args.push('-x', '--audio-format', wantsWav ? 'wav' : 'mp3');
+                if (!wantsWav) args.push('--audio-quality', quality);
                 // Let yt-dlp write + embed the best thumbnail (for music /
                 // "Topic" videos this is the square album cover). node-id3 is
                 // no longer used for the YouTube path.
@@ -973,7 +981,10 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         // Upgrade the embedded cover to the true square YouTube Music
                         // album art when the parallel lookup succeeded.
                         const isAudioDownload = formatId && (formatId.startsWith('audio_') || formatId === 'audio');
-                        if (isAudioDownload && artPromise && fs.existsSync(finalFilePath)) {
+                        // node-id3 only writes MP3 tags, so a WAV download is
+                        // left with whatever yt-dlp embedded instead of being
+                        // handed to a tagger that cannot parse it.
+                        if (isAudioDownload && finalExt === 'mp3' && artPromise && fs.existsSync(finalFilePath)) {
                             const art = await artPromise;
                             if (art) {
                                 console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
@@ -1108,7 +1119,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
         return { success: true };
     });
 
-    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications, jobId }) => {
+    ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications, jobId, formatId }) => {
         registerDownloadStart();
         try {
             // Ensure FFmpeg is available for conversion
@@ -1127,17 +1138,27 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             const safeTitle = `${artist} - ${title}`.replace(/[^a-zA-Z0-9 \-_]/g, '').trim();
             const outputTemplate = path.join(downloadPath, `${safeTitle}.%(ext)s`);
 
+            // Spotify tracks are matched on YouTube and then converted, so the
+            // picker picks the same three MP3 bitrates plus WAV as everywhere
+            // else. An unknown id falls back to the 320k default, which is what
+            // every caller sent before the format became selectable.
+            const audioExt = formatId === 'audio_wav' ? 'wav' : 'mp3';
+            const audioQuality = formatId === 'audio_standard' ? '5' : formatId === 'audio_low' ? '9' : '0';
+
             const args = [
                 ytSearchUrl,
                 '--extractor-args', 'youtube:player_client=tv_embedded',
                 '--no-check-certificates',
-                '-x', '--audio-format', 'mp3', '--audio-quality', '0',
+                '-x', '--audio-format', audioExt,
                 '-o', outputTemplate,
                 '--no-playlist',
                 '--playlist-items', '1',
                 '--progress', '--newline',
                 '--concurrent-fragments', '16'
             ];
+
+            // WAV is uncompressed PCM, where an MP3 VBR digit means nothing.
+            if (audioExt === 'mp3') args.push('--audio-quality', audioQuality);
 
             const spotifyJsRuntime = detectJsRuntime();
             if (spotifyJsRuntime) args.splice(1, 0, '--js-runtimes', spotifyJsRuntime.flag);
@@ -1185,7 +1206,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         return;
                     }
 
-                    const finalFilePath = path.join(downloadPath, `${safeTitle}.mp3`);
+                    const finalFilePath = path.join(downloadPath, `${safeTitle}.${audioExt}`);
                     console.log("Spotify download process closed, finalizing:", finalFilePath);
 
                     // Wait a tiny bit for file to be released
@@ -1194,8 +1215,11 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                     let notificationThumbPath: string | undefined;
 
                     // Embed thumbnail logic with retry and longer timeout
+                    // node-id3 only writes MP3 tags, so a WAV track is left
+                    // untagged rather than handed to a tagger that cannot
+                    // parse it.
                     try {
-                        if (thumbnail) {
+                        if (thumbnail && audioExt === 'mp3') {
                             console.log('Fetching Spotify thumbnail (with retry):', thumbnail.slice(0, 60));
 
                             const axios = require('axios');
