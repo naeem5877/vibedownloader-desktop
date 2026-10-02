@@ -1,6 +1,6 @@
 {
   "name": "vibe-downloader",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Premium Multi-Platform Downloader with Lossless Spotify & Hi-Res Audio support",
   "main": "dist-electron/main.js",
   "type": "module",
