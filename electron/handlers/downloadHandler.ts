@@ -16,6 +16,7 @@ import { fetchYouTubeMusicAlbumArt, extractYouTubeVideoId } from '../utils/youtu
 import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv } from '../utils/platform';
 import { preferredYoutubeClient } from '../utils/youtubeStrategy';
 import { classifyExtractionError } from '../utils/errorMessage';
+import { createStageReader } from '../utils/downloadStages';
 
 // Download an image URL to a unique temp file (used for MP3 cover embedding
 // and the Windows completion notification).
@@ -738,8 +739,40 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 args.push('--cookies', path.join(app.getPath('userData'), 'cookies.txt'));
             }
 
+            // yt-dlp's last progress line is the last byte of the *source*
+            // stream; everything that makes the file the user asked for runs
+            // after it. Those steps report themselves as `[Name]` lines, so
+            // without reading them the loader can only say the download
+            // finished - while, for audio, the transcode that takes longer than
+            // the download itself is still running.
+            //
+            // Declared ahead of the FFmpeg download below because that is also a
+            // silent wait on a machine that has never converted anything.
+            let lastPercent = 0;
+            // `work` marks a step that is running but has no percentage of its
+            // own, which is what tells the renderer to sweep the ring instead of
+            // pinning it to the download's last number.
+            let lastStage: { label: string; work: boolean } | null = null;
+
+            const sendStage = (label: string, work = true) => {
+                lastStage = { label, work };
+                mainWindow?.webContents.send('download-progress', {
+                    percent: lastPercent,
+                    stage: label,
+                    processing: work,
+                    isLive: isLiveDownload,
+                    jobId
+                });
+            };
+
+            const publishStage = (label: string) => {
+                if (label === lastStage?.label) return;
+                sendStage(label);
+            };
+
             if (formatId && formatId.startsWith('audio_')) {
                 // Ensure FFmpeg is available for conversion
+                sendStage('Preparing FFmpeg', false);
                 await ensureFFmpeg();
 
                 // WAV is uncompressed PCM, so an MP3 VBR digit has nothing to
@@ -768,6 +801,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 args.push('--write-thumbnail', '--convert-thumbnails', 'jpg', '--embed-thumbnail');
             } else {
                 // Ensure FFmpeg is available for merging video/audio
+                sendStage('Preparing FFmpeg', false);
                 await ensureFFmpeg();
 
                 if (isLiveDownload) {
@@ -857,9 +891,18 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 const ytDlpEventEmitter = ytDlpWrap.exec(execArgs, { env: jsRuntimeEnv });
                 jobHandle.proc = ytDlpEventEmitter;
 
+                const stageReader = createStageReader(publishStage);
+
+                // stdout, re-parsed by yt-dlp-wrap...
+                ytDlpEventEmitter.on('ytDlpEvent', (eventType: string, data: string) => stageReader.fromEvent(eventType, data));
+                // ...and stderr, which is where post-processor chatter goes and
+                // which the wrapper only buffers for error messages.
+                (ytDlpEventEmitter as any).ytDlpProcess?.stderr?.on('data', (chunk: Buffer) => stageReader.fromStderr(chunk.toString()));
+
                 ytDlpEventEmitter.on('progress', (progress: any) => {
                     // Ensure percent is a number and valid
                     const percent = typeof progress.percent === 'number' ? progress.percent : parseFloat(progress.percent) || 0;
+                    if (percent > lastPercent) lastPercent = percent;
 
                     mainWindow?.webContents.send('download-progress', {
                         percent: percent,
@@ -867,6 +910,13 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         currentSpeed: progress.currentSpeed || '...',
                         eta: progress.eta || '...',
                         downloaded: progress.downloadedSize || '...',
+                        // A download line can still arrive after a post-processor
+                        // one when yt-dlp fetches streams in parallel, so a stage
+                        // that is doing work is kept rather than cleared on every
+                        // tick. An announcement ("Preparing FFmpeg") is dropped, or
+                        // it would hide the speed for the rest of the transfer.
+                        stage: lastStage?.work ? lastStage.label : null,
+                        processing: lastStage?.work ?? false,
                         isLive: isLiveDownload,
                         jobId
                     });
@@ -909,6 +959,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         if (isLiveDownload) {
                             // Recording stopped (by user or stream end) — finalize the
                             // partial file into a playable mp4.
+                            sendStage('Finalizing recording');
                             const desiredName = `${uniqueFilename}.mp4`;
                             const finalPath = await finalizeLiveRecording(downloadPath, uniqueFilename, desiredName);
                             if (!finalPath) {
@@ -949,13 +1000,16 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         }
                         const isVideoDownload = !(formatId && (formatId.startsWith('audio_') || formatId === 'audio'));
                         if (isVideoDownload && fs.existsSync(actualFilePath)) {
+                            // A second ffmpeg pass, and the longest step of a video
+                            // download: recoding to H.264 rewrites every frame.
+                            sendStage('Converting to H.264');
                             await recodeVideoToH264(actualFilePath);
                         }
 
                         // Cut the finished file down to [cutStart, cutEnd] if requested.
                         let displayPath = actualFilePath;
                         if (isCutDownload && fs.existsSync(actualFilePath)) {
-                            mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
+                            sendStage('Cutting segment');
                             const cutResultPath = await cutMediaFile(actualFilePath, cutStart, cutEnd);
                             if (cutResultPath) displayPath = cutResultPath;
                             else console.error('Cut failed, keeping full-length file');
@@ -985,9 +1039,13 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                         // left with whatever yt-dlp embedded instead of being
                         // handed to a tagger that cannot parse it.
                         if (isAudioDownload && finalExt === 'mp3' && artPromise && fs.existsSync(finalFilePath)) {
+                            // The lookup runs in parallel with the download, but a
+                            // network miss here still costs the user a visible wait.
+                            sendStage('Fetching album art');
                             const art = await artPromise;
                             if (art) {
                                 console.log('Upgrading cover to YouTube Music album art:', art.substring(0, 50) + '...');
+                                sendStage('Embedding album art');
                                 const info = await saveThumbnailTemp(art);
                                 if (info) {
                                     // The earlier candidate is superseded by the real
@@ -1122,11 +1180,14 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
     ipcMain.handle('download-spotify-track', async (event: any, { searchQuery, title, artist, thumbnail, playlistTitle, suppressNotifications, jobId, formatId }) => {
         registerDownloadStart();
         try {
+            const mainWindow = getMainWindow();
             // Ensure FFmpeg is available for conversion
+            // On a machine that has never converted anything this pulls an ~80 MB
+            // binary, which is otherwise a loader with nothing to say for it.
+            mainWindow?.webContents.send('download-progress', { percent: 0, stage: 'Preparing FFmpeg', processing: false, jobId });
             await ensureFFmpeg();
 
             console.log(`Searching YouTube for: ${searchQuery}`);
-            const mainWindow = getMainWindow();
             const ytDlpWrap = getYtDlpWrap();
             // Search top 3 results so yt-dlp picks the best relevance match
             const ytSearchUrl = `ytsearch3:${searchQuery}`;
@@ -1171,14 +1232,40 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
 
             const ytDlpEventEmitter = ytDlpWrap.exec(args, { env: jsRuntimeSpawnEnv(spotifyJsRuntime) });
 
+            // A Spotify "track" is a YouTube video re-encoded to audio, so it
+            // hits the same two-phase pipeline: a progress line per byte, then
+            // the ExtractAudio/EmbedThumbnail work that has no percentage.
+            let lastPercent = 0;
+            let lastStage: { label: string; work: boolean } | null = null;
+
+            const sendStage = (label: string, work = true) => {
+                lastStage = { label, work };
+                mainWindow?.webContents.send('download-progress', {
+                    percent: lastPercent,
+                    stage: label,
+                    processing: work,
+                    jobId
+                });
+            };
+
+            const stageReader = createStageReader(label => {
+                if (label === lastStage?.label) return;
+                sendStage(label);
+            });
+            ytDlpEventEmitter.on('ytDlpEvent', (eventType: string, data: string) => stageReader.fromEvent(eventType, data));
+            (ytDlpEventEmitter as any).ytDlpProcess?.stderr?.on('data', (chunk: Buffer) => stageReader.fromStderr(chunk.toString()));
+
             ytDlpEventEmitter.on('progress', (progress: any) => {
                 const percent = typeof progress.percent === 'number' ? progress.percent : parseFloat(progress.percent) || 0;
+                if (percent > lastPercent) lastPercent = percent;
                 mainWindow?.webContents.send('download-progress', {
                     percent: percent,
                     totalSize: progress.totalSize || '...',
                     currentSpeed: progress.currentSpeed || '...',
                     eta: progress.eta || '...',
                     downloaded: progress.downloadedSize || '...',
+                    stage: lastStage?.work ? lastStage.label : null,
+                    processing: lastStage?.work ?? false,
                     jobId
                 });
             });
@@ -1220,6 +1307,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                     // parse it.
                     try {
                         if (thumbnail && audioExt === 'mp3') {
+                            sendStage('Embedding cover art');
                             console.log('Fetching Spotify thumbnail (with retry):', thumbnail.slice(0, 60));
 
                             const axios = require('axios');

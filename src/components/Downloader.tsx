@@ -169,8 +169,41 @@ const formatBytes = (b?: number) => {
     return Math.round(mb) + ' MB';
 };
 
+// yt-dlp reports speed, ETA and transferred size only on the progress lines
+// that carry them, and the main process forwards every gap as the placeholder
+// '...'. Storing that placeholder as if it were a value is what made a finished
+// download read as "Starting...", so a gap keeps the last real number instead.
+const orPrevious = (value: string | undefined, previous: string | undefined) =>
+    (value && value !== '...' ? value : previous);
+
+// `stage` names the step being worked on when it is not measurable as a
+// percentage - the FFmpeg passes yt-dlp and this app run after the last byte of
+// the source stream arrives.
+interface DownloadProgress {
+    percent: number;
+    speed?: string;
+    eta?: string;
+    downloaded?: string;
+    stage?: string | null;
+    processing?: boolean;
+}
+
+// The loader's headline, in priority order. A named stage wins over a speed
+// because the speed is missing on exactly the lines that matter most: the final
+// `[download] 100%` line carries no "at .../s", so the old speed check fell
+// through to "Starting..." on a download that had already finished, and the
+// conversion lines that follow carry no percentage at all.
+function progressHeadline(progress: DownloadProgress | null): string {
+    if (!progress) return 'Starting...';
+    if (progress.stage) return progress.stage;
+    if (progress.speed && progress.speed !== '...') return progress.speed;
+    if (progress.percent >= 100) return 'Download finished';
+    if (progress.percent > 0) return `Downloading ${Math.round(progress.percent)}%`;
+    return 'Starting...';
+}
+
 // Circular Progress
-function CircularProgress({ percent, color }: { percent: number; color: string }) {
+function CircularProgress({ percent, color, processing = false }: { percent: number; color: string; processing?: boolean }) {
     const radius = 45;
     const stroke = 5;
     const normalizedRadius = radius - stroke / 2;
@@ -181,10 +214,35 @@ function CircularProgress({ percent, color }: { percent: number; color: string }
         <div className="relative w-28 h-28">
             <svg className="transform -rotate-90 w-28 h-28">
                 <circle className="text-white/10" strokeWidth={stroke} stroke="currentColor" fill="transparent" r={normalizedRadius} cx={56} cy={56} />
-                <circle strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" stroke={color} fill="transparent" r={normalizedRadius} cx={56} cy={56} style={{ transition: 'stroke-dashoffset 0.3s ease' }} />
+                {processing ? (
+                    // Transcoding and merging report no percentage of their own,
+                    // so an arc that keeps the download's last number would claim
+                    // a measurement nobody made. It sweeps instead.
+                    <circle
+                        strokeWidth={stroke}
+                        strokeDasharray={`${circumference * 0.2} ${circumference}`}
+                        strokeLinecap="round"
+                        stroke={color}
+                        fill="transparent"
+                        r={normalizedRadius}
+                        cx={56}
+                        cy={56}
+                        className="origin-center animate-spin"
+                        style={{ animationDuration: '1.15s', filter: `drop-shadow(0 0 5px ${color}66)` }}
+                    />
+                ) : (
+                    <circle strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" stroke={color} fill="transparent" r={normalizedRadius} cx={56} cy={56} style={{ transition: 'stroke-dashoffset 0.3s ease' }} />
+                )}
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-2xl font-bold text-white">{Math.round(percent)}%</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                {processing ? (
+                    <>
+                        <Loader2 className="w-6 h-6 animate-spin" style={{ color }} />
+                        <span className="text-[10px] font-bold text-white/50 tabular-nums">{Math.round(percent)}%</span>
+                    </>
+                ) : (
+                    <span className="text-2xl font-bold text-white">{Math.round(percent)}%</span>
+                )}
             </div>
         </div>
     );
@@ -394,10 +452,13 @@ const BatchQueueItem = memo(({
                                 />
                             </div>
                             <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
-                                <span>{item.speed && item.speed !== '...' ? item.speed : 'Downloading...'}</span>
+                                <span className="flex items-center gap-1.5 truncate max-w-[220px]">
+                                    {item.processing && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
+                                    {item.stage || (item.speed && item.speed !== '...' ? item.speed : 'Downloading...')}
+                                </span>
                                 <div className="flex items-center gap-2">
                                     {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
-                                    {item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
+                                    {!item.processing && item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
                                 </div>
                             </div>
                         </>
@@ -693,7 +754,7 @@ export function Downloader() {
     const [downloading, setDownloading] = useState(false);
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
-    const [progress, setProgress] = useState<{ percent: number; speed?: string; eta?: string; downloaded?: string } | null>(null);
+    const [progress, setProgress] = useState<DownloadProgress | null>(null);
     const [complete, setComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [downloadedFilePath, setDownloadedFilePath] = useState<string | null>(null);
@@ -721,7 +782,6 @@ export function Downloader() {
     const [subtitleKey, setSubtitleKey] = useState<string | null>(null);
     const [subtitleFormat, setSubtitleFormat] = useState<'srt' | 'vtt'>('srt');
     const [subtitleSearch, setSubtitleSearch] = useState('');
-    const [subtitleFilter, setSubtitleFilter] = useState<'all' | 'creator' | 'auto'>('all');
     // Starts closed. The picker sits above the download options, so an expanded
     // panel would push the formats the user opened the result for off-screen.
     const [tracksOpen, setTracksOpen] = useState(false);
@@ -797,13 +857,11 @@ export function Downloader() {
     // Filter on language name/code as well as creator vs auto category
     const subtitleVisibleTracks = useMemo(() => {
         const q = subtitleSearch.trim().toLowerCase();
-        return subtitleTracks.filter((t) => {
-            if (subtitleFilter === 'creator' && t.isAuto) return false;
-            if (subtitleFilter === 'auto' && !t.isAuto) return false;
-            if (!q) return true;
-            return t.langLabel.toLowerCase().includes(q) || t.lang.toLowerCase().includes(q);
-        });
-    }, [subtitleTracks, subtitleSearch, subtitleFilter]);
+        if (!q) return subtitleTracks;
+        return subtitleTracks.filter((t) =>
+            t.langLabel.toLowerCase().includes(q) || t.lang.toLowerCase().includes(q)
+        );
+    }, [subtitleTracks, subtitleSearch]);
 
     const subtitleAuthored = useMemo(
         () => subtitleVisibleTracks.filter((t) => !t.isAuto),
@@ -992,10 +1050,14 @@ export function Downloader() {
         formatId?: string;
         platform?: string;
         speed?: string;
-eta?: string;
-    downloaded?: string;
-    ext?: string;
-}>>([]);
+        eta?: string;
+        downloaded?: string;
+        // Set while the item is being converted rather than transferred, where
+        // there is a stage to name but no percentage to draw.
+        stage?: string | null;
+        processing?: boolean;
+        ext?: string;
+    }>>([]);
     const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
     const [batchDownloading, setBatchDownloading] = useState(false);
     const batchCompletionRef = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null);
@@ -1283,7 +1345,10 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
             } else if (data.status) {
                 // Only show speed for single downloads or if specifically desired
                 if (!isBatchActive && !downloading) {
-                    setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status }));
+                    // An explicit status is the most recent and most specific
+                    // thing said about this download, so it takes the headline
+                    // back from any stage label that was showing before.
+                    setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status, stage: null, processing: false }));
                 }
             } else if (data.percent !== undefined) {
                 if (isBatchActive) {
@@ -1292,19 +1357,28 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                         idx === index ? {
                             ...q,
                             progress: data.percent,
-                            speed: data.currentSpeed,
-                            eta: data.eta,
-                            downloaded: data.downloaded
+                            speed: orPrevious(data.currentSpeed, q.speed),
+                            eta: orPrevious(data.eta, q.eta),
+                            downloaded: orPrevious(data.downloaded, q.downloaded),
+                            stage: data.stage ?? null,
+                            processing: !!data.processing
                         } : q
                     ));
                 } else {
-                    setProgress({
+                    setProgress(prev => ({
+                        ...(prev || { percent: 0 }),
                         percent: data.percent,
-                        speed: data.currentSpeed,
-                        eta: data.eta,
-                        downloaded: data.downloaded
-                    });
+                        speed: orPrevious(data.currentSpeed, prev?.speed),
+                        eta: orPrevious(data.eta, prev?.eta),
+                        downloaded: orPrevious(data.downloaded, prev?.downloaded),
+                        stage: data.stage ?? null,
+                        processing: !!data.processing
+                    }));
                 }
+            } else if (data.stage) {
+                // A stage update without a percentage: keep whatever the
+                // download last reported rather than resetting the ring.
+                setProgress(prev => ({ ...(prev || { percent: 0 }), stage: data.stage, processing: !!data.processing }));
             }
         };
         window.electron.onProgress(handler);
@@ -2385,14 +2459,16 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                             </>
                                         ) : (
                                             <>
-                                                <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} />
+                                                <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} processing={!!progress?.processing} />
                                                 <div className="mt-4 space-y-1">
                                                     <p className="text-white font-bold text-base">
-                                                        {progress?.speed && progress.speed !== '...' ? progress.speed : 'Starting...'}
+                                                        {progressHeadline(progress)}
                                                     </p>
                                                     <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
                                                         {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
-                                                        {progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
+                                                        {/* The ETA belongs to the transfer, which is over once a
+                                                            conversion is what the loader is waiting on. */}
+                                                        {!progress?.processing && progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
                                                     </div>
                                                 </div>
                                             </>
