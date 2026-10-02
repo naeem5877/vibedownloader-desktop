@@ -1,4 +1,11 @@
-import * as Sentry from '@sentry/electron/main';
+// Type-only on purpose. The SDK reads `process.versions.electron` while it is
+// being imported and throws when that is undefined, which is the case anywhere
+// outside a running Electron app. Importing it for its side effect at the top of
+// this file would mean that `require`-ing any module that reports errors - the
+// info handler, for one - crashes node scripts and tests before they execute a
+// line of their own. It is loaded inside `initSentry` instead, which only runs
+// in the app.
+import type * as SentrySdk from '@sentry/electron/main';
 import { app } from 'electron';
 import {
     buildExtractionFailureEvent,
@@ -44,6 +51,7 @@ const SEND_FROM_DEV = 'VD_SENTRY';
 const DSN_ENV = 'SENTRY_DSN';
 
 let initialised = false;
+let sdk: typeof SentrySdk | null = null;
 
 /** True when this process reports. The gate for every reporter below. */
 export function isSentryInitialised(): boolean {
@@ -65,6 +73,8 @@ export function initSentry(): boolean {
     const dsn = process.env[DSN_ENV]?.trim();
     if (!dsn) return false;
 
+    const Sentry = require('@sentry/electron/main') as typeof SentrySdk;
+
     Sentry.init({
         dsn,
         // No accounts, no IPs, no machine identity beyond what an IP header
@@ -85,6 +95,7 @@ export function initSentry(): boolean {
     });
 
     initialised = true;
+    sdk = Sentry;
     return true;
 }
 
@@ -96,7 +107,7 @@ export function initSentry(): boolean {
  */
 export function flushSentry(): void {
     if (!initialised) return;
-    void Sentry.flush(2000);
+    void sdk?.flush(2000);
 }
 
 /** Report a metadata fetch that produced nothing. Returns whether it was sent. */
@@ -104,7 +115,7 @@ export function reportExtractionFailure(report: ExtractionFailureReport): boolea
     if (!initialised) return false;
     const event = buildExtractionFailureEvent(report);
     if (!event) return false;
-    Sentry.captureEvent(event);
+    sdk?.captureEvent(event);
     return true;
 }
 
@@ -113,7 +124,7 @@ export function reportThinFormatList(report: ThinFormatReport): boolean {
     if (!initialised) return false;
     const event = buildThinFormatEvent(report);
     if (!event) return false;
-    Sentry.captureEvent(event);
+    sdk?.captureEvent(event);
     return true;
 }
 
@@ -122,6 +133,6 @@ export function reportDownloadFailure(report: DownloadFailureReport): boolean {
     if (!initialised) return false;
     const event = buildDownloadFailureEvent(report);
     if (!event) return false;
-    Sentry.captureEvent(event);
+    sdk?.captureEvent(event);
     return true;
 }
