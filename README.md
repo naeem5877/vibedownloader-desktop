@@ -12,7 +12,7 @@
   </p>
   
   <p>
-    Download videos, audio, and playlists from YouTube, Instagram, TikTok, Twitch, Facebook, X, SoundCloud, Spotify, and more — locally, ad-free, and privacy-first. Add the free browser extension and download straight from the page.
+    Download videos, audio, subtitles, lyrics, and playlists from YouTube, Instagram, TikTok, Twitch, Facebook, X, SoundCloud, Spotify, and more — locally, ad-free, and privacy-first. Add the free browser extension and download straight from the page.
   </p>
 
   <p>
@@ -55,9 +55,23 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 
 <div align="center">
 
-### 🚫 No Accounts • 🔒 No Tracking • ✨ No Nonsense
+### 🚫 No Accounts • 🔒 Private by Design • ✨ No Nonsense
 
 </div>
+
+---
+
+## 🆕 What's New in v2.1.0
+
+- 💬 **Subtitles** — download captions as SRT in any available language
+- 🌍 **Multi-language audio tracks** — pick Bangla, English, Hindi and more, then save as audio or video
+- 🎤 **Lyrics download** — line by line, word by word, plain text, or translated (Spotify & YouTube Music)
+- 🎧 **WAV format** — uncompressed audio for music downloads
+- 🏷️ **Better metadata** — track, album and artist embedded in every song
+- 📖 **Stories fixed** — Instagram and Facebook story downloading works again
+- 🛡️ **More reliable YouTube** — automatic player fallback to reduce bot-protection and age-restriction errors
+
+See the full list on the [**Releases page**](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
 
 ---
 
@@ -70,11 +84,26 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 ### 🎥 Multi-Platform Support
 Videos, reels, shorts, stories & playlists from YouTube, Instagram, TikTok, Facebook, X, Pinterest, SoundCloud and Twitch
 
+### 📖 Stories
+Download Instagram and Facebook stories directly
+
+### 💬 Subtitles & Audio Languages
+Download subtitles as SRT, and choose the exact audio language when a video has multiple tracks — save it as audio or video
+
+### 🎤 Lyrics Download
+Line by line, word by word, plain text, or translated lyrics for Spotify and YouTube Music tracks
+
+### 🎵 Spotify Downloads
+Tracks, albums & playlists with full metadata and cover art — choose from 4 audio formats, up to lossless & hi-res
+
+### 🎧 Studio-Quality Music
+WAV export plus embedded track, album and artist details, so songs look right in any music player
+
 ### ✂️ Cut & Download
 Trim any video or song with the waveform editor before saving — clean output, no leftovers
 
-### 🎵 Spotify Downloads
-Tracks, albums & playlists with full metadata and cover art — up to lossless & hi-res
+</td>
+<td width="50%" valign="top">
 
 ### 📦 Batch Downloading
 Queue videos & audio with per-item quality controls and pause/resume
@@ -82,20 +111,17 @@ Queue videos & audio with per-item quality controls and pause/resume
 ### 🔴 Twitch Live Recording
 Record any live broadcast until you stop — auto-finalized as a playable MP4
 
-</td>
-<td width="50%" valign="top">
-
 ### 🧩 Browser Extension
 One-click download buttons right on the page, sent straight to the desktop engine
 
-### 📦 Smart Organization
+### 📂 Smart Organization
 Auto-sorted folders by platform and content type — Live, VODs, Clips, Playlists
 
 ### 💎 Modern UI
 Clean dark interface with smooth animations
 
 ### 🔐 Privacy-First
-100% local processing — no accounts, no ads, no tracking
+Local processing — no accounts, no ads, no tracking of your downloads
 
 ### 📥 System Tray
 Keep the app running in the background for instant access
@@ -243,6 +269,36 @@ Download directly from the page — no copying links, no switching tabs.
 
 ---
 
+## 🍪 Cookies (Optional)
+
+Some content needs a signed-in session, such as age-restricted videos or private accounts. You can add your cookies for a platform in the app.
+
+- Cookies are stored **only on your computer** and are used only to authenticate your own downloads
+- They are never uploaded to any server
+- **Tip:** for the most reliable result, export your cookies from a **private/incognito window**, then close that window right away. A browser session that stays open can rotate its cookies and make the exported ones stop working.
+
+---
+
+## 🧰 Troubleshooting
+
+If a download fails or only shows low quality:
+
+1. Open **Settings** and make sure the downloader (yt-dlp) is up to date
+2. Try again without cookies, or with freshly exported cookies
+3. Turn off any VPN. Some VPN and shared IPs are blocked by YouTube
+4. If it still fails, open a [new issue](https://github.com/naeem5877/vibedownloader-desktop/issues) with the video link (a public one), your app version, and your OS
+
+---
+
+## 🔐 Privacy
+
+- Downloads, conversions and cookies are processed **locally on your device**
+- No accounts, no ads
+- **Crash and error reports:** VibeDownloader uses [Sentry](https://sentry.io) to find and fix bugs. Links and file paths are scrubbed before anything is sent, and cookies are never included
+- You can read exactly what is collected in this repository — the app is fully open source
+
+---
+
 ## 🛠️ For Developers
 
 Built with modern web technologies: **Electron**, **React**, **Vite**, and **TypeScript** (Desktop) | **React Native** (Android).
@@ -381,4 +437,4 @@ If you create a fork or modified version:
 
 <sub>© 2026 VibeDownloader. Released under GPL v3.0 License.</sub>
 
-</div> 
+</div>
