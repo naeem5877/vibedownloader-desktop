@@ -237,6 +237,84 @@ function swapYtDlpBinary(newBinary: string): boolean {
     return true;
 }
 
+/** First bytes of the file, or null. Used to tell a Windows PE from a unix binary. */
+function readMagic(file: string): Buffer | null {
+    try {
+        const fd = fs.openSync(file, 'r');
+        try {
+            const buf = Buffer.alloc(4);
+            const n = fs.readSync(fd, buf, 0, 4, 0);
+            return n >= 2 ? buf.subarray(0, n) : null;
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Removes yt-dlp binaries that belong to another OS: a stray `yt-dlp.exe` on
+ * macOS/Linux, or a Windows PE ("MZ") sitting under the unix name. Reports of
+ * "spawn .../yt-dlp ENOENT" on macOS came from exactly this state.
+ */
+function removeForeignYtDlp() {
+    try {
+        const dir = path.dirname(ytDlpBinaryPath);
+        if (!isWindows) {
+            const stray = path.join(dir, 'yt-dlp.exe');
+            if (fs.existsSync(stray)) {
+                try { fs.unlinkSync(stray); } catch { /* ignore */ }
+            }
+            if (fs.existsSync(ytDlpBinaryPath)) {
+                const magic = readMagic(ytDlpBinaryPath);
+                // "MZ" = Windows executable. Mach-O/ELF never start with it.
+                if (magic && magic[0] === 0x4d && magic[1] === 0x5a) {
+                    console.warn('yt-dlp binary is a Windows executable, replacing it for this OS');
+                    try { fs.unlinkSync(ytDlpBinaryPath); } catch { /* ignore */ }
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Foreign yt-dlp cleanup failed:', e);
+    }
+}
+
+/**
+ * Guarantees the binary exists right before it is used. Startup already does
+ * this, but if that first download failed (offline launch, firewall) the file
+ * is missing later and every spawn dies with ENOENT. Cheap when it is present.
+ */
+export async function ensureYtDlpReady(): Promise<void> {
+    if (fs.existsSync(ytDlpBinaryPath)) {
+        let sizeOk = false;
+        try { sizeOk = fs.statSync(ytDlpBinaryPath).size >= YTDLP_MIN_SIZE; } catch { /* treat as missing */ }
+        if (sizeOk) {
+            if (isWindows) return;
+            const magic = readMagic(ytDlpBinaryPath);
+            const isForeignPE = !!(magic && magic[0] === 0x4d && magic[1] === 0x5a);
+            if (!isForeignPE) {
+                // Downloaded files can arrive without the execute bit; spawn
+                // then fails and gets reported as a confusing ENOENT/EACCES.
+                try { fs.accessSync(ytDlpBinaryPath, fs.constants.X_OK); }
+                catch { makeExecutable(ytDlpBinaryPath); }
+                return;
+            }
+        }
+    }
+    await ensureYtDlp();
+}
+
+/** Waits for a running update/download to finish, up to `maxMs`. */
+async function waitForYtDlpUpdate(maxMs: number = 180000): Promise<void> {
+    const start = Date.now();
+    while (ytdlpUpdateRunning && Date.now() - start < maxMs) {
+        await new Promise(r => setTimeout(r, 250));
+    }
+}
+
+let ytdlpEnsureInFlight: Promise<void> | null = null;
+
 /**
  * Guarantees a working yt-dlp before the app does anything else. Shares the
  * updater's verified download path on purpose: the old implementation used
@@ -244,10 +322,33 @@ function swapYtDlpBinary(newBinary: string): boolean {
  * installs could fail) and then got immediately re-downloaded by the update
  * check anyway.
  */
-export async function ensureYtDlp() {
+export function ensureYtDlp(): Promise<void> {
+    // Startup, the info fetch and the download handler can all land here at once
+    // on a first run. Sharing one run means the later callers wait for the first
+    // download instead of failing with "update already in progress" (which then
+    // surfaced as `spawn .../yt-dlp ENOENT`).
+    if (!ytdlpEnsureInFlight) {
+        ytdlpEnsureInFlight = ensureYtDlpInner().finally(() => { ytdlpEnsureInFlight = null; });
+    }
+    return ytdlpEnsureInFlight;
+}
+
+async function ensureYtDlpInner(): Promise<void> {
+    // A binary left behind by a different OS build (e.g. a Windows `yt-dlp.exe`
+    // copied into a macOS/Linux profile, or a PE file stored under the unix
+    // name) can never run here. Clear it so it gets re-fetched for this OS.
+    removeForeignYtDlp();
+
+    // The background updater may already be fetching the binary.
+    if (ytdlpUpdateRunning) await waitForYtDlpUpdate();
+
     if (!fs.existsSync(ytDlpBinaryPath)) {
         console.log('No yt-dlp binary found, fetching the current release...');
-        const r = await checkForYtDlpUpdate(true);
+        let r = await checkForYtDlpUpdate(true);
+        if (!r.version && r.error === 'update already in progress') {
+            await waitForYtDlpUpdate();
+            r = { updated: false, version: await getYtDlpVersion(), error: null };
+        }
         if (!r.version) {
             throw new Error(r.error || 'Could not obtain a working yt-dlp binary');
         }
@@ -259,7 +360,11 @@ export async function ensureYtDlp() {
     const version = await getYtDlpVersion();
     if (!version) {
         console.warn('yt-dlp binary exists but will not run, repairing it now...');
-        const r = await checkForYtDlpUpdate(true);
+        let r = await checkForYtDlpUpdate(true);
+        if (!r.version && r.error === 'update already in progress') {
+            await waitForYtDlpUpdate();
+            r = { updated: false, version: await getYtDlpVersion(), error: null };
+        }
         if (!r.version) {
             throw new Error(r.error || 'The existing yt-dlp binary is broken and could not be replaced');
         }
@@ -323,7 +428,11 @@ export async function checkForYtDlpUpdate(force: boolean = false): Promise<{ upd
             return fail('downloaded file was too small to be yt-dlp');
         }
 
-        // Never install something we cannot execute.
+        // Never install something we cannot execute. A file written by
+        // createWriteStream is mode 0666, so on macOS/Linux it must be marked
+        // executable BEFORE the probe - otherwise the probe always fails and the
+        // binary is never installed (the root cause of `spawn yt-dlp ENOENT`).
+        makeExecutable(tmpPath);
         const newVersion = await getYtDlpVersion(tmpPath);
         if (!newVersion) {
             try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
@@ -362,10 +471,13 @@ export async function checkForYtDlpUpdate(force: boolean = false): Promise<{ upd
     }
 }
 
-async function downloadFFmpeg(): Promise<boolean> {
+async function downloadFFmpeg(onlyProbe: boolean = false): Promise<boolean> {
     const ffmpegDir = ffmpegDirPath;
     const ffmpegExePath = path.join(ffmpegDir, exeName('ffmpeg'));
-    const sources = ffmpegSources();
+    const ffprobeExePath = path.join(ffmpegDir, exeName('ffprobe'));
+    // `onlyProbe`: ffmpeg is already in place but ffprobe is not. Only macOS
+    // ships them as two archives, so only there can the missing half be fetched alone.
+    const sources = ffmpegSources().filter(s => !onlyProbe || /ffprobe/i.test(s.url));
     // The archive extension has to match the source, because the extractor is
     // chosen from it: Windows and macOS ship zips, Linux ships .tar.xz.
     const firstExt = sources.length && archiveKind(sources[0].url) === 'tar' ? '.tar.xz' : '.zip';
@@ -465,9 +577,14 @@ async function downloadFFmpeg(): Promise<boolean> {
                         try {
                             if (!fs.existsSync(ffmpegDir)) fs.mkdirSync(ffmpegDir, { recursive: true });
                             const ok = extractFfmpegBinaries(tempZipPath, ffmpegDir);
+                            // The macOS ffprobe archive holds only ffprobe, so what
+                            // counts as "found" depends on which archive this is.
+                            const isProbeArchive = /ffprobe/i.test(downloadUrl);
+                            const expectedPath = isProbeArchive ? ffprobeExePath : ffmpegExePath;
+                            const expectedName = isProbeArchive ? exeName('ffprobe') : exeName('ffmpeg');
 
-                            if (!ok || !fs.existsSync(ffmpegExePath)) {
-                                console.error(exeName('ffmpeg') + ' not found in archive');
+                            if (!ok || !fs.existsSync(expectedPath)) {
+                                console.error(expectedName + ' not found in archive');
                                 discardPartial();
                                 done(false);
                                 return;
@@ -480,8 +597,8 @@ async function downloadFFmpeg(): Promise<boolean> {
                             // machine can time out on the first -version call, and
                             // throwing away a perfectly good download because of that
                             // would be worse.
-                            if (!canRun(ffmpegExePath)) {
-                                console.warn('Extracted ' + exeName('ffmpeg') + ' did not respond to -version; it will not be used');
+                            if (!canRun(expectedPath)) {
+                                console.warn('Extracted ' + expectedName + ' did not respond to -version; it will not be used');
                                 if (fs.existsSync(tempZipPath)) try { fs.unlinkSync(tempZipPath); } catch { /* ignore */ }
                                 done(false);
                                 return;
@@ -489,8 +606,8 @@ async function downloadFFmpeg(): Promise<boolean> {
 
                             if (fs.existsSync(tempZipPath)) fs.unlinkSync(tempZipPath);
 
-                            console.log('FFmpeg extracted successfully to:', ffmpegExePath);
-                            ffmpegAvailable = true;
+                            console.log(expectedName + ' extracted successfully to:', expectedPath);
+                            if (!isProbeArchive) ffmpegAvailable = true;
                             resolveFfmpegTools(true);
                             done(true);
                         } catch (e) {
@@ -585,7 +702,7 @@ function extractFfmpegBinaries(archivePath: string, ffmpegDir: string): boolean 
             makeExecutable(dest);
         }
 
-        return wanted.has('ffmpeg');
+        return wanted.size > 0;
     } catch (e) {
         console.error('FFmpeg extraction failed:', e);
         return false;
@@ -621,10 +738,45 @@ function writeFfmpegState(state: { lastAttempt: number; consecutiveFailures: num
 const FFMPEG_RETRY_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const FFMPEG_MAX_BACKGROUND_FAILURES = 3;
 
+// Only one ffprobe top-up per app session: if the mirror is down we must not
+// hold every download hostage to a retry loop.
+let ffprobeTopUpPromise: Promise<void> | null = null;
+let ffprobeTopUpTried = false;
+
+/**
+ * macOS ships ffmpeg and ffprobe as two separate archives, so a machine can end
+ * up with a working ffmpeg and no ffprobe (first archive fetched, second failed
+ * or interrupted). Everything that needs ffprobe then silently degrades
+ * ("ffprobe unavailable, skipping compatibility re-encode"). Fetch just the
+ * missing half.
+ */
+async function topUpFfprobe(): Promise<void> {
+    if (!isMac || ffprobeTopUpTried) return;
+    if (ffprobeTopUpPromise) return ffprobeTopUpPromise;
+    ffprobeTopUpTried = true;
+    ffprobeTopUpPromise = (async () => {
+        console.log('ffprobe missing next to a working ffmpeg, fetching it...');
+        try {
+            if (await downloadFFmpeg(true)) {
+                resolveFfmpegTools(true);
+                console.log('ffprobe ready:', resolvedFfprobe);
+            } else {
+                console.warn('Could not fetch ffprobe; continuing without it.');
+            }
+        } catch (e) {
+            console.warn('ffprobe top-up failed:', e);
+        } finally {
+            ffprobeTopUpPromise = null;
+        }
+    })();
+    return ffprobeTopUpPromise;
+}
+
 export async function ensureFFmpeg(force: boolean = true): Promise<boolean> {
-    const { ffmpeg } = resolveFfmpegTools();
+    const { ffmpeg, ffprobe } = resolveFfmpegTools();
     if (ffmpeg) {
         ffmpegAvailable = true;
+        if (!ffprobe) await topUpFfprobe();
         return true;
     }
 
@@ -672,10 +824,11 @@ export async function ensureFFmpeg(force: boolean = true): Promise<boolean> {
 }
 
 export function checkFFmpegOnStartup() {
-    const { ffmpeg } = resolveFfmpegTools();
+    const { ffmpeg, ffprobe } = resolveFfmpegTools();
     if (ffmpeg) {
         ffmpegAvailable = true;
         console.log('FFmpeg ready:', ffmpeg);
+        if (!ffprobe) topUpFfprobe().catch((e) => console.error('Background ffprobe setup failed:', e));
         return;
     }
 

@@ -106,6 +106,29 @@ Keep the app running in the background for instant access
 
 ---
 
+## 🆕 What's New in 2.2.0
+
+### 🎞️ Plays & Imports Everywhere
+- **Universal video compatibility** — downloads are checked and, when needed, converted to H.264 + AAC in an MP4, so files open in QuickTime, VLC, Premiere, DaVinci Resolve, CapCut and on phones
+- **No more "audio only" videos** in QuickTime or editors
+- **Smarter conversion** — only the stream that needs fixing is re-encoded; most files finish quickly
+
+### 🍎🐧 macOS & Linux Fixes
+- **yt-dlp `ENOENT` fixed** — the downloader is now installed correctly on Mac/Linux (it was never marked executable before its safety check), and a first-launch race that failed early requests is gone
+- **ffprobe on macOS** — a missing ffprobe is fetched on its own, so compatibility conversion no longer gets skipped
+- **Menu-bar icon** scaled correctly on macOS
+- **Homebrew & Snap tools** (FFmpeg, Deno, Node) are detected when the app is launched from Finder or a launcher
+- **Browser extension setup** works across Chrome, Edge, Brave, Vivaldi, Chromium and Opera on macOS/Linux
+
+### 🛠️ Reliability & Design
+- **Safer yt-dlp update button** — a failed update never leaves you without a working downloader
+- **Subtitles & Spotify downloads** now verify yt-dlp is ready before starting
+- **New TikTok icon** with the classic cyan & red glitch style
+
+See the full history in the [changelog](CHANGELOG.md).
+
+---
+
 ## 🖼️ Screenshots
 
 <div align="center">

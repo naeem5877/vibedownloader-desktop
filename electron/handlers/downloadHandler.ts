@@ -8,12 +8,12 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 // @ts-ignore
 import NodeID3 from 'node-id3';
-import { getYtDlpWrap, getYtDlpBinaryPath, ensureFFmpeg, getFfmpegBinaryPath, getFfprobePath, isFfmpegAvailable } from '../utils/binaries';
+import { getYtDlpWrap, getYtDlpBinaryPath, ensureYtDlpReady, ensureFFmpeg, getFfmpegBinaryPath, getFfprobePath, isFfmpegAvailable } from '../utils/binaries';
 import { getOrganizedPath, getCookiePath, loadSettings } from '../utils/paths';
 import { getMainWindow } from '../utils/windowManager';
 import { showNotification } from '../utils/notifications';
 import { fetchYouTubeMusicAlbumArt, extractYouTubeVideoId } from '../utils/youtubeMusic';
-import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv, describeJsRuntime } from '../utils/platform';
+import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv, describeJsRuntime, isMac } from '../utils/platform';
 import { preferredYoutubeClient } from '../utils/youtubeStrategy';
 import { redactUrlForLog } from '../utils/redact';
 import { reportDownloadFailure } from '../utils/sentry';
@@ -154,6 +154,10 @@ const jsRuntime = detectJsRuntime();
     const ffmpegPath = getFfmpegBinaryPath();
     if (ffmpegPath) args.push('--ffmpeg-location', path.dirname(ffmpegPath));
 
+    try { await ensureYtDlpReady(); } catch (e: any) {
+        return { success: false, error: `Could not prepare the downloader: ${e?.message || e}` };
+    }
+
 for (let attempt = 1; attempt <= SUBTITLE_ATTEMPTS; attempt++) {
         let stderr = '';
         try {
@@ -291,77 +295,124 @@ async function cutMediaFile(filePath: string, start: number, end: number): Promi
 // messaging apps and many hardware players. Probe the finished file and, when
 // the video codec isn't H.264 (or the audio is HE-AAC/Vorbis/Opus), re-encode
 // to the universally compatible H.264 + AAC-LC using the integrated FFmpeg.
-async function recodeVideoToH264(filePath: string): Promise<void> {
-    if (!fs.existsSync(filePath)) return;
+async function recodeVideoToH264(filePath: string): Promise<string> {
+    if (!fs.existsSync(filePath)) return filePath;
     const ffmpeg = getFfmpegBinaryPath();
     const ffprobe = getFfprobePath();
     if (!ffprobe || !ffmpeg) {
         console.warn('FFmpeg/ffprobe unavailable, skipping compatibility re-encode');
-        return;
+        return filePath;
     }
 
     let probe: any;
     try {
         const { stdout } = await execFileAsync(ffprobe, [
             '-hide_banner', '-v', 'error',
-            '-show_entries', 'stream=codec_type,codec_name,profile',
+            '-show_entries', 'stream=index,codec_type,codec_name,profile,pix_fmt,codec_tag_string,channels,width,height:stream_disposition=attached_pic',
             '-of', 'json',
             filePath
         ]);
         probe = JSON.parse(stdout);
     } catch (e) {
         console.error('Failed to probe codecs:', e);
-        return;
+        return filePath;
     }
 
     const streams = probe?.streams || [];
-    const video = streams.find((s: any) => s.codec_type === 'video');
+    // Cover art is exposed as a "video" stream; it is not the real video.
+    const isRealVideo = (s: any) => s.codec_type === 'video' && !(s.disposition && s.disposition.attached_pic);
+    const video = streams.find(isRealVideo);
     const audio = streams.find((s: any) => s.codec_type === 'audio');
-    if (!video) return;
+    if (!video) return filePath;
 
-    const videoOk = /h264|avc/i.test(video.codec_name || '');
+    // "Plays in VLC" is not the bar. The bar is QuickTime, Premiere, DaVinci,
+    // CapCut and phones. That means 8-bit 4:2:0 H.264 (not High 10 / 4:4:4, not
+    // HEVC/VP9/AV1) with AAC-LC or MP3/AC-3 audio, in an MP4 container.
+    const vName = (video.codec_name || '').toLowerCase();
+    const vProfile = (video.profile || '').toLowerCase();
+    const pixFmt = (video.pix_fmt || '').toLowerCase();
+    const h264 = vName === 'h264';
+    const profileOk = !/(high 10|high 4:2:2|high 4:4:4|hi10|hi422|hi444)/.test(vProfile);
+    const pixOk = !pixFmt || pixFmt === 'yuv420p' || pixFmt === 'yuvj420p';
+    const videoOk = h264 && profileOk && pixOk;
+
     const audioCodec = (audio?.codec_name || '').toLowerCase();
     const audioProfile = (audio?.profile || '').toLowerCase();
     const heAac = audioCodec === 'aac' && (audioProfile.includes('he') || audioProfile.includes('latm'));
-    const audioOk = !audio || ['mp3', 'ac3', 'eac3'].includes(audioCodec) || (audioCodec === 'aac' && !heAac);
-    if (videoOk && audioOk) return;
+    const audioChannels = Number(audio?.channels) || 2;
+    const audioOk = !audio
+        || ['mp3', 'ac3', 'eac3'].includes(audioCodec)
+        || (audioCodec === 'aac' && !heAac && audioChannels <= 8);
 
-    const ext = path.extname(filePath);
-    const tmpPath = filePath.replace(ext, `_recode${ext}`);
+    const ext = path.extname(filePath).toLowerCase();
+    // webm/mkv/mov can never be what the user gets: editors and QuickTime want
+    // mp4. A needless container swap is a cheap stream copy.
+    const containerOk = ext === '.mp4' || ext === '.m4v';
+    const tagOk = !h264 || (video.codec_tag_string || '').toLowerCase() === 'avc1';
+
+    if (videoOk && audioOk && containerOk && tagOk) return filePath;
+
+    const outPath = filePath.slice(0, filePath.length - ext.length) + '.mp4';
+    const tmpPath = filePath.slice(0, filePath.length - ext.length) + '_recode.mp4';
 
     // Transcode ONLY the streams that actually need it. Re-encoding the video
-    // is the expensive part (minutes for a 1080p file), so an HE-AAC audio
-    // track is fixed with a stream copy of the video instead.
-    const codecArgs: string[] = videoOk
-        ? ['-c:v', 'copy']
-        : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p'];
-
-    if (audio) {
-        if (audioOk) {
-            codecArgs.push('-c:a', 'copy');
-        } else {
-            codecArgs.push('-c:a', 'aac', '-b:a', '192k');
-        }
-    }
-
-    const reason = [
-        videoOk ? null : `${video.codec_name} video`,
-        !audioOk ? `${audioCodec}${heAac ? ' (HE-AAC)' : ''} audio` : null
-    ].filter(Boolean).join(' + ') || 'compatibility';
-    console.log(`Re-encoding ${reason} for compatibility:`, path.basename(filePath));
-    try {
-        await execFileAsync(ffmpeg, [
+    // is the expensive part (minutes for a 1080p file), so a bad audio track or
+    // a wrong container is fixed with a stream copy of the video instead.
+    const buildArgs = (videoEncoder: 'libx264' | 'h264_videotoolbox'): string[] => {
+        const v: string[] = videoOk
+            ? ['-c:v', 'copy', '-tag:v', 'avc1']
+            : videoEncoder === 'libx264'
+                ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+                   // H.264 4:2:0 needs even dimensions or the encoder refuses.
+                   '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-tag:v', 'avc1']
+                : ['-c:v', 'h264_videotoolbox', '-b:v', '8M', '-pix_fmt', 'yuv420p',
+                   '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-tag:v', 'avc1'];
+        const a: string[] = audio
+            ? (audioOk ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000'])
+            : [];
+        return [
             '-hide_banner', '-loglevel', 'error', '-y',
             '-i', filePath,
-            ...codecArgs,
+            // First real video + first audio only. Dropping subtitle/data/attached
+            // streams is what keeps ffmpeg from failing on an unmappable track.
+            '-map', `0:${video.index}`,
+            ...(audio ? ['-map', `0:${audio.index}`] : []),
+            '-sn', '-dn',
+            ...v, ...a,
+            '-max_muxing_queue_size', '4096',
             '-movflags', '+faststart',
+            '-f', 'mp4',
             tmpPath
-        ]);
-        fs.renameSync(tmpPath, filePath);
-    } catch (e) {
-        console.error('Failed to re-encode video to H.264:', e);
-        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+        ];
+    };
+
+    const reason = [
+        videoOk ? null : `${vName}${pixOk ? '' : ' ' + pixFmt} video`,
+        !audioOk ? `${audioCodec}${heAac ? ' (HE-AAC)' : ''} audio` : null,
+        !containerOk ? `${ext || 'unknown'} container` : null
+    ].filter(Boolean).join(' + ') || 'compatibility tags';
+    console.log(`Re-encoding ${reason} for compatibility:`, path.basename(filePath));
+
+    const cleanupTmp = () => { try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {} };
+    const encoders: ('libx264' | 'h264_videotoolbox')[] = ['libx264'];
+    // Some minimal ffmpeg builds ship without libx264; VideoToolbox is the safety net on macOS.
+    if (isMac && !videoOk) encoders.push('h264_videotoolbox');
+
+    for (const enc of encoders) {
+        try {
+            await execFileAsync(ffmpeg, buildArgs(enc), { maxBuffer: 64 * 1024 * 1024 });
+            if (!fs.existsSync(tmpPath) || fs.statSync(tmpPath).size === 0) throw new Error('ffmpeg produced no output');
+            if (outPath !== filePath) {
+                try { fs.unlinkSync(filePath); } catch {}
+            }
+            fs.renameSync(tmpPath, outPath);
+            return outPath;
+        } catch (e) {
+            console.error(`Failed to re-encode video with ${enc}:`, e);
+            cleanupTmp();
+        }
     }
+    return filePath;
 }
 
 let activeDownloads = 0;
@@ -480,6 +531,7 @@ export function registerDownloadHandlers() {
         registerDownloadStart();
         try {
             const mainWindow = getMainWindow();
+            await ensureYtDlpReady();
             const ytDlpWrap = getYtDlpWrap();
 
             // TikTok tracking params (is_from_webapp, sender_device) can break
@@ -663,14 +715,15 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
                 fs.writeFileSync(finalFilePath, fileBuffer);
 
+                let directPath = finalFilePath;
                 if (finalExt === 'mp4') {
-                    await recodeVideoToH264(finalFilePath);
+                    directPath = await recodeVideoToH264(finalFilePath);
                 }
 
-                    let resultPath = finalFilePath;
+                    let resultPath = directPath;
                     if (isCutDownload) {
                         mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
-                        const cutPath = await cutMediaFile(finalFilePath, cutStart, cutEnd);
+                        const cutPath = await cutMediaFile(directPath, cutStart, cutEnd);
                         if (cutPath) resultPath = cutPath;
                         else console.error('Cut failed, keeping full-length file');
                     }
@@ -833,7 +886,9 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                     if (formatId && formatId !== 'best') {
                         // Pair the chosen video with the chosen audio language.
                         // `bestaudio` would quietly hand back the original track.
-                        args.push('-f', `${formatId}+${audioTrack || 'bestaudio'}/best`);
+                        // Prefer AAC (m4a) audio: it muxes straight into MP4 and
+                        // keeps QuickTime/editors happy. Opus only if there is no m4a.
+                        args.push('-f', `${formatId}+${audioTrack || 'bestaudio[ext=m4a]/bestaudio'}/best`);
                         if (audioTrack) {
                             console.log(`Merging ${formatId} with ${audioLangLabel || audioTrack} audio (format ${audioTrack})`);
                         }
@@ -1049,7 +1104,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                             // A second ffmpeg pass, and the longest step of a video
                             // download: recoding to H.264 rewrites every frame.
                             sendStage('Converting to H.264');
-                            await recodeVideoToH264(actualFilePath);
+                            actualFilePath = await recodeVideoToH264(actualFilePath);
                         }
 
                         // Cut the finished file down to [cutStart, cutEnd] if requested.
@@ -1266,6 +1321,7 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             // binary, which is otherwise a loader with nothing to say for it.
             mainWindow?.webContents.send('download-progress', { percent: 0, stage: 'Preparing FFmpeg', processing: false, jobId });
             await ensureFFmpeg();
+            await ensureYtDlpReady();
 
             console.log(`Searching YouTube for: ${searchQuery}`);
             const ytDlpWrap = getYtDlpWrap();

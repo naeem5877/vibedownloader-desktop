@@ -7,32 +7,42 @@ import { getNativeOrigins, FIREFOX_ADDON_ID } from './extensionInstaller';
 
 const HOST_NAME = 'com.vibedownloader.host';
 
-function getChromeNativeMessagingDir(): string | null {
+/**
+ * NativeMessagingHosts folders for every Chromium-family browser on macOS and
+ * Linux. Chrome is always written (it is the common case and creating its
+ * folder is harmless); the others only when the browser's profile folder
+ * already exists, so we never litter machines that do not have them.
+ */
+function getChromiumNativeMessagingDirs(): string[] {
     const home = os.homedir();
     const platform = os.platform();
+    const roots: { root: string; always?: boolean }[] = [];
 
-    switch (platform) {
-        case 'win32':
-            return path.join(home, 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Default', 'NativeMessagingHosts');
-        case 'darwin':
-            return path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts');
-        case 'linux':
-            return path.join(home, '.config', 'google-chrome', 'NativeMessagingHosts');
-        default:
-            return null;
+    if (platform === 'darwin') {
+        const support = path.join(home, 'Library', 'Application Support');
+        roots.push(
+            { root: path.join(support, 'Google', 'Chrome'), always: true },
+            { root: path.join(support, 'Microsoft Edge') },
+            { root: path.join(support, 'BraveSoftware', 'Brave-Browser') },
+            { root: path.join(support, 'Vivaldi') },
+            { root: path.join(support, 'Chromium') },
+            { root: path.join(support, 'com.operasoftware.Opera') },
+        );
+    } else if (platform === 'linux') {
+        const config = path.join(home, '.config');
+        roots.push(
+            { root: path.join(config, 'google-chrome'), always: true },
+            { root: path.join(config, 'microsoft-edge') },
+            { root: path.join(config, 'BraveSoftware', 'Brave-Browser') },
+            { root: path.join(config, 'vivaldi') },
+            { root: path.join(config, 'chromium') },
+            { root: path.join(config, 'opera') },
+        );
     }
-}
 
-function getEdgeNativeMessagingDir(): string | null {
-    const home = os.homedir();
-    const platform = os.platform();
-
-    switch (platform) {
-        case 'win32':
-            return path.join(home, 'AppData', 'Local', 'Microsoft', 'Edge', 'User Data', 'Default', 'NativeMessagingHosts');
-        default:
-            return null;
-    }
+    return roots
+        .filter(r => r.always || fs.existsSync(r.root))
+        .map(r => path.join(r.root, 'NativeMessagingHosts'));
 }
 
 // Where the bundled Windows host exe lives inside the app. Only ever called
@@ -68,6 +78,7 @@ function writeShScript(dir: string, content: string, filename: string): string {
 }
 
 function writeManifest(manifestPath: string, manifest: Record<string, unknown>) {
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     console.log('Registered native host:', manifestPath);
 }
@@ -195,8 +206,6 @@ export function registerNativeHost() {
         } else {
             // macOS / Linux: hosts are discovered from these directories.
             const scriptPath = writeShScript(hostDir, generateShContent(), `${HOST_NAME}.sh`);
-            const chromeDir = getChromeNativeMessagingDir();
-            const edgeDir = getEdgeNativeMessagingDir();
             const manifest = {
                 name: HOST_NAME,
                 description: 'VibeDownloader Native Messaging Host',
@@ -204,8 +213,15 @@ export function registerNativeHost() {
                 type: 'stdio' as const,
                 allowed_origins: getNativeOrigins()
             };
-            if (chromeDir) writeManifest(path.join(chromeDir, `${HOST_NAME}.json`), manifest);
-            if (edgeDir) writeManifest(path.join(edgeDir, `${HOST_NAME}.json`), manifest);
+            // Each browser has its own folder, and a missing one used to throw on
+            // the first browser and silently skip every browser after it.
+            for (const dir of getChromiumNativeMessagingDirs()) {
+                try {
+                    writeManifest(path.join(dir, `${HOST_NAME}.json`), manifest);
+                } catch (e) {
+                    console.error('Failed to register native host in', dir, e);
+                }
+            }
         }
 
     } catch (e) {

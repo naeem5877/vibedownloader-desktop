@@ -1,7 +1,7 @@
 import { ipcMain, app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { getYtDlpWrap } from '../utils/binaries';
+import { getYtDlpWrap, ensureYtDlpReady } from '../utils/binaries';
 import { getCookiePath } from '../utils/paths';
 import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
 import { defaultUserAgent, detectJsRuntime, jsRuntimeSpawnEnv, describeJsRuntime } from '../utils/platform';
@@ -236,6 +236,7 @@ export function registerInfoHandlers() {
         let lastAttemptLabel = 'default';
 
         try {
+            await ensureYtDlpReady();
             const ytDlpWrap = getYtDlpWrap();
             const hasListParam = url.includes('list=');
             const isRadioMix = url.includes('start_radio=1') || url.includes('list=RD') || url.includes('list=RDMM');

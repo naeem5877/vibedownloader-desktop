@@ -9,7 +9,8 @@ import {
     Instagram,
     Facebook
 } from 'lucide-react';
-import { FaSpotify, FaTiktok, FaSoundcloud, FaTwitch, FaPinterest, FaXTwitter } from 'react-icons/fa6';
+import { FaSpotify, FaSoundcloud, FaTwitch, FaPinterest, FaXTwitter } from 'react-icons/fa6';
+import TikTokIcon from './TikTokIcon';
 
 interface EmptyStateProps {
     currentPlatform: {
@@ -55,7 +56,7 @@ const EmptyState: React.FC<EmptyStateProps> = memo(({ currentPlatform, hasCookie
             title: 'TikTok Downloader',
             subtitle: 'Videos & Sounds',
             features: ['🎬 Videos', '🎵 Sounds', '🎥 No Mark', '🚀 Fast'],
-            icon: <FaTiktok className="w-12 h-12" />,
+            icon: <TikTokIcon className="w-12 h-12" />,
             color: '#00F2EA'
         },
         facebook: {

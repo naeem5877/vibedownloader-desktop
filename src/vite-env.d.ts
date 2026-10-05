@@ -78,9 +78,20 @@ interface Window {
 
         // Auto-Update System
         checkForUpdates: () => Promise<{ success: boolean; updateInfo?: any; error?: string }>;
-        installUpdate: () => Promise<{ success: boolean; error?: string }>;
+        installUpdate: (opts?: { force?: boolean }) => Promise<{ success: boolean; error?: string; activeDownloads?: number }>;
+        getUpdateState: () => Promise<{
+            status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+            version?: string;
+            currentVersion: string;
+            percent?: number;
+            bytesPerSecond?: number;
+            transferred?: number;
+            total?: number;
+            message?: string;
+            releaseUrl: string;
+        }>;
         getAppInfo: () => Promise<{ version: string; name: string; isPackaged: boolean }>;
-        onUpdateStatus: (callback: (data: any) => void) => void;
+        onUpdateStatus: (callback: (data: any) => void) => () => void;
         offUpdateStatus?: () => void;
 
         onProgress: (callback: (data: any) => void) => void;

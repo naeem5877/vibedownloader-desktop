@@ -1,5 +1,5 @@
 
-import { app, BrowserWindow, shell, Tray, Menu } from 'electron';
+import { app, BrowserWindow, shell, Tray, Menu, nativeImage } from 'electron';
 import path from 'path';
 import { initPaths, ensureYtDlp, checkFFmpegOnStartup, checkForYtDlpUpdate } from './utils/binaries';
 import { setMainWindow } from './utils/windowManager';
@@ -134,7 +134,15 @@ function createTray() {
         ? path.join(process.resourcesPath, 'build', 'icon.png')
         : path.join(__dirname, '..', 'build', 'icon.png');
 
-    tray = new Tray(iconPath);
+    // The source icon is a large (hundreds of px) PNG. Handed to Tray as-is it
+    // renders at full size on macOS and clips into a huge cropped icon in the
+    // menu bar, so scale it to the size each platform's tray expects.
+    let trayImage = nativeImage.createFromPath(iconPath);
+    if (!trayImage.isEmpty()) {
+        const size = process.platform === 'darwin' ? 18 : process.platform === 'linux' ? 22 : 16;
+        trayImage = trayImage.resize({ width: size, height: size, quality: 'best' });
+    }
+    tray = new Tray(trayImage);
     const contextMenu = Menu.buildFromTemplate([
         {
             label: 'Open VibeDownloader',

@@ -1,3 +1,63 @@
+## [2.2.0] - 2026-10-05
+
+### 🎞️ Plays & Imports Everywhere
+- **Universal Video Compatibility**: Every downloaded video is now checked and, when needed, converted to 8-bit 4:2:0 H.264 (`avc1`) + AAC in an MP4 with fast-start. VP9, AV1, HEVC, 10-bit/4:4:4 video, HE-AAC/Opus audio and webm/mkv containers are all handled, so files open in QuickTime, VLC, Premiere, DaVinci Resolve, CapCut and on phones.
+- **No More "Audio Only" Videos**: Fixes videos that opened as audio only in QuickTime/editors and the "file contains media which isn't compatible with QuickTime Player" warning.
+- **Works on Every Platform**: Applies to YouTube, Instagram, TikTok, Facebook, X and Twitch, including direct-CDN story downloads.
+- **Smarter Conversion**: Only the stream that needs fixing is re-encoded; the rest is copied, so most files finish quickly. Subtitle/cover-art streams can no longer make the conversion fail, and macOS falls back to hardware encoding if needed.
+- **Cleaner Audio Pick**: Downloads prefer AAC (m4a) audio, so most files need no re-encode at all.
+
+### 🍎🐧 macOS & Linux Fixes
+- **yt-dlp ENOENT Fixed**: A Windows `yt-dlp.exe` (or a Windows executable under the `yt-dlp` name) left in a Mac/Linux profile is removed and the correct build (`yt-dlp_macos`, `yt-dlp_linux`, `yt-dlp_linux_aarch64`) is fetched automatically. yt-dlp is re-checked right before every link fetch and download.
+- **yt-dlp Now Installs on Mac & Linux**: The freshly downloaded yt-dlp wasn't marked executable before its safety check, so the check always failed and the file was never installed, which caused `spawn … yt-dlp ENOENT` on macOS. It is now made executable first.
+- **No More First-Launch Race**: If you pasted a link while yt-dlp was still downloading on the first run, the request failed. It now waits for the running download instead of erroring.
+- **Subtitles & Spotify Check yt-dlp Too**: Subtitle downloads and Spotify track downloads now make sure yt-dlp is ready before starting, like every other download.
+- **ffprobe on macOS**: On Mac, FFmpeg and ffprobe are separate downloads, and a missing ffprobe silently skipped video compatibility conversion. A missing ffprobe is now fetched on its own, at startup and before downloads.
+- **Oversized Menu-Bar Icon**: The tray/menu-bar icon is now scaled per OS instead of showing a huge, cropped icon on macOS.
+- **Homebrew & Snap Tools Found**: Apps launched from Finder or a desktop launcher couldn't see Homebrew/snap installs of FFmpeg, Deno or Node. They are now detected.
+- **Browser Extension Setup**: The native-messaging host is now registered for Chrome, Edge, Brave, Vivaldi, Chromium and Opera on macOS/Linux, and one missing browser folder no longer stops the others from registering.
+
+### 🛠️ Reliability
+- **Safer yt-dlp Update Button**: Updating from Settings no longer deletes the working yt-dlp before the new one is downloaded. If the update fails, your current version keeps working.
+
+### 🎨 Design
+- **New TikTok Icon**: A sharper, redrawn TikTok icon with the cyan and red glitch shadows and no background box. It adapts to the active/inactive tab colors and is used in the platform bar and on the TikTok screen.
+
+## [2.1.0] - 2026-10-04
+
+### 🎬 YouTube Upgrades
+- **Subtitles Download**: Videos with captions now show a **Subtitles** option. Pick a language and save the subtitles as an SRT file.
+- **Multi-Language Audio Tracks**: If a video has more than one audio track (for example Bangla, English, Hindi), you can now choose the exact language you want.
+- **Audio or Video in Your Language**: Download the selected language as an audio file, or as a video with that audio track.
+- **Smarter Format Detection**: The app now checks the quality list YouTube returns. If it looks incomplete (for example only 360p), it tries again with a different player before showing you the result.
+
+### 🎵 Lyrics Download (Spotify & YouTube Music)
+- **Lyrics for Music Tracks**: When a song has lyrics available, a new lyrics option appears in the music section.
+- **Line by Line**: Synced lyrics, one line at a time.
+- **Word by Word**: Lyrics timed word by word, for karaoke-style use.
+- **Plain Text**: Clean lyrics without timestamps.
+- **Translation**: Download a translated version of the lyrics.
+
+### 🎧 Music Downloading
+- **WAV Format Added**: Download songs as uncompressed WAV for the highest audio fidelity.
+- **Better Metadata Embedding**: Downloaded songs now include **track, album and artist** details, so they show up correctly in your music player.
+- **Spotify: 4 Audio Formats**: Spotify downloads now offer four audio format options.
+
+### 📸 Stories
+- **Instagram Stories Fixed**: Story downloading works again.
+- **Facebook Stories Fixed**: Story downloading works again.
+
+### 🛡️ Bot Protection & Age Restriction
+- **Improved YouTube Reliability**: Reworked how the app talks to YouTube to reduce "bot protection" and age-restriction errors, including on PCs where it previously failed.
+- **Automatic Player Fallback**: If one YouTube player is refused, the app tries another instead of showing an error.
+- **Better Error Messages**: The app reads the real reason yt-dlp reports, so you see a clearer message when something goes wrong.
+- **Stuck Requests Cancelled Properly**: A timed-out request now stops the downloader process instead of leaving it running in the background.
+- **More Secure Connections**: Removed the setting that skipped certificate checks.
+
+### 🧰 Diagnostics & Debugging
+- **Sentry Error Reporting**: Added to help find and fix crashes faster. Links and file paths are scrubbed before anything is sent.
+- **Private Logs**: Video links in logs are redacted.
+
 ## [2.0.0] - 2026-09-02
 
 ### 🧩 Browser Extension

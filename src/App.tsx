@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion';
 import { TitleBar } from './components/TitleBar';
 import { Downloader } from './components/Downloader';
 import { Onboarding } from './components/Onboarding';
+import { UpdateBanner } from './components/UpdateBanner';
 
 function App() {
     const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -53,6 +54,7 @@ function App() {
         <>
             <TitleBar />
             <Downloader />
+            <UpdateBanner />
             <AnimatePresence>
                 {onboardingOpen && (
                     <Onboarding

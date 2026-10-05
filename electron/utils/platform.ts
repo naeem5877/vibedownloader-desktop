@@ -97,6 +97,20 @@ export function defaultUserAgent(): string {
     return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 }
 
+/**
+ * PATH as a terminal would see it. A GUI app launched from Finder, the Dock or a
+ * desktop launcher gets a minimal PATH (/usr/bin:/bin:...) that does NOT include
+ * Homebrew (/opt/homebrew/bin, /usr/local/bin) or snap/flatpak shims, so
+ * `which ffmpeg` found nothing even when ffmpeg was installed.
+ */
+function searchPath(): string {
+    const base = process.env.PATH || '';
+    if (isWindows) return base;
+    const extra = ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/local/sbin', '/usr/bin', '/bin', '/snap/bin', '/home/linuxbrew/.linuxbrew/bin'];
+    const have = new Set(base.split(':').filter(Boolean));
+    return [...have, ...extra.filter(p => !have.has(p))].join(':');
+}
+
 /** Cross-platform PATH lookup: `where.exe` on Windows, `which` elsewhere. */
 export function whichSync(command: string): string | null {
     try {
@@ -105,6 +119,7 @@ export function whichSync(command: string): string | null {
             encoding: 'utf-8',
             timeout: 10000,
             windowsHide: true,
+            env: { ...process.env, PATH: searchPath() },
             // Not-found is the normal answer here, and `where.exe` writes
             // "Could not find files for the given pattern(s)" to stderr. Left
             // alone that line surfaces in the console as if something broke.

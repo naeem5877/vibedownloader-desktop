@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions, Loader2
 } from 'lucide-react';
-import { FaTiktok, FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
+import { FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
+import TikTokIcon from './ui/TikTokIcon';
 import { Settings } from './Settings';
 import { TutorialModal } from './TutorialModal';
 import { CutTimeline } from './CutTimeline';
@@ -96,7 +97,7 @@ interface Platform {
 const platforms: Platform[] = [
     { id: 'youtube', name: 'YouTube', icon: <FaYoutube size={22} />, color: '#FF0000', bgClass: 'bg-red-600' },
     { id: 'instagram', name: 'Instagram', icon: <FaInstagram size={22} />, color: '#E4405F', bgClass: 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400' },
-    { id: 'tiktok', name: 'TikTok', icon: <FaTiktok size={22} />, color: '#00F2EA', bgClass: 'bg-black' },
+    { id: 'tiktok', name: 'TikTok', icon: <TikTokIcon size={22} />, color: '#00F2EA', bgClass: 'bg-black' },
     { id: 'facebook', name: 'Facebook', icon: <FaFacebook size={22} />, color: '#1877F2', bgClass: 'bg-blue-600' },
     { id: 'spotify', name: 'Spotify', icon: <FaSpotify size={22} />, color: '#1DB954', bgClass: 'bg-green-500' },
     { id: 'x', name: 'X', icon: <FaXTwitter size={22} />, color: '#FFFFFF', bgClass: 'bg-white' },

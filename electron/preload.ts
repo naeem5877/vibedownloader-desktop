@@ -39,12 +39,16 @@ contextBridge.exposeInMainWorld('electron', {
 
     // Auto-Update System
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-    installUpdate: () => ipcRenderer.invoke('install-update'),
+    installUpdate: (opts?: { force?: boolean }) => ipcRenderer.invoke('install-update', opts),
+    getUpdateState: () => ipcRenderer.invoke('get-update-state'),
     getAppInfo: () => ipcRenderer.invoke('get-app-info'),
     onUpdateStatus: (callback: (data: any) => void) => {
         const handler = (_: any, data: any) => callback(data);
         ipcRenderer.on('update-status', handler);
         (window as any)._updateStatusHandler = handler;
+        // Returns its own unsubscribe so a component can clean up exactly the
+        // listener it added instead of relying on a single shared slot.
+        return () => ipcRenderer.removeListener('update-status', handler);
     },
     offUpdateStatus: () => {
         const handler = (window as any)._updateStatusHandler;

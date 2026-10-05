@@ -2,10 +2,9 @@ import { ipcMain, shell, dialog, app } from 'electron';
 import fs from 'fs';
 import { getMainWindow } from '../utils/windowManager';
 import { getHistoryPath, loadSettings, saveSettings } from '../utils/paths';
-import { getYtDlpWrap, getYtDlpBinaryPath, initPaths } from '../utils/binaries';
+import { getYtDlpVersion, checkForYtDlpUpdate } from '../utils/binaries';
 import { defaultUserAgent } from '../utils/platform';
 import { showNotification } from '../utils/notifications';
-import YtDlpWrap from 'yt-dlp-wrap';
 
 interface HistoryItem {
     id: string;
@@ -189,8 +188,7 @@ export function registerGeneralHandlers() {
     ipcMain.handle('get-versions', async () => {
         let ytdlpVersion = 'Unknown';
         try {
-            const output = await getYtDlpWrap().execPromise(['--version']);
-            ytdlpVersion = output.trim();
+            ytdlpVersion = (await getYtDlpVersion()) || 'Unknown';
         } catch (e) {
             console.error('Failed to get yt-dlp version:', e);
         }
@@ -204,57 +202,23 @@ export function registerGeneralHandlers() {
     ipcMain.handle('update-ytdlp', async () => {
         try {
             console.log('Checking for yt-dlp updates from settings...');
-            const ytDlpBinaryPath = getYtDlpBinaryPath();
+            const before = await getYtDlpVersion();
 
-            // 1. Get current version
-            let currentVersion = 'Unknown';
-            try {
-                const ytDlp = new YtDlpWrap(ytDlpBinaryPath);
-                currentVersion = (await ytDlp.getVersion()).trim();
-            } catch (e) {
-                console.log('Could not get current version');
+            // Uses the same verified path as the automatic updater: the new binary
+            // is downloaded beside the old one, must run, and only then replaces
+            // it. The previous code deleted the working binary first and then went
+            // through GitHub's rate-limited API, so one failed download left the
+            // user with no yt-dlp at all (every download then died with ENOENT).
+            const result = await checkForYtDlpUpdate(true);
+
+            if (result.error && !result.version) {
+                const current = before || (await getYtDlpVersion()) || 'Unknown';
+                return { updated: false, error: `Could not update yt-dlp (${result.error}). Your current version still works.`, version: current };
             }
-
-            // 2. Get latest version from Github
-            const latestGithubRelease = await YtDlpWrap.getGithubReleases(1, 1);
-            if (!latestGithubRelease || latestGithubRelease.length === 0) {
-                return { updated: false, message: 'Could not connect to GitHub', version: currentVersion };
+            if (!result.updated) {
+                return { updated: false, message: 'yt-dlp engine is already up to date!', version: result.version || before || 'Unknown' };
             }
-
-            const latestVersion = latestGithubRelease[0].tag_name;
-
-            if (currentVersion === latestVersion) {
-                return { updated: false, message: 'yt-dlp engine is already up to date!', version: currentVersion };
-            }
-
-            // 3. Download update
-            console.log(`Updating yt-dlp: ${currentVersion} -> ${latestVersion}`);
-
-            // Delete old binary first to avoid permission issues on some systems
-            if (fs.existsSync(ytDlpBinaryPath)) {
-                try {
-                    fs.unlinkSync(ytDlpBinaryPath);
-                } catch (e) {
-                    console.error('Failed to delete old binary:', e);
-                }
-            }
-
-            await YtDlpWrap.downloadFromGithub(ytDlpBinaryPath);
-
-            // 4. Verify new version
-            let newVersion = '';
-            try {
-                const ytDlp = new YtDlpWrap(ytDlpBinaryPath);
-                newVersion = (await ytDlp.getVersion()).trim();
-            } catch (e) {
-                console.log('Could not verify new version');
-            }
-
-            if (newVersion && newVersion === latestVersion) {
-                return { updated: true, version: newVersion };
-            } else {
-                return { updated: true, version: newVersion || latestVersion, message: 'Update completed but version verification failed' };
-            }
+            return { updated: true, version: result.version || 'Unknown' };
         } catch (e: any) {
             console.error('Update failed:', e);
             return { updated: false, error: e.message || 'Failed to download update' };
