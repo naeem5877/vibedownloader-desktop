@@ -61,15 +61,15 @@ Unlike web-based downloaders cluttered with ads and trackers, VibeDownloader run
 
 ---
 
-## 🆕 What's New in v2.1.0
+## 🆕 What's New in v2.2.0
 
-- 💬 **Subtitles** — download captions as SRT in any available language
-- 🌍 **Multi-language audio tracks** — pick Bangla, English, Hindi and more, then save as audio or video
-- 🎤 **Lyrics download** — line by line, word by word, plain text, or translated (Spotify & YouTube Music)
-- 🎧 **WAV format** — uncompressed audio for music downloads
-- 🏷️ **Better metadata** — track, album and artist embedded in every song
-- 📖 **Stories fixed** — Instagram and Facebook story downloading works again
-- 🛡️ **More reliable YouTube** — automatic player fallback to reduce bot-protection and age-restriction errors
+- 🎞️ **Plays everywhere** — downloads are auto-converted to H.264 + AAC when needed, so videos open in QuickTime, VLC, Premiere, CapCut and on phones
+- 🔇 **No more "audio only" videos** — fixes files that opened without picture in QuickTime and editors
+- 🍎 **macOS yt-dlp fix** — resolves the `spawn yt-dlp ENOENT` error and the first-launch failure on Mac & Linux
+- 🧰 **ffprobe on Mac** — a missing ffprobe is fetched automatically, so conversion no longer gets skipped
+- 📍 **Mac & Linux polish** — correct menu-bar icon size, Homebrew/Snap tools detected, browser extension setup for more browsers
+- 🔄 **Safer yt-dlp updates** — a failed update never leaves you without a working downloader
+- 🎨 **New TikTok icon** — redrawn with the classic cyan & red glitch style
 
 See the full list on the [**Releases page**](https://github.com/naeem5877/vibedownloader-desktop/releases/latest).
 
