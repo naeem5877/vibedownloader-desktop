@@ -6,7 +6,9 @@
     font-weight: 400;
     color-scheme: dark;
     color: rgba(255, 255, 255, 0.87);
-    background-color: #030712;
+    /* One surface colour for the whole window: the title bar, the page and the
+       loading state all use #0a0a0a so nothing shows a different shade at the edges. */
+    background-color: #0a0a0a;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -24,13 +26,27 @@ body {
     padding: 0;
     min-width: 320px;
     min-height: 100vh;
-    background: #030712;
+    background: #0a0a0a;
     overflow: hidden;
 }
 
 #root {
     width: 100%;
     height: 100vh;
+}
+
+/* Keyboard focus. Only appears for keyboard navigation (never on mouse click) and
+   matches the ring the title bar buttons already use. It sits in the base layer so
+   Tailwind's own outline-none utilities (the URL field draws its own glow) still win. */
+@layer base {
+    :focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.5);
+        outline-offset: 2px;
+    }
+}
+
+::selection {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 /* Custom scrollbar */
@@ -90,6 +106,108 @@ body {
 
 .animate-pulse {
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Library loading: a soft light sweep across each placeholder, a staggered
+   entrance, and a glowing beam that travels down the grid while scanning. */
+@keyframes lib-shimmer {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes lib-rise {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes lib-beam {
+    0% {
+        transform: translateY(-10%);
+        opacity: 0;
+    }
+
+    10%,
+    85% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateY(100vh);
+        opacity: 0;
+    }
+}
+
+@keyframes lib-slide {
+    0% {
+        transform: translateX(-120%);
+    }
+
+    100% {
+        transform: translateX(320%);
+    }
+}
+
+/* Editor tab content eases in each time the tab changes */
+.lib-fade {
+    animation: lib-rise 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lib-fade {
+        animation: none;
+    }
+}
+
+.lib-skeleton {
+    position: relative;
+    overflow: hidden;
+    animation: lib-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.lib-skeleton::after,
+.lib-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(100deg, transparent 25%, rgba(255, 255, 255, 0.07) 50%, transparent 75%);
+    animation: lib-shimmer 1.6s ease-in-out infinite;
+    animation-delay: var(--lib-d, 0s);
+}
+
+.lib-shimmer {
+    position: relative;
+    overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .lib-skeleton,
+    .lib-skeleton::after,
+    .lib-shimmer::after {
+        animation: none;
+    }
+}
+
+/* Equaliser bars on the Library's audio cards. */
+@keyframes eq {
+
+    0%,
+    100% {
+        transform: scaleY(0.25);
+    }
+
+    50% {
+        transform: scaleY(1);
+    }
 }
 
 .scrollbar-none {

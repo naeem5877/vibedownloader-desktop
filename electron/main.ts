@@ -9,12 +9,15 @@ import { registerCookieHandlers } from './handlers/cookieHandler';
 import { registerGeneralHandlers } from './handlers/generalHandler';
 import { registerExtensionHandlers } from './handlers/extensionHandler';
 import { registerLyricsHandlers } from './handlers/lyricsHandler';
+import { registerLibraryScheme, registerLibraryHandlers } from './handlers/libraryHandler';
+import { registerLibraryEditHandlers, cancelAllEdits } from './handlers/libraryEditHandler';
 import { showNotification } from './utils/notifications';
 import { setupAutoUpdater, registerUpdaterHandlers } from './utils/updater';
 import { startWebSocketServer, stopWebSocketServer } from './utils/websocketServer';
 import { registerNativeHost, registerUrlProtocol } from './utils/nativeHost';
 import { prepareUnpackedExtension } from './utils/extensionInstaller';
 import { loadSettings } from './utils/paths';
+import { applyFolderIcon } from './utils/folderIcon';
 import { initSentry, flushSentry } from './utils/sentry';
 import './utils/env'; // Load env vars
 
@@ -25,9 +28,16 @@ initSentry();
 // Initialize paths and binaries state
 initPaths();
 
+// The Library serves thumbnails and previews over a custom scheme. Electron only
+// accepts scheme registration before the app is ready.
+registerLibraryScheme();
+
 // Resource Optimization: Disable GPU to save significant RAM (GPU process often uses 50-100MB)
 // This also merges processes, reducing the total count from 4-5 down to 2-3.
-app.disableHardwareAcceleration();
+// NOTE: GPU acceleration is now ON by default. With it off, every blur, shadow and
+// animation is painted on the CPU, which made the Library and editor feel laggy.
+// Set VIBE_DISABLE_GPU=1 to get the old lower-memory behaviour back.
+if (process.env.VIBE_DISABLE_GPU === '1') app.disableHardwareAcceleration();
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -253,6 +263,9 @@ if (!gotTheLock) {
 
         checkFFmpegOnStartup();
 
+        // Brand the existing download folder too, not only newly created ones.
+        void applyFolderIcon(path.join(loadSettings().downloadBasePath, 'VibeDownloader'));
+
         createWindow();
         
         // Tray only when "Minimize to Tray" is enabled
@@ -311,6 +324,8 @@ if (!gotTheLock) {
         registerGeneralHandlers();
         registerExtensionHandlers();
         registerLyricsHandlers();
+        registerLibraryHandlers();
+        registerLibraryEditHandlers();
         registerUpdaterHandlers();
 
         // Initialize auto-updater (only in production)
@@ -337,6 +352,7 @@ app.on('activate', () => {
 // Cleanup WebSocket server on quit
 app.on('before-quit', () => {
     isQuitting = true;
+    cancelAllEdits(); // do not leave an ffmpeg process (or a half-written file) behind
     stopWebSocketServer();
     // A quit is the one moment a queued report is guaranteed to be dropped
     // without this - the process exits before the request finishes. `before-quit`

@@ -634,16 +634,23 @@ async function downloadFFmpeg(onlyProbe: boolean = false): Promise<boolean> {
     for (const source of sources) {
         console.log(`Trying FFmpeg source: ${source.label}`);
         const ok = await tryDownload(source.url);
-        if (ok) gotFfmpeg = true;
+        const haveFfmpeg = fs.existsSync(ffmpegExePath);
+        const haveProbe = fs.existsSync(ffprobeExePath);
+
+        if (onlyProbe) {
+            if (ok && haveProbe) return true;
+            continue;
+        }
+        if (ok && haveFfmpeg) gotFfmpeg = true;
 
         if (!isMac) {
             if (gotFfmpeg) break;
             continue;
         }
         // On macOS keep going until both halves of the pair are present.
-        if (gotFfmpeg && fs.existsSync(path.join(ffmpegDir, exeName('ffprobe')))) break;
+        if (gotFfmpeg && haveProbe) break;
     }
-    return gotFfmpeg;
+    return onlyProbe ? false : gotFfmpeg;
 }
 
 /**

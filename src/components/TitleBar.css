@@ -1,66 +1,143 @@
+/* The bar is the same surface as the page below it (#0a0a0a), so the two read as
+   one window instead of a strip laid on top. The height stays 32px, which is the
+   native Windows caption height. */
 .titlebar {
     height: 32px;
-    background: transparent;
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: center;
-    -webkit-app-region: drag;
-    /* Electron specific */
-    padding: 0 16px;
-    z-index: 50;
+    padding-left: 12px;
     position: relative;
-    color: var(--text-secondary);
+    z-index: 50;
+    -webkit-app-region: drag;
+    user-select: none;
+    background: #0a0a0a;
+    color: rgba(255, 255, 255, 0.62);
 }
 
-.titlebar-branding {
-    font-family: 'Montserrat', sans-serif;
-    font-weight: 800;
-    font-size: 13px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+.titlebar-brand {
     display: flex;
     align-items: center;
     gap: 8px;
-    opacity: 0.6;
+    min-width: 0;
 }
 
-.titlebar-controls,
-.titlebar-actions {
-    -webkit-app-region: no-drag;
+.titlebar-logo {
+    display: block;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    object-fit: cover;
+}
+
+.titlebar-name {
+    font-family: 'Montserrat', 'Inter', system-ui, sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    color: #fff;
+    white-space: nowrap;
+}
+
+.titlebar-name em {
+    font-style: normal;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.titlebar-right {
     display: flex;
     align-items: center;
+    height: 100%;
 }
 
+.titlebar-actions,
 .titlebar-controls {
-    gap: 8px;
+    display: flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
 }
 
 .titlebar-actions {
-    gap: 4px;
-    margin-right: 12px;
-    padding-right: 12px;
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 2px;
 }
 
-.control-btn {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    color: var(--text-secondary);
-    transition: all 0.2s ease;
+.titlebar-sep {
+    width: 1px;
+    height: 14px;
+    margin: 0 8px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.tb-icon {
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 30px;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.control-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-primary);
+.tb-icon:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
 }
 
-.control-btn.close:hover {
-    background: #ef4444;
-    color: white;
+.tb-icon.is-done {
+    color: #4ade80;
+}
+
+/* Window buttons run the full height of the bar, as Windows draws them. */
+.titlebar-controls {
+    height: 100%;
+}
+
+.win-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.win-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.win-btn:active {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.win-btn.close:hover {
+    background: #e81123;
+    color: #fff;
+}
+
+.win-btn.close:active {
+    background: #c50f1f;
+}
+
+.tb-icon:focus-visible,
+.win-btn:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.5);
+    outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tb-icon,
+    .win-btn {
+        transition: none;
+    }
 }

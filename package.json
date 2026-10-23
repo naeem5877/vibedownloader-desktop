@@ -4,11 +4,11 @@
   "description": "Premium Multi-Platform Downloader with Lossless Spotify & Hi-Res Audio support",
   "main": "dist-electron/main.js",
   "type": "module",
-  "homepage": "https://vibedownloader.me",
+  "homepage": "https://vibedownloader.vercel.app",
   "author": {
     "name": "Naeem",
     "email": "contact@vibedownloader.me",
-    "url": "https://vibedownloader.me"
+    "url": "https://vibedownloader.vercel.app"
   },
   "repository": {
     "type": "git",

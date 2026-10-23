@@ -1,6 +1,7 @@
 import { ipcMain, app } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { configureInnerTube, resolveInnerTube, parseYouTubeVideoId, type InnerTubeStore } from '../utils/innertube';
 import { getYtDlpWrap, ensureYtDlpReady } from '../utils/binaries';
 import { getCookiePath } from '../utils/paths';
 import { fetchSpotifyInfo, extractSpotifyId } from '../utils/spotify';
@@ -207,6 +208,57 @@ export async function buildMetadataFromRaw(raw: any, url: string, isYoutube: boo
     return { metadata, contentType };
 }
 
+/**
+ * Keeps the InnerTube visitor token across restarts, so the first paste after
+ * launch does not pay for an extra round trip to mint one. A missing or corrupt
+ * file just means a new token is minted, so every failure here is swallowed.
+ */
+function innerTubeStore(): InnerTubeStore {
+    const file = () => path.join(app.getPath('userData'), 'innertube-cache.json');
+    const load = (): Record<string, string> => {
+        try { return JSON.parse(fs.readFileSync(file(), 'utf8')) || {}; } catch { return {}; }
+    };
+    return {
+        read: (key) => {
+            const value = load()[key];
+            return typeof value === 'string' && value ? value : null;
+        },
+        write: (key, value) => {
+            const data = load();
+            if (value) data[key] = value; else delete data[key];
+            fs.writeFileSync(file(), JSON.stringify(data));
+        }
+    };
+}
+
+let innerTubeConfigured = false;
+
+/**
+ * Metadata for a single YouTube video straight from InnerTube, in the same shape
+ * the yt-dlp path produces, or null when yt-dlp should answer instead.
+ *
+ * Runs through `buildMetadataFromRaw` so the renderer cannot tell which path
+ * served it. Any failure, including one inside the builder, returns null: this
+ * is an optimisation, and the extraction below is still the source of truth.
+ */
+async function tryInnerTubeFastPath(videoId: string, url: string) {
+    if (!innerTubeConfigured) {
+        innerTubeConfigured = true;
+        configureInnerTube({ store: innerTubeStore() });
+    }
+
+    const raw = await resolveInnerTube(videoId);
+    if (!raw) return null;
+
+    try {
+        const { metadata } = await buildMetadataFromRaw(raw, url, true);
+        return metadata;
+    } catch (e: any) {
+        console.warn(`[InnerTube] metadata build failed, falling back: ${String(e?.message || e).split('\n')[0]}`);
+        return null;
+    }
+}
+
 export function registerInfoHandlers() {
     ipcMain.handle('get-video-info', async (event: any, url: any) => {
         // Type first. Everything below calls `url.includes`, so a non-string
@@ -236,11 +288,28 @@ export function registerInfoHandlers() {
         let lastAttemptLabel = 'default';
 
         try {
-            await ensureYtDlpReady();
-            const ytDlpWrap = getYtDlpWrap();
             const hasListParam = url.includes('list=');
             const isRadioMix = url.includes('start_radio=1') || url.includes('list=RD') || url.includes('list=RDMM');
             const isRegularPlaylist = hasListParam && !isRadioMix && (url.includes('/playlist') || !url.includes('watch?v='));
+
+            // Fast path: a single YouTube video is answered straight from
+            // InnerTube, before yt-dlp is even made ready. It declines (returns
+            // null) for anything it is not sure about - playlists and mixes
+            // (decided by the flags above), live streams, dubbed videos,
+            // age/login walls, a thin format list - and those continue into the
+            // yt-dlp extraction below exactly as before.
+            // Set VIBE_DISABLE_INNERTUBE=1 to turn the fast path off entirely, e.g.
+            // to compare against yt-dlp or to rule it out when debugging a report.
+            const fastVideoId = !isRadioMix && !isRegularPlaylist && process.env.VIBE_DISABLE_INNERTUBE !== '1'
+                ? parseYouTubeVideoId(url)
+                : null;
+            if (fastVideoId) {
+                const fast = await tryInnerTubeFastPath(fastVideoId, url);
+                if (fast) return { success: true, metadata: fast };
+            }
+
+            await ensureYtDlpReady();
+            const ytDlpWrap = getYtDlpWrap();
 
             // `--no-check-certificates` used to sit here. It disabled TLS
             // verification for every site the app can open, to work around one

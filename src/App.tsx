@@ -47,7 +47,7 @@ function App() {
     };
 
     if (!settingsLoaded && !onboardingOpen) {
-        return <div className="w-full h-full bg-[#0a0a0b]" />;
+        return <div className="w-full h-full bg-[#0a0a0a]" />;
     }
 
     return (

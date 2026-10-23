@@ -10,8 +10,69 @@ interface ImportMeta {
     readonly env: ImportMetaEnv;
 }
 
+// Library (see electron/handlers/libraryHandler.ts)
+interface LibraryItem {
+    id: string;
+    path: string;
+    name: string;
+    artist?: string;
+    platform: string;
+    kind: 'video' | 'audio' | 'image';
+    ext: string;
+    size: number;
+    mtime: number;
+    duration?: number;
+    width?: number;
+    height?: number;
+    hasThumb: boolean;
+    accent?: string;
+    root: string;
+}
+
+interface LibraryRoot {
+    path: string;
+    auto: boolean;
+    current: boolean;
+    exists: boolean;
+}
+
+interface LibraryScanProgress {
+    phase: 'scanning' | 'processing' | 'done';
+    done: number;
+    total: number;
+    item?: LibraryItem;
+    removed?: string[];
+    count?: number;
+}
+
+type LibraryEditRequest =
+    | { type: 'audio'; format: 'mp3' | 'm4a'; quality: 'best' | 'standard' }
+    | { type: 'convert'; format: 'mp4' | 'webm' | 'mkv'; height: number; quality: 'high' | 'balanced' | 'small' }
+    | { type: 'gif'; start: number; length: number; width: number; fps: number };
+
+interface LibraryEditResult {
+    success: boolean;
+    item?: LibraryItem;
+    inBytes?: number;
+    outBytes?: number;
+    error?: string;
+    cancelled?: boolean;
+}
+
 interface Window {
     electron: {
+        libraryEdit: (jobId: string, id: string, req: LibraryEditRequest) => Promise<LibraryEditResult>;
+        libraryEditCancel: (jobId: string) => Promise<{ success: boolean }>;
+        onLibraryEditProgress: (callback: (data: { jobId: string; pct: number }) => void) => () => void;
+        libraryList: () => Promise<{ items: LibraryItem[]; roots: LibraryRoot[]; ffmpeg: boolean; scanning: boolean }>;
+        libraryScan: () => Promise<{ success: boolean; total?: number; added?: number; removed?: number; error?: string }>;
+        libraryAddFolder: () => Promise<{ roots: LibraryRoot[] }>;
+        libraryRemoveFolder: (folder: string) => Promise<{ roots: LibraryRoot[]; removedIds: string[] }>;
+        libraryOpen: (id: string) => Promise<{ success: boolean; error?: string }>;
+        libraryReveal: (id: string) => Promise<{ success: boolean; error?: string }>;
+        libraryTrash: (id: string) => Promise<{ success: boolean; error?: string }>;
+        onLibraryScanProgress: (callback: (data: LibraryScanProgress) => void) => () => void;
+
         getVideoInfo: (url: string) => Promise<any>;
         getSpotifyInfo: (url: string) => Promise<any>;
         downloadVideo: (params: { url: string; formatId: string; title: string; platform?: string; contentType?: string; thumbnail?: string; playlistTitle?: string; suppressNotifications?: boolean; jobId?: string; cutStart?: number; cutEnd?: number; audioTrack?: string; audioLang?: string; audioLangLabel?: string; mediaExt?: 'jpg' | 'mp4' }) => Promise<{ success: boolean; path?: string }>;

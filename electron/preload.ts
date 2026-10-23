@@ -33,6 +33,27 @@ contextBridge.exposeInMainWorld('electron', {
     openInFolder: (filePath: string) => ipcRenderer.invoke('open-in-folder', filePath),
     saveThumbnail: (params: { url: string, title: string }) => ipcRenderer.invoke('save-thumbnail', params),
 
+    // Library (gallery of downloaded media)
+    libraryList: () => ipcRenderer.invoke('library-list'),
+    libraryScan: () => ipcRenderer.invoke('library-scan'),
+    libraryAddFolder: () => ipcRenderer.invoke('library-add-folder'),
+    libraryRemoveFolder: (folder: string) => ipcRenderer.invoke('library-remove-folder', folder),
+    libraryOpen: (id: string) => ipcRenderer.invoke('library-open', id),
+    libraryReveal: (id: string) => ipcRenderer.invoke('library-reveal', id),
+    libraryTrash: (id: string) => ipcRenderer.invoke('library-trash', id),
+    libraryEdit: (jobId: string, id: string, req: any) => ipcRenderer.invoke('library-edit', jobId, id, req),
+    libraryEditCancel: (jobId: string) => ipcRenderer.invoke('library-edit-cancel', jobId),
+    onLibraryEditProgress: (callback: (data: { jobId: string; pct: number }) => void) => {
+        const handler = (_: any, data: any) => callback(data);
+        ipcRenderer.on('library-edit-progress', handler);
+        return () => ipcRenderer.removeListener('library-edit-progress', handler);
+    },
+    onLibraryScanProgress: (callback: (data: any) => void) => {
+        const handler = (_: any, data: any) => callback(data);
+        ipcRenderer.on('library-scan-progress', handler);
+        return () => ipcRenderer.removeListener('library-scan-progress', handler);
+    },
+
     // Updates & Versions
     getVersions: () => ipcRenderer.invoke('get-versions'),
     updateYtdlp: () => ipcRenderer.invoke('update-ytdlp'),

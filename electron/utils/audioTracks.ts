@@ -131,7 +131,8 @@ export function buildAudioTrackList(raw: any): AudioTrack[] {
             lang,
             langLabel: languageLabel(lang),
             isOriginal: isOriginal(f),
-            formatId: String(f.format_id),
+            // A selector when the fast path supplied one (see innertube.ts), else the yt-dlp id.
+            formatId: String(f.vibe_selector || f.format_id),
             ext: String(f.ext || ''),
             acodec: String(f.acodec || ''),
             abr: bitrate(f)

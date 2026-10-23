@@ -22,7 +22,7 @@
     <a href="https://github.com/naeem5877/vibedownloader-android">
       <img src="https://img.shields.io/badge/Android-GitHub-3DDC84?style=for-the-badge&logo=android" alt="Android on GitHub" />
     </a>
-    <a href="https://vibedownloader.me">
+    <a href="https://vibedownloader.vercel.app">
       <img src="https://img.shields.io/badge/Visit-Website-blue?style=for-the-badge&logo=google-chrome" alt="Visit Website" />
     </a>
   </p>

@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import { applyFolderIcon } from './folderIcon';
 
 // Settings storage
 export const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
@@ -101,6 +102,11 @@ export function getOrganizedPath(platform: string, contentType: string, subFolde
     if (!fs.existsSync(fullPath)) {
         fs.mkdirSync(fullPath, { recursive: true });
     }
+
+    // Branded folder icon on the top-level VibeDownloader folder (runs once per folder).
+    void applyFolderIcon(path.join(basePath, 'VibeDownloader'));
+    // And each platform folder gets its own platform logo.
+    void applyFolderIcon(path.join(basePath, 'VibeDownloader', platformFolder), platform.toLowerCase());
 
     return fullPath;
 }

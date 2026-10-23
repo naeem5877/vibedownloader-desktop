@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion, type Variants } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions, Loader2
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions, Loader2, Link2, LayoutGrid
 } from 'lucide-react';
 import { FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
 import TikTokIcon from './ui/TikTokIcon';
 import { Settings } from './Settings';
 import { TutorialModal } from './TutorialModal';
 import { CutTimeline } from './CutTimeline';
+import { Library } from './Library';
 import LyricsPanel, { type LyricsData } from './LyricsPanel';
 import ShinyText from './ui/ShinyText';
 import EmptyState from './ui/EmptyState';
@@ -535,6 +536,24 @@ const BatchQueueItem = memo(({
 const SHOW_FETCH_TIMER =
     import.meta.env.DEV || import.meta.env.VITE_SHOW_FETCH_TIMER === 'true';
 
+/* Entrance for a fetched result. Transform and opacity only, so it stays on the
+   compositor. Children begin together with the card and are staggered by 50ms,
+   so the whole thing settles in well under half a second and nothing waits for
+   it: every control is live from the first frame. */
+const RESULT_EASE = [0.22, 1, 0.36, 1] as const;
+const resultContainer: Variants = {
+    hidden: {},
+    show: { transition: { staggerChildren: 0.05 } }
+};
+const resultMedia: Variants = {
+    hidden: { opacity: 0, scale: 0.965, y: 10 },
+    show: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.45, ease: RESULT_EASE } }
+};
+const resultItem: Variants = {
+    hidden: { opacity: 0, y: 14 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.38, ease: RESULT_EASE } }
+};
+
 const FetchTimer = memo(({ start, elapsed, failed }: { start: number | null; elapsed: number | null; failed: boolean }) => {
     const [, tick] = useState(0);
 
@@ -756,6 +775,8 @@ export function Downloader() {
     const [url, setUrl] = useState('');
     const [currentPlatform, setCurrentPlatform] = useState<Platform>(platforms[0]);
     const [loading, setLoading] = useState(false);
+    // Honour the OS "reduce motion" setting: the result simply appears.
+    const reduceMotion = useReducedMotion();
 
 
     // Initial load
@@ -1035,6 +1056,7 @@ export function Downloader() {
 
     // Settings modal
     const [showSettings, setShowSettings] = useState(false);
+    const [showLibrary, setShowLibrary] = useState(false);
     const [showDiscordModal, setShowDiscordModal] = useState(false);
     const [showTutorial, setShowTutorial] = useState(false);
     const [showCutModal, setShowCutModal] = useState(false);
@@ -1046,6 +1068,7 @@ export function Downloader() {
 
     // Batch download features
     const [batchMode, setBatchMode] = useState(false);
+    const modeReduce = useReducedMotion();
     const [batchUrls, setBatchUrls] = useState('');
     const [downloadQueue, setDownloadQueue] = useState<Array<{
         id: string;
@@ -2020,34 +2043,69 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
     );
 
     return (
-        <div className="w-full h-full bg-[#0a0a0a] text-white overflow-y-auto overflow-x-hidden relative">
-            {/* Header Buttons Container - Fixed to Viewport */}
-            <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
-                {/* Discord Button */}
+        <div className="w-full h-full bg-[#0a0a0a] text-white overflow-y-auto overflow-x-hidden relative isolate [scrollbar-gutter:stable]">
+            {/* Ambient glow: a faint wash of the selected platform's colour behind the
+                header. It sits behind the content (-z-10 inside the isolated stacking
+                context) and cross-fades whenever the platform changes. */}
+            <motion.div
+                key={currentPlatform.id}
+                aria-hidden="true"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+                className="pointer-events-none absolute inset-x-0 top-0 h-[460px] -z-10"
+                style={{ background: `radial-gradient(60% 100% at 50% 0%, ${currentPlatform.color}1a, transparent 100%)` }}
+            />
+
+            {/* Header controls: one grouped cluster instead of three separate floating
+                buttons, drawn in the same ghost-icon style as the title bar. */}
+            <div
+                role="toolbar"
+                aria-label="App shortcuts"
+                className="absolute top-4 right-4 z-50 flex items-center gap-0.5 p-1 rounded-xl bg-white/[0.04] border border-white/10"
+            >
                 <button
+                    type="button"
+                    onClick={() => setShowLibrary(true)}
+                    className="w-9 h-9 rounded-lg flex items-center justify-center text-white/55 hover:text-white hover:bg-white/10 transition-colors duration-150 cursor-pointer"
+                    title="Library"
+                    aria-label="Open Library"
+                >
+                    <LayoutGrid className="w-[18px] h-[18px]" />
+                </button>
+
+                <span className="w-px h-4 mx-0.5 bg-white/10" aria-hidden="true" />
+
+                <button
+                    type="button"
                     onClick={() => setShowDiscordModal(true)}
-                    className="w-10 h-10 rounded-xl bg-[#5865F2]/10 hover:bg-[#5865F2]/20 discord-border-animation flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm group"
+                    className="w-9 h-9 rounded-lg flex items-center justify-center text-[#5865F2] hover:bg-[#5865F2]/15 transition-colors duration-150 cursor-pointer"
                     title="Join Discord"
+                    aria-label="Join Discord"
                 >
-                    <FaDiscord className="w-5 h-5 text-[#5865F2] group-hover:scale-110 transition-transform" />
+                    <FaDiscord className="w-[18px] h-[18px]" />
                 </button>
 
-                {/* Extension Button */}
                 <button
+                    type="button"
                     onClick={() => setShowTutorial(true)}
-                    className="w-10 h-10 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 hover:border-purple-500/30 flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm group"
-                    title="Install Extension"
+                    className="w-9 h-9 rounded-lg flex items-center justify-center text-purple-400 hover:bg-purple-500/15 transition-colors duration-150 cursor-pointer"
+                    title="Install browser extension"
+                    aria-label="Install browser extension"
                 >
-                    <Puzzle className="w-5 h-5 text-purple-400 group-hover:scale-110 transition-transform" />
+                    <Puzzle className="w-[18px] h-[18px]" />
                 </button>
 
-                {/* Settings Button */}
+                <span className="w-px h-4 mx-0.5 bg-white/10" aria-hidden="true" />
+
                 <button
+                    type="button"
                     onClick={() => setShowSettings(true)}
-                    className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 flex items-center justify-center transition-all duration-200 cursor-pointer backdrop-blur-sm"
+                    className="w-9 h-9 rounded-lg flex items-center justify-center text-white/55 hover:text-white hover:bg-white/10 transition-colors duration-150 cursor-pointer"
                     title="Settings"
+                    aria-label="Settings"
                 >
-                    <SettingsIcon className="w-5 h-5 text-white/60 hover:text-white/80" />
+                    <SettingsIcon className="w-[18px] h-[18px]" />
                 </button>
             </div>
 
@@ -2094,27 +2152,72 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                     })}
                 </div>
 
-                {/* Batch Mode Toggle */}
+                {/* Single / Batch switch. Both options are always visible, so it is clear
+                    which mode is active and what the other one is. */}
                 <div className="flex justify-center mb-6">
-                    <button
-                        onClick={() => {
-                            setBatchMode(!batchMode);
-                            if (batchMode) {
-                                setBatchUrls('');
-                                setDownloadQueue([]);
-                            }
-                        }}
-                        disabled={loading || downloading || batchDownloading}
-                        className={`px-4 py-2 rounded-xl font-medium text-sm transition-all flex items-center gap-2 ${batchMode
-                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                            : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
-                            } ${loading || downloading || batchDownloading ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                    <div
+                        role="group"
+                        aria-label="Download mode"
+                        className={`relative inline-grid grid-cols-[6rem_6rem] p-1 rounded-xl bg-white/[0.04] border border-white/10 transition-opacity ${loading || downloading || batchDownloading ? 'opacity-40' : ''}`}
                     >
-                        <Layers className="w-4 h-4" />
-                        {batchMode ? 'Batch Mode' : 'Single Mode'}
-                    </button>
+                        {/* Sliding highlight: transform + colour only, so it stays on the GPU and never reflows. */}
+                        <span
+                            aria-hidden="true"
+                            className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-lg will-change-transform pointer-events-none transition-[transform,background-color] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none"
+                            style={{
+                                transform: batchMode ? 'translateX(100%)' : 'translateX(0)',
+                                backgroundColor: batchMode ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.10)',
+                            }}
+                        />
+                        {([
+                            { batch: false, label: 'Single', Icon: Link2, from: { scale: 0.5, rotate: -60, opacity: 0.4 } },
+                            { batch: true, label: 'Batch', Icon: Layers, from: { scale: 0.6, y: 6, opacity: 0.4 } },
+                        ] as const).map(({ batch, label, Icon, from }) => {
+                            const active = batchMode === batch;
+                            const busy = loading || downloading || batchDownloading;
+                            return (
+                                <button
+                                    key={label}
+                                    type="button"
+                                    aria-pressed={active}
+                                    disabled={busy}
+                                    onClick={() => {
+                                        if (active) return;
+                                        setBatchMode(batch);
+                                        // Leaving batch mode clears what was queued, as before.
+                                        if (batchMode) {
+                                            setBatchUrls('');
+                                            setDownloadQueue([]);
+                                        }
+                                    }}
+                                    className={`relative z-10 h-8 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors duration-200 ${busy ? 'cursor-not-allowed' : 'cursor-pointer'} ${active
+                                        ? (batch ? 'text-blue-300' : 'text-white')
+                                        : 'text-white/45 hover:text-white/80'
+                                        }`}
+                                >
+                                    {/* The icon pops when its mode becomes active (transform/opacity only). */}
+                                    <motion.span
+                                        key={`${label}-${active}`}
+                                        className="flex will-change-transform"
+                                        initial={active && !modeReduce ? from : false}
+                                        animate={{ scale: 1, rotate: 0, y: 0, opacity: 1 }}
+                                        transition={{ type: 'spring', stiffness: 520, damping: 16, mass: 0.6 }}
+                                    >
+                                        <Icon className="w-3.5 h-3.5" />
+                                    </motion.span>
+                                    {label}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
 
+                <motion.div
+                    key={batchMode ? 'batch' : 'single'}
+                    initial={modeReduce ? false : { opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                >
                 {!batchMode ? (
                     <form onSubmit={handleSubmit} className="mb-8 w-full max-w-xl mx-auto">
                         <div className="flex flex-col sm:flex-row gap-2.5 relative z-20">
@@ -2362,6 +2465,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                         </AnimatePresence>
                     </div>
                 )}
+                </motion.div>
 
                 {/* Error */}
                 <AnimatePresence>
@@ -2387,9 +2491,9 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                     {loading && (
                         <motion.div
                             key="skeleton"
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -20 }}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0, transition: { duration: 0.18 } }}
+                            exit={{ opacity: 0, transition: { duration: 0 } }}
                         >
                             <div className="animate-pulse relative">
                                 {/* Thumbnail */}
@@ -2420,16 +2524,29 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                     )}
                     {/* Single Video/Track Result */}
                     {metadata && !loading && !complete && !isPlaylist && (!isStory || isSingleStory) && (
-                        <motion.div key="video" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+                        <motion.div key="video" variants={resultContainer} initial={reduceMotion ? false : 'hidden'} animate="show" exit={{ opacity: 0, transition: { duration: 0.1 } }}>
                             {/* Thumbnail */}
-                            <div className={`relative rounded-2xl overflow-hidden mb-5 ${isSingleStory ? 'bg-black' : 'bg-gradient-to-br from-white/5 to-white/10'}`}>
+                            <motion.div variants={resultMedia} className={`relative rounded-2xl overflow-hidden mb-5 ${isSingleStory ? 'bg-black' : 'bg-gradient-to-br from-white/5 to-white/10'}`}>
+                                {!reduceMotion && (
+                                    <motion.div
+                                        aria-hidden
+                                        className="pointer-events-none absolute inset-y-0 -inset-x-1/4 z-10 bg-gradient-to-r from-transparent via-white/[0.14] to-transparent"
+                                        style={{ skewX: -14 }}
+                                        initial={{ x: '-110%' }}
+                                        animate={{ x: '110%' }}
+                                        transition={{ duration: 0.85, delay: 0.12, ease: 'easeInOut' }}
+                                    />
+                                )}
                                 {metadata.thumbnail ? (
                                     /* A story is a portrait frame. Cropping it to 16:9 the way a
                                        landscape thumbnail is cropped would show a letterbox slit
                                        of the middle of the video, so it is fitted whole instead. */
-                                    <img
+                                    <motion.img
                                         src={metadata.thumbnail}
                                         alt=""
+                                        initial={reduceMotion ? false : { scale: 1.07 }}
+                                        animate={{ scale: 1 }}
+                                        transition={{ duration: 0.9, ease: RESULT_EASE }}
                                         onError={handleImgError}
                                         className={isSingleStory ? 'max-h-[60vh] w-auto max-w-full mx-auto object-contain block' : 'w-full aspect-video object-cover'}
                                         referrerPolicy="no-referrer"
@@ -2503,10 +2620,10 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         )}
                                     </div>
                                 )}
-                            </div>
+                            </motion.div>
 
                             {/* Info */}
-                            <div className="flex items-start justify-between mb-5">
+                            <motion.div variants={resultItem} className="flex items-start justify-between mb-5">
                                 <div className="flex-1">
                                     <h2 className="text-lg font-bold leading-snug mb-2">{metadata.title}</h2>
                                     <div className="flex items-center gap-4 text-white/40 text-sm">
@@ -2539,8 +2656,9 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         </button>
                                     )}
                                 </div>
-                            </div>
+                            </motion.div>
 
+                            <motion.div variants={resultItem}>
                             {/* Lyrics and subtitle tracks sit above the download
                                 options, each folded to a single row. They are the
                                 reason to come back to a result after the file is
@@ -2760,7 +2878,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                 <div className="flex items-center justify-between mb-3.5">
                                     <p className="text-white/40 text-xs font-bold uppercase tracking-wider">Download Options</p>
                                     <span className="text-[10px] text-white/30 font-medium">
-                                        {isSingleStory ? 'One video, nothing to choose' : 'Select format &amp; quality'}
+                                        {isSingleStory ? 'One video, nothing to choose' : 'Select format & quality'}
                                     </span>
                                 </div>
                                 <div className="grid gap-3">
@@ -3172,6 +3290,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     )}
                                 </div>
                             </div>
+                            </motion.div>
                         </motion.div>
                     )}
 
@@ -3489,65 +3608,85 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
+                                transition={{ duration: 0.2 }}
                                 onClick={() => setShowCookieModal(false)}
-                                className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                                className="absolute inset-0 bg-black/70 backdrop-blur-md"
                             />
                             <motion.div
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.95 }}
-                                className="relative w-full max-w-lg max-h-[85vh] overflow-y-auto bg-[#111] border border-white/10 rounded-2xl p-6 shadow-2xl custom-scrollbar"
+                                initial={{ opacity: 0, y: 14, scale: 0.98 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                                transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                                className="relative w-full max-w-[480px] max-h-[86vh] flex flex-col overflow-hidden rounded-[22px] border border-[#d4b483]/[0.18] bg-[#0d0c0b] shadow-[0_40px_120px_-24px_rgba(0,0,0,0.95),0_0_90px_-30px_rgba(212,180,131,0.28),inset_0_1px_0_0_rgba(236,214,168,0.14)]"
                             >
-                                <div className="flex items-center gap-3 mb-6 sticky top-0 bg-[#111] z-10 pb-2 border-b border-white/5">
-                                    <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
-                                        <Key className="w-5 h-5 text-blue-400" />
+                                {/* Soft top light */}
+                                <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(ellipse_at_top,rgba(212,180,131,0.16),transparent_70%)]" />
+
+                                {/* Header */}
+                                <div className="relative flex items-center gap-3.5 px-6 pt-5 pb-4 border-b border-[#d4b483]/[0.14]">
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-b from-[#d4b483]/[0.22] to-[#d4b483]/[0.05] border border-[#d4b483]/35 flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.14),0_6px_20px_-8px_rgba(212,180,131,0.5)]">
+                                        <Key className="w-[18px] h-[18px] text-[#ecd6a8]" strokeWidth={1.75} />
                                     </div>
-                                    <div>
-                                        <h2 className="text-lg font-bold">Login for {currentPlatform.name}</h2>
-                                        <p className="text-white/40 text-xs">Unlock premium features</p>
+                                    <div className="min-w-0">
+                                        <h2 className="text-[15px] font-semibold tracking-tight text-white leading-tight">Sign in to {currentPlatform.name}</h2>
+                                        <p className="text-[11.5px] text-[#d4b483]/65 mt-0.5">Unlock premium access</p>
                                     </div>
-                                    <button onClick={() => setShowCookieModal(false)} className="ml-auto w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition cursor-pointer">
-                                        <X className="w-5 h-5 text-white/60" />
+                                    <button
+                                        onClick={() => setShowCookieModal(false)}
+                                        className="ml-auto w-8 h-8 flex items-center justify-center rounded-lg text-white/40 hover:text-[#ecd6a8] hover:bg-[#d4b483]/10 transition-colors cursor-pointer"
+                                    >
+                                        <X className="w-[18px] h-[18px]" strokeWidth={1.75} />
                                     </button>
                                 </div>
 
-                                <div className="space-y-4 mb-6">
-                                    {/* Benefits List */}
-                                    <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                                        <h3 className="text-sm font-bold text-white mb-3">Why add cookies?</h3>
-                                        <ul className="space-y-2 text-xs text-white/60">
-                                            <li className="flex items-center gap-2">
-                                                <Check className="w-3.5 h-3.5 text-green-400" />
+                                {/* Body */}
+                                <div className="relative flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-6">
+                                    {/* Included */}
+                                    <section>
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75 mb-3">Included</p>
+                                        <ul className="space-y-2.5 text-[12.5px] text-white/55 [&_b]:font-medium [&_b]:text-white/90">
+                                            <li className="flex items-center gap-3">
+                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                </span>
                                                 {currentPlatform.id === 'youtube' ? (
-                                                    <span>Access <b>Premium</b> & Age-restricted videos</span>
+                                                    <span>Access <b>Premium</b> &amp; age-restricted videos</span>
                                                 ) : currentPlatform.id === 'tiktok' ? (
                                                     <span>Download <b>Private</b> videos</span>
                                                 ) : (
                                                     <span>Download <b>Stories</b> and Highlights</span>
                                                 )}
                                             </li>
-                                            <li className="flex items-center gap-2">
-                                                <Check className="w-3.5 h-3.5 text-green-400" />
-                                                <span>Access contents from <b>Private Accounts</b> you follow</span>
+                                            <li className="flex items-center gap-3">
+                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                </span>
+                                                <span>Content from <b>private accounts</b> you follow</span>
                                             </li>
-                                            <li className="flex items-center gap-2">
-                                                <Check className="w-3.5 h-3.5 text-green-400" />
-                                                <span>Download high-quality <b>original audio</b></span>
+                                            <li className="flex items-center gap-3">
+                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                </span>
+                                                <span>High-quality <b>original audio</b></span>
                                             </li>
-                                            <li className="flex items-center gap-2">
-                                                <Check className="w-3.5 h-3.5 text-green-400" />
+                                            <li className="flex items-center gap-3">
+                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                </span>
                                                 <span>Bypass age restrictions</span>
                                             </li>
                                         </ul>
-                                    </div>
+                                    </section>
 
-                                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-sm text-blue-300">
-                                        <p className="mb-2 font-bold flex items-center gap-2">
-                                            <ShieldCheck className="w-4 h-4" /> Secure & Local
-                                        </p>
-                                        <p className="opacity-80 leading-relaxed text-xs font-medium">
-                                            Your privacy is our priority. Cookies are stored exclusively on your local machine and are used solely to authenticate downloads from restricted or private sources. We do not track, store, or transmit any sensitive data.
-                                        </p>
+                                    {/* Privacy */}
+                                    <div className="flex gap-3.5 rounded-2xl border border-[#d4b483]/[0.18] bg-gradient-to-b from-[#d4b483]/[0.07] to-[#d4b483]/[0.02] px-4 py-3.5">
+                                        <ShieldCheck className="w-4 h-4 text-[#d4b483] shrink-0 mt-0.5" strokeWidth={1.75} />
+                                        <div>
+                                            <p className="text-[12px] font-medium text-white/80 mb-1">Private by design</p>
+                                            <p className="text-[11.5px] leading-relaxed text-white/40">
+                                                Cookies stay on your machine and are only used to authenticate downloads from restricted or private sources. Nothing is tracked, stored, or transmitted.
+                                            </p>
+                                        </div>
                                     </div>
 
                                     {/* Instagram Stories - Instagram only.
@@ -3555,156 +3694,159 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         with the app. No Instagram login, no cookies, no API key,
                                         and nothing is billed per lookup. */}
                                     {currentPlatform.id === 'instagram' && (
-                                        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-                                            <h3 className="text-sm font-bold text-white mb-1">Read Stories without logging in</h3>
-                                            <p className="text-[11px] text-white/50 leading-relaxed">
+                                        <div className="rounded-2xl border border-[#d4b483]/[0.18] bg-gradient-to-b from-[#d4b483]/[0.07] to-[#d4b483]/[0.02] px-4 py-3.5">
+                                            <h3 className="text-[12px] font-medium text-white/80 mb-1">Read Stories without logging in</h3>
+                                            <p className="text-[11.5px] text-white/40 leading-relaxed">
                                                 Instagram serves no story data to anonymous clients, so the app uses its
                                                 own built-in downloader instead. No Instagram login, no cookies, no
                                                 API key, and no credits are involved. On the Instagram tab you can
-                                                paste a bare username such as <code className="text-emerald-300">nike</code>.
+                                                paste a bare username such as <code className="text-white/70 font-mono">nike</code>.
                                             </p>
                                         </div>
                                     )}
 
                                     {!hasCookies ? (
                                         <div className="space-y-6">
-                                            {/* Easier with Extension Card */}
-                                            <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 to-violet-500/10 border border-purple-500/20">
-                                                <div className="flex items-center gap-3 mb-2">
-                                                    <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
-                                                        <Puzzle className="w-4 h-4 text-purple-400" />
+                                            <div className="h-px bg-gradient-to-r from-transparent via-[#d4b483]/30 to-transparent" />
+
+                                            {/* Extension */}
+                                            <div className="rounded-2xl border border-[#d4b483]/30 bg-gradient-to-b from-[#d4b483]/[0.14] to-[#d4b483]/[0.02] p-4 shadow-[inset_0_1px_0_0_rgba(236,214,168,0.2),0_18px_40px_-24px_rgba(212,180,131,0.45)]">
+                                                <div className="flex items-center gap-3.5 mb-3.5">
+                                                    <div className="w-9 h-9 rounded-lg bg-[#d4b483]/[0.14] border border-[#d4b483]/35 flex items-center justify-center shrink-0">
+                                                        <Puzzle className="w-4 h-4 text-[#ecd6a8]" strokeWidth={1.75} />
                                                     </div>
-                                                    <div className="flex-1">
-                                                        <h4 className="text-sm font-bold text-white">Easier with the Extension</h4>
-                                                        <p className="text-[11px] text-white/40">Sync your session automatically → no copy-paste needed.</p>
+                                                    <div className="min-w-0">
+                                                        <h4 className="text-[13px] font-semibold text-white leading-tight">The easier way</h4>
+                                                        <p className="text-[11.5px] text-white/40 mt-0.5">Sync your session automatically with the extension.</p>
                                                     </div>
                                                 </div>
                                                 <button
                                                     onClick={() => { setShowCookieModal(false); setShowTutorial(true); }}
-                                                    className="w-full h-10 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-xs font-bold text-purple-300 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98]"
+                                                    className="w-full h-10 rounded-xl bg-[#d4b483]/[0.14] hover:bg-[#d4b483]/[0.24] border border-[#d4b483]/40 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#ecd6a8] transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-[0.99]"
                                                 >
-                                                    <Puzzle className="w-3.5 h-3.5" /> Get VibeDownloader Extension
+                                                    Get the Extension
+                                                    <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
                                                 </button>
                                             </div>
 
-                                            <div className="grid grid-cols-1 gap-4">
-                                                {/* Step 1 */}
-                                                <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.05] transition-colors group">
-                                                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20 group-hover:scale-110 transition-transform">
-                                                        <Download className="w-5 h-5 text-blue-400" />
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="text-sm font-bold text-white mb-1">Step 1: Get Cookie Editor</h4>
-                                                        <p className="text-[11px] text-white/40 mb-3 leading-relaxed">Install the editor for your browser to export login data.</p>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            <button
-                                                                onClick={() => window.electron.openExternal("https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm")}
-                                                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-                                                            >
-                                                                <Globe className="w-3 h-3" /> For Chrome
-                                                            </button>
-                                                            <button
-                                                                onClick={() => window.electron.openExternal("https://microsoftedge.microsoft.com/addons/detail/cookieeditor/neaplmfkghagebokkhpjpoebhdledlfi")}
-                                                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-                                                            >
-                                                                <Monitor className="w-3 h-3" /> For Edge
-                                                            </button>
-                                                            <button
-                                                                onClick={() => window.electron.openExternal("https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/")}
-                                                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-                                                            >
-                                                                <Globe className="w-3 h-3" /> For Firefox
-                                                            </button>
+                                            {/* Manual steps */}
+                                            <section>
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75 mb-1">Or do it manually</p>
+                                                <ol>
+                                                    <li className="flex gap-4 py-4 border-b border-[#d4b483]/[0.14]">
+                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-[#d4b483] pt-0.5">01</span>
+                                                        <div className="min-w-0">
+                                                            <h4 className="text-[13px] font-medium text-white mb-1">Get Cookie Editor</h4>
+                                                            <p className="text-[11.5px] text-white/40 mb-3 leading-relaxed">Install it for your browser to export your login data.</p>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                <button
+                                                                    onClick={() => window.electron.openExternal("https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm")}
+                                                                    className="px-3 h-7 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.06] hover:bg-[#d4b483]/[0.15] hover:border-[#d4b483]/60 text-[10.5px] font-medium text-white/75 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                                                                >
+                                                                    <Globe className="w-3 h-3" strokeWidth={1.75} /> Chrome
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => window.electron.openExternal("https://microsoftedge.microsoft.com/addons/detail/cookieeditor/neaplmfkghagebokkhpjpoebhdledlfi")}
+                                                                    className="px-3 h-7 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.06] hover:bg-[#d4b483]/[0.15] hover:border-[#d4b483]/60 text-[10.5px] font-medium text-white/75 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                                                                >
+                                                                    <Monitor className="w-3 h-3" strokeWidth={1.75} /> Edge
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => window.electron.openExternal("https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/")}
+                                                                    className="px-3 h-7 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.06] hover:bg-[#d4b483]/[0.15] hover:border-[#d4b483]/60 text-[10.5px] font-medium text-white/75 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                                                                >
+                                                                    <Globe className="w-3 h-3" strokeWidth={1.75} /> Firefox
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                </div>
+                                                    </li>
+                                                    <li className="flex gap-4 py-4 border-b border-[#d4b483]/[0.14]">
+                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-[#d4b483] pt-0.5">02</span>
+                                                        <div>
+                                                            <h4 className="text-[13px] font-medium text-white mb-1">Sign in</h4>
+                                                            <p className="text-[11.5px] text-white/40 leading-relaxed">Open <span className="text-white/85 font-medium">{currentPlatform.name}</span> in your browser and make sure you are logged in.</p>
+                                                        </div>
+                                                    </li>
+                                                    <li className="flex gap-4 py-4">
+                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-[#d4b483] pt-0.5">03</span>
+                                                        <div>
+                                                            <h4 className="text-[13px] font-medium text-white mb-1">Export as Netscape</h4>
+                                                            <p className="text-[11.5px] text-white/40 leading-relaxed">Click the extension &rsaquo; Export &rsaquo; choose the <span className="text-white/85 font-medium">Netscape</span> format.</p>
+                                                        </div>
+                                                    </li>
+                                                </ol>
+                                            </section>
 
-                                                {/* Step 2 */}
-                                                <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
-                                                    <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center shrink-0 border border-purple-500/20">
-                                                        <Globe className="w-5 h-5 text-purple-400" />
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="text-sm font-bold text-white mb-1">Step 2: Sign In</h4>
-                                                        <p className="text-[11px] text-white/40 leading-relaxed">Open <span className="text-white font-bold">{currentPlatform.name}</span> in your browser and ensure you are logged in.</p>
-                                                    </div>
-                                                </div>
-
-                                                {/* Step 3 */}
-                                                <div className="flex gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
-                                                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0 border border-amber-500/20">
-                                                        <FileText className="w-5 h-5 text-amber-400" />
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="text-sm font-bold text-white mb-1">Step 3: Export as <span className="text-amber-400 uppercase tracking-wider">Netscape</span></h4>
-                                                        <p className="text-[11px] text-white/40 leading-relaxed">Click extension &rsaquo; Export &rsaquo; Select <span className="text-white font-bold text-[12px]">Netscape</span> format.</p>
-                                                    </div>
-                                                    <div className="ml-auto animate-pulse">
-                                                        <ChevronRight className="w-4 h-4 text-white/20" />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between ml-1">
-                                                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Paste Content Below</label>
+                                            {/* Paste */}
+                                            <div className="space-y-2.5">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75">Paste content</label>
                                                     <button
                                                         onClick={handleCookieFileUpload}
-                                                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer"
+                                                        className="text-[11px] font-medium text-[#d4b483] hover:text-[#ecd6a8] transition-colors flex items-center gap-1.5 cursor-pointer"
                                                     >
-                                                        <FolderOpen className="w-3 h-3" />
-                                                        Upload .txt File
+                                                        <FolderOpen className="w-3 h-3" strokeWidth={1.75} />
+                                                        Upload .txt file
                                                     </button>
                                                 </div>
                                                 <textarea
                                                     value={cookieContent}
                                                     onChange={(e) => setCookieContent(e.target.value)}
                                                     placeholder="# Netscape HTTP Cookie File..."
-                                                    className="w-full h-32 bg-white/[0.03] border border-white/10 rounded-2xl p-4 text-[11px] text-white/70 font-mono outline-none focus:border-blue-500/30 focus:bg-white/[0.05] transition-all resize-none shadow-inner"
+                                                    className="w-full h-32 bg-black/50 border border-[#d4b483]/20 rounded-xl p-3.5 text-[11px] leading-relaxed text-white/70 placeholder:text-[#d4b483]/30 font-mono outline-none focus:border-[#d4b483]/55 focus:ring-4 focus:ring-[#d4b483]/10 focus:bg-black/70 transition-all resize-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]"
                                                 />
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="text-center py-6">
-                                            <div className="relative w-20 h-20 mx-auto mb-6">
-                                                <div className="absolute inset-0 bg-green-500/20 blur-2xl rounded-full animate-pulse" />
-                                                <div className="relative w-20 h-20 bg-green-500/10 border border-green-500/20 rounded-3xl flex items-center justify-center mx-auto transition-transform hover:scale-110 duration-500">
-                                                    <ShieldCheck className="w-10 h-10 text-green-400" />
-                                                </div>
-                                            </div>
-                                            <h3 className="text-2xl font-black text-white mb-2 tracking-tight">Vault Secured</h3>
-                                            <p className="text-white/40 text-sm max-w-xs mx-auto mb-8 font-medium">
-                                                Your cookies are active. Stories and private content are now unlocked for <span className="text-white font-bold">{currentPlatform.name}</span>.
-                                            </p>
+                                        <div className="space-y-6">
+                                            <div className="h-px bg-gradient-to-r from-transparent via-[#d4b483]/30 to-transparent" />
 
-                                            <div className="bg-white/[0.03] rounded-2xl p-5 border border-white/5 text-left group">
-                                                <div className="flex items-center justify-between mb-4">
-                                                    <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Update Vault</p>
+                                            <div className="text-center pt-2">
+                                                <div className="relative w-16 h-16 mx-auto mb-5">
+                                                    <div className="absolute inset-0 rounded-full bg-[#d4b483]/30 blur-2xl" />
+                                                    <div className="relative w-16 h-16 rounded-full border border-[#d4b483]/40 bg-gradient-to-b from-[#d4b483]/[0.22] to-[#d4b483]/[0.04] flex items-center justify-center shadow-[inset_0_1px_0_0_rgba(255,255,255,0.14)]">
+                                                        <ShieldCheck className="w-7 h-7 text-[#ecd6a8]" strokeWidth={1.5} />
+                                                    </div>
+                                                </div>
+                                                <div className="inline-flex items-center gap-2 px-3 h-6 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.07] mb-3.5">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+                                                    <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#ecd6a8]">Session active</span>
+                                                </div>
+                                                <h3 className="text-xl font-semibold text-white tracking-tight mb-1.5">Vault Secured</h3>
+                                                <p className="text-white/40 text-[12.5px] leading-relaxed max-w-[300px] mx-auto">
+                                                    Your cookies are active. Stories and private content are unlocked for <span className="text-white/90 font-medium">{currentPlatform.name}</span>.
+                                                </p>
+                                            </div>
+
+                                            <div className="rounded-2xl border border-[#d4b483]/[0.18] bg-gradient-to-b from-[#d4b483]/[0.07] to-[#d4b483]/[0.02] p-4 group">
+                                                <div className="flex items-center justify-between mb-2.5">
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75">Update vault</p>
                                                     <button
                                                         onClick={handleCookieFileUpload}
-                                                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer"
+                                                        className="text-[11px] font-medium text-[#d4b483] hover:text-[#ecd6a8] transition-colors flex items-center gap-1.5 cursor-pointer"
                                                     >
-                                                        <FolderOpen className="w-3 h-3" />
-                                                        Upload .txt File
+                                                        <FolderOpen className="w-3 h-3" strokeWidth={1.75} />
+                                                        Upload .txt file
                                                     </button>
                                                 </div>
-                                                <p className="text-[11px] text-white/40 mb-3 font-medium">If downloads fail, your session may have expired. Paste a new <span className="font-bold text-white/60">Netscape</span> file below:</p>
+                                                <p className="text-[11.5px] text-white/40 mb-3 leading-relaxed">If downloads fail, your session may have expired. Paste a new <span className="font-medium text-white/70">Netscape</span> file below.</p>
                                                 <textarea
                                                     value={cookieContent}
                                                     onChange={(e) => setCookieContent(e.target.value)}
                                                     placeholder="Paste new Netscape content..."
-                                                    className="w-full h-24 bg-black/40 border border-white/10 rounded-xl p-3 text-[11px] text-white/70 font-mono outline-none focus:border-white/20 resize-none transition-all group-focus-within:bg-black/60 shadow-inner"
+                                                    className="w-full h-24 bg-black/50 border border-[#d4b483]/20 rounded-xl p-3.5 text-[11px] leading-relaxed text-white/70 placeholder:text-[#d4b483]/30 font-mono outline-none focus:border-[#d4b483]/55 focus:ring-4 focus:ring-[#d4b483]/10 focus:bg-black/70 resize-none transition-all shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]"
                                                 />
                                             </div>
                                         </div>
                                     )}
                                 </div>
 
-                                <div className="flex gap-4 sticky bottom-0 bg-[#111] pt-4 border-t border-white/5">
+                                {/* Footer */}
+                                <div className="relative flex gap-3 px-6 py-4 border-t border-[#d4b483]/[0.14] bg-[#0d0c0b]">
                                     {hasCookies && (
                                         <button
                                             onClick={handleDeleteCookies}
-                                            className="px-6 h-12 border border-red-500/30 text-red-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-500/10 transition-all cursor-pointer active:scale-95"
+                                            className="px-5 h-11 rounded-xl border border-white/10 text-white/50 text-[11px] font-semibold uppercase tracking-[0.16em] hover:text-red-300 hover:border-red-400/30 hover:bg-red-500/[0.06] transition-all cursor-pointer active:scale-[0.98]"
                                         >
                                             Purge
                                         </button>
@@ -3712,11 +3854,9 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     <button
                                         onClick={handleSaveCookies}
                                         disabled={!cookieContent.trim()}
-                                        className={`flex-1 h-12 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all cursor-pointer active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed
-                                            ${hasCookies
-                                                ? 'bg-white/10 text-white hover:bg-white/20 border border-white/10'
-                                                : 'bg-white text-black shadow-xl shadow-white/5 hover:bg-white/90'
-                                            }`}
+                                        className="flex-1 h-11 rounded-xl text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer active:scale-[0.99]
+                                            bg-gradient-to-b from-[#f2dfb3] to-[#c8a265] text-[#1c1407] hover:brightness-110 shadow-[0_10px_30px_-10px_rgba(212,180,131,0.6),inset_0_1px_0_0_rgba(255,255,255,0.5)]
+                                            disabled:bg-none disabled:bg-[#d4b483]/[0.07] disabled:text-[#d4b483]/50 disabled:border disabled:border-[#d4b483]/20 disabled:shadow-none disabled:cursor-not-allowed"
                                     >
                                         {hasCookies ? 'Update Session' : 'Activate Vault'}
                                     </button>
@@ -3728,24 +3868,24 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
             </div >
 
             {/* Footer */}
-            < div className="fixed bottom-0 left-0 right-0 py-3 px-6 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/95 to-transparent pointer-events-none" >
-                <div className="max-w-2xl mx-auto flex items-center justify-between pointer-events-auto">
+            < div className="fixed bottom-0 left-0 right-1.5 py-3 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/95 to-transparent pointer-events-none" >
+                <div className="max-w-2xl mx-auto px-6 flex items-center justify-between pointer-events-auto">
                     <a
-                        href="https://vibedownloader.me"
+                        href="https://vibedownloader.vercel.app"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-white/30 hover:text-white/60 transition-colors cursor-pointer flex items-center gap-1.5"
+                        className="text-xs text-white/45 hover:text-white/75 transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                         <Sparkles className="w-3 h-3" />
-                        vibedownloader.me
+                        vibedownloader.vercel.app
                     </a>
-                    <div className="flex items-center gap-1.5 text-xs text-white/25">
+                    <div className="flex items-center gap-1.5 text-xs text-white/40">
                         <span>Powered by</span>
                         <a
                             href="https://github.com/yt-dlp/yt-dlp"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="font-semibold text-white/40 hover:text-white/70 transition-colors cursor-pointer"
+                            className="font-semibold text-white/60 hover:text-white/85 transition-colors cursor-pointer"
                         >
                             yt-dlp
                         </a>
@@ -4070,6 +4210,11 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                 isOpen={showTutorial}
                 onClose={() => setShowTutorial(false)}
             />
+
+            {/* Library: gallery of everything downloaded (and anything already on disk) */}
+            <AnimatePresence>
+                {showLibrary && <Library onClose={() => setShowLibrary(false)} />}
+            </AnimatePresence>
 
         </div >
     );
