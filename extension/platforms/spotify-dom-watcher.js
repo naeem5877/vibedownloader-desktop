@@ -36,7 +36,7 @@
     let lastId = null;
 
     function scan() {
-        const npBar = document.querySelector('[data-testid="now-playing-widget"]');
+        const npBar = document.querySelector('[data-testid="now-playing-widget"], [data-testid="now-playing-widget-v2"]');
         if (!npBar) return;
 
         // Track ID: prefer the title link itself, then any track link or

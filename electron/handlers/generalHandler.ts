@@ -165,6 +165,26 @@ export function registerGeneralHandlers() {
         }
     });
 
+    // Opens a downloaded media file in the user's default player. Anything that
+    // could execute code is refused: this is for media, never for programs.
+    ipcMain.handle('open-file', async (event: any, filePath: string) => {
+        try {
+            const path = require('path');
+            const fs = require('fs');
+            const blocked = ['.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.ps1', '.vbs', '.js', '.jar', '.lnk', '.app', '.sh', '.command'];
+            if (typeof filePath !== 'string' || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+                return { success: false, error: 'File not found' };
+            }
+            if (blocked.includes(path.extname(filePath).toLowerCase())) {
+                return { success: false, error: 'This file type cannot be opened from here' };
+            }
+            const err = await shell.openPath(filePath);
+            return err ? { success: false, error: err } : { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    });
+
     ipcMain.handle('open-external', async (event: any, url: string) => {
         try {
             await shell.openExternal(url);

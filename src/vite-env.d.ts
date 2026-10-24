@@ -131,6 +131,7 @@ interface Window {
 
         // File Operations
         openInFolder: (filePath: string) => Promise<{ success: boolean }>;
+    openFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
         saveThumbnail: (params: { url: string; title: string }) => Promise<{ success: boolean; path?: string }>;
 
         // Updates & Versions

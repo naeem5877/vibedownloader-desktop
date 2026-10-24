@@ -5,12 +5,32 @@ interface CutTimelineProps {
     start: number;
     end: number;
     onChange: (start: number, end: number) => void;
+    /** Colour of the selected range and its handles (hex). */
+    accent?: string;
 }
 
-const MIN_GAP = 0.2;
+const MIN_GAP = 1; // shortest clip the trimmer allows (seconds)
+const BAR_COUNT = 72;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-const fmtTime = (s: number) => `${s.toFixed(1).replace(/\.0$/, '')}s`;
+
+/** m:ss.t (or h:mm:ss.t), rounded once so 59.96s never prints as 0:60.0 */
+const clock = (s: number) => {
+    const tenths = Math.round(Math.max(0, s) * 10);
+    const total = Math.floor(tenths / 10);
+    const frac = tenths % 10;
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = String(total % 60).padStart(2, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}.${frac}` : `${m}:${sec}.${frac}`;
+};
+
+const Readout = ({ label, value, align = 'left' }: { label: string; value: string; align?: 'left' | 'right' }) => (
+    <div className={align === 'right' ? 'text-right' : ''}>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-white/35">{label}</p>
+        <p className="mt-0.5 text-xs font-semibold text-white/80 tabular-nums">{value}</p>
+    </div>
+);
 
 /**
  * Editor-style dual-range trimmer.
@@ -18,7 +38,7 @@ const fmtTime = (s: number) => `${s.toFixed(1).replace(/\.0$/, '')}s`;
  * - Uses pointer capture + rAF-throttled updates so it stays smooth even on long videos.
  * - Keyboard accessible: focus a handle and use ArrowLeft/ArrowRight (Shift = 5s steps).
  */
-export function CutTimeline({ duration, start, end, onChange }: CutTimelineProps) {
+export function CutTimeline({ duration, start, end, onChange, accent = '#a855f7' }: CutTimelineProps) {
     const trackRef = useRef<HTMLDivElement>(null);
     const dragRef = useRef<'start' | 'end' | null>(null);
     const rafRef = useRef<number | null>(null);
@@ -26,13 +46,13 @@ export function CutTimeline({ duration, start, end, onChange }: CutTimelineProps
     const latestRef = useRef({ duration, start, end });
     latestRef.current = { duration, start, end };
 
-    const [dragging, setDragging] = useState(false);
+    const [dragging, setDragging] = useState<'start' | 'end' | null>(null);
 
-    // Precompute a deterministic waveform for the duration of the modal
+    // Deterministic decorative waveform, so the track always looks the same
     const bars = useMemo(
-        () => Array.from({ length: 48 }, (_, i) => ({
+        () => Array.from({ length: BAR_COUNT }, (_, i) => ({
             key: i,
-            height: 12 + Math.abs(Math.sin(i * 0.9) * 22) + (i % 7) * 2
+            height: 20 + Math.abs(Math.sin(i * 0.9)) * 45 + ((i * 7) % 5) * 5
         })),
         []
     );
@@ -64,7 +84,7 @@ export function CutTimeline({ duration, start, end, onChange }: CutTimelineProps
 
     const stopDrag = () => {
         dragRef.current = null;
-        setDragging(false);
+        setDragging(null);
         if (rafRef.current != null) {
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
@@ -74,7 +94,7 @@ export function CutTimeline({ duration, start, end, onChange }: CutTimelineProps
     const startDrag = (which: 'start' | 'end', clientX: number) => {
         if (duration <= 0) return;
         dragRef.current = which;
-        setDragging(true);
+        setDragging(which);
         schedule(clientX);
     };
 
@@ -119,113 +139,83 @@ export function CutTimeline({ duration, start, end, onChange }: CutTimelineProps
 
     const pct = (s: number) => (duration > 0 ? (s / duration) * 100 : 0);
 
+    const handle = (which: 'start' | 'end') => {
+        const value = which === 'start' ? start : end;
+        return (
+            <div
+                role="slider"
+                aria-label={which === 'start' ? 'Clip start' : 'Clip end'}
+                aria-valuemin={which === 'start' ? 0 : Math.round(start + MIN_GAP)}
+                aria-valuemax={which === 'start' ? Math.round(end - MIN_GAP) : Math.round(duration)}
+                aria-valuenow={Math.round(value)}
+                tabIndex={0}
+                onPointerDown={onHandlePointerDown(which)}
+                onKeyDown={onKeyDown(which)}
+                className="absolute -top-2 -bottom-2 z-10 w-3.5 -translate-x-1/2 rounded-md outline-none cursor-ew-resize focus-visible:ring-2 focus-visible:ring-white/70"
+                style={{ left: `${pct(value)}%` }}
+            >
+                <div
+                    className={`h-full w-full rounded-md flex items-center justify-center shadow-lg shadow-black/50 pointer-events-none transition-[filter] duration-150 ${dragging === which ? 'brightness-125' : ''}`}
+                    style={{ background: accent }}
+                >
+                    <div className="w-[2px] h-4 rounded-full bg-white/85" />
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div>
             <div
-                ref={trackRef}
-                className={`relative h-12 select-none touch-none ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                className={`relative h-16 rounded-2xl bg-white/[0.03] border border-white/10 select-none touch-none ${dragging ? 'cursor-grabbing' : 'cursor-pointer'}`}
                 onPointerDown={onTrackPointerDown}
                 onPointerMove={onTrackPointerMove}
                 onPointerUp={stopDrag}
                 onPointerCancel={stopDrag}
             >
-                {/* Ticks (ruler feel) */}
-                {Array.from({ length: 9 }).map((_, i) => (
+                {/* Inner track: insets leave room so the handles never poke out of the card */}
+                <div ref={trackRef} className="absolute inset-y-3 inset-x-4">
+                    {/* Waveform */}
+                    <div aria-hidden="true" className="absolute inset-0 flex items-center justify-between gap-[2px]">
+                        {bars.map((b) => {
+                            const barT = (b.key + 0.5) / bars.length;
+                            const inSelection = duration > 0 && barT >= start / duration && barT <= end / duration;
+                            return (
+                                <div
+                                    key={b.key}
+                                    className="flex-1 rounded-full transition-colors duration-150"
+                                    style={{
+                                        height: `${b.height}%`,
+                                        background: inSelection ? accent : 'rgba(255,255,255,0.1)',
+                                        opacity: inSelection ? 0.8 : 1
+                                    }}
+                                />
+                            );
+                        })}
+                    </div>
+
+                    {/* Selected range frame */}
                     <div
-                        key={i}
-                        className="absolute top-1/2 -translate-y-1/2 w-px h-[14px] bg-white/10"
-                        style={{ left: `${(i / 8) * 100}%` }}
+                        aria-hidden="true"
+                        className="absolute -inset-y-1 border-y-2 pointer-events-none"
+                        style={{
+                            left: `${pct(start)}%`,
+                            width: `${Math.max(0, pct(end) - pct(start))}%`,
+                            borderColor: accent,
+                            background: `${accent}1f`
+                        }}
                     />
-                ))}
 
-                {/* Waveform */}
-                <div className="absolute top-1/2 -translate-y-1/2 inset-x-0 px-[2px] h-8 flex items-center justify-between overflow-hidden rounded-md">
-                    {bars.map((b) => {
-                        const barT = (b.key + 0.5) / bars.length;
-                        const inSelection = barT >= start / duration && barT <= end / duration;
-                        return (
-                            <div
-                                key={b.key}
-                                className={`w-[2px] rounded-full ${inSelection ? 'bg-purple-500/45' : 'bg-white/[0.09]'}`}
-                                style={{ height: `${b.height}px` }}
-                            />
-                        );
-                    })}
-                </div>
-
-                {/* Base track */}
-                <div className="absolute top-1/2 -translate-y-1/2 inset-x-0 h-[4px] bg-white/[0.06] rounded-full border border-white/[0.06]" />
-
-                {/* Selected range */}
-                <div
-                    className="absolute top-1/2 -translate-y-1/2 h-[5px] rounded-full bg-gradient-to-r from-purple-500 to-fuchsia-500 border border-white/25"
-                    style={{
-                        left: `${pct(start)}%`,
-                        width: `${pct(end) - pct(start)}%`
-                    }}
-                />
-
-                {/* Start handle */}
-                <div
-                    role="slider"
-                    aria-label="Clip start"
-                    aria-valuemin={0}
-                    aria-valuemax={Math.round(end - MIN_GAP)}
-                    aria-valuenow={Math.round(start)}
-                    tabIndex={0}
-                    onPointerDown={onHandlePointerDown('start')}
-                    onKeyDown={onKeyDown('start')}
-                    className="absolute top-1/2 -translate-y-1/2 z-10 -translate-x-1/2 w-[16px] h-[36px] outline-none cursor-grab focus-visible:ring-2 focus-visible:ring-purple-400/70 rounded-md"
-                    style={{ left: `${pct(start)}%` }}
-                >
-                    <div className={`relative w-full h-full rounded-md bg-gradient-to-b from-[#2c2c33] to-[#141418] border pointer-events-none ${dragging ? 'border-purple-300' : 'border-white/25'}`}>
-                        <div className="absolute top-1 left-1/2 -translate-x-1/2 w-[7px] h-[7px] rotate-45 bg-purple-400 rounded-[2px]" />
-                        <div className="flex items-center justify-center gap-[2px] absolute inset-x-0 top-1/2 -translate-y-1/2">
-                            <div className="w-px h-[10px] bg-white/25" />
-                            <div className="w-px h-[10px] bg-white/25" />
-                        </div>
-                        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[7px] h-[7px] rotate-45 bg-purple-400 rounded-[2px]" />
-                    </div>
-                </div>
-
-                {/* End handle */}
-                <div
-                    role="slider"
-                    aria-label="Clip end"
-                    aria-valuemin={Math.round(start + MIN_GAP)}
-                    aria-valuemax={Math.round(duration)}
-                    aria-valuenow={Math.round(end)}
-                    tabIndex={0}
-                    onPointerDown={onHandlePointerDown('end')}
-                    onKeyDown={onKeyDown('end')}
-                    className="absolute top-1/2 -translate-y-1/2 z-10 -translate-x-1/2 w-[16px] h-[36px] outline-none cursor-grab focus-visible:ring-2 focus-visible:ring-fuchsia-400/70 rounded-md"
-                    style={{ left: `${pct(end)}%` }}
-                >
-                    <div className={`relative w-full h-full rounded-md bg-gradient-to-b from-[#2c2c33] to-[#141418] border pointer-events-none ${dragging ? 'border-fuchsia-300' : 'border-white/25'}`}>
-                        <div className="absolute top-1 left-1/2 -translate-x-1/2 w-[7px] h-[7px] rotate-45 bg-fuchsia-400 rounded-[2px]" />
-                        <div className="flex items-center justify-center gap-[2px] absolute inset-x-0 top-1/2 -translate-y-1/2">
-                            <div className="w-px h-[10px] bg-white/25" />
-                            <div className="w-px h-[10px] bg-white/25" />
-                        </div>
-                        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[7px] h-[7px] rotate-45 bg-fuchsia-400 rounded-[2px]" />
-                    </div>
+                    {handle('start')}
+                    {handle('end')}
                 </div>
             </div>
 
-            {/* Timecode strip below the track */}
-            <div className="relative h-6 mt-1">
-                <div
-                    className="absolute top-0 -translate-x-1/2 px-1.5 py-0.5 rounded-md bg-black/60 border border-white/10 font-mono text-[9px] font-bold text-purple-300 pointer-events-none"
-                    style={{ left: `${pct(start)}%` }}
-                >
-                    {fmtTime(start)}
-                </div>
-                <div
-                    className="absolute top-0 -translate-x-1/2 px-1.5 py-0.5 rounded-md bg-black/60 border border-white/10 font-mono text-[9px] font-bold text-fuchsia-300 pointer-events-none"
-                    style={{ left: `${pct(end)}%` }}
-                >
-                    {fmtTime(end)}
-                </div>
+            {/* Readout: fixed positions, so the two labels can never collide */}
+            <div className="mt-2.5 flex items-end justify-between">
+                <Readout label="Start" value={clock(start)} />
+                <p className="text-[10px] text-white/30 tabular-nums pb-0.5">of {clock(duration)}</p>
+                <Readout label="End" value={clock(end)} align="right" />
             </div>
         </div>
     );

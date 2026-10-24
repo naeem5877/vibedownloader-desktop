@@ -56,3 +56,6 @@ Desktop.ini
 # OS generated files
 .DS_Store
 ._*
+
+# Raw 8K screenshots (the README uses the optimized copies in Screenshots/readme)
+Screenshots/Screenshot*.png
