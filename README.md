@@ -352,6 +352,8 @@ Download the installer for your system from the [**Releases page**](https://gith
 1. Run the downloaded **`.exe`** and follow the setup wizard.
 2. Open **VibeDownloader** from the Start Menu.
 
+---
+
 <a id="install-macos"></a>
 
 ### 🍎 macOS
@@ -369,6 +371,8 @@ Download the installer for your system from the [**Releases page**](https://gith
 >
 > It only removes macOS quarantine flags, and the code is fully open source if you'd like to inspect it first.
 
+---
+
 <a id="install-linux"></a>
 
 ### 🐧 Linux
@@ -385,6 +389,8 @@ chmod +x VibeDownloader-*.AppImage
 ```bash
 sudo dpkg -i VibeDownloader-*.deb
 ```
+
+---
 
 <a id="whats-new"></a>
 
