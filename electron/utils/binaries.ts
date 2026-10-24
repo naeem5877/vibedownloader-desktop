@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import YtDlpWrap from 'yt-dlp-wrap';
 import { getMainWindow } from './windowManager';
 import { showNotification } from './notifications';
@@ -15,20 +16,147 @@ let ffmpegDirPath: string;
 let ytDlpWrap: YtDlpWrap;
 let ffmpegAvailable = false;
 
-// Resolved absolute locations. The app-managed copy inside userData is
-// preferred, but a machine that already has FFmpeg on PATH is a perfectly good
-// source and must be used as such - previously every direct ffmpeg/ffprobe call
-// looked *only* in userData, so users whose managed copy was missing (failed
-// download, cleaned AppData, or a profile/redirected %APPDATA% on another drive)
-// hit "ffmpeg not found" even with FFmpeg installed.
+// ---------------------------------------------------------------------------
+// FFmpeg / ffprobe resolution
+//
+// Order of preference:
+//   1. An FFmpeg already installed on this machine (PATH, Homebrew, winget,
+//      Scoop, Chocolatey, apt, ...), but only when it is complete and capable.
+//   2. The copy this app downloaded into userData.
+//   3. Nothing yet: ensureFFmpeg() downloads our own copy.
+//
+// Reusing the machine's FFmpeg saves ~190MB of disk and the first-run download.
+// A system copy is accepted only when it will not cause trouble later: it must
+// run, be a recent version, have ffprobe from the same place, and include the
+// encoders this app calls by name. Anything less falls through to our own copy,
+// so a stripped-down build can never break a download half way through.
+// ---------------------------------------------------------------------------
+export type FfmpegSource = 'system' | 'managed';
+
 let resolvedFfmpeg: string | null = null;
 let resolvedFfprobe: string | null = null;
+let resolvedSource: FfmpegSource | null = null;
 
-function findOnPath(exeName: string): string | null {
-    return whichSync(exeName);
+const MIN_FFMPEG_MAJOR = 4;
+/** Encoders the app asks for by name (video cuts/recodes, AAC audio, MP3 export). */
+const REQUIRED_ENCODERS = ['libx264', 'aac', 'libmp3lame'];
+
+function findOnPath(tool: string): string | null {
+    return whichSync(tool);
 }
 
-/** A copy only counts if it is big enough to be real and actually executes. */
+/**
+ * Folders where package managers put FFmpeg but which a GUI app's PATH can miss
+ * (an app started from the Start menu, Finder or a launcher does not always see
+ * the PATH a terminal does, and PATH edits only apply to apps started afterwards).
+ */
+function systemToolDirs(): string[] {
+    const env = process.env;
+    const home = os.homedir();
+    if (isWindows) {
+        const local = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+        return [
+            path.join(local, 'Microsoft', 'WinGet', 'Links'),
+            path.join(env.SCOOP || path.join(home, 'scoop'), 'shims'),
+            path.join(env.ChocolateyInstall || path.join(env.ProgramData || 'C:\\ProgramData', 'chocolatey'), 'bin'),
+            path.join(env.ProgramFiles || 'C:\\Program Files', 'ffmpeg', 'bin'),
+            'C:\\ffmpeg\\bin'
+        ];
+    }
+    if (isMac) return ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin'];
+    return ['/usr/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin', path.join(home, '.local', 'bin')];
+}
+
+/** Every place a system copy of `tool` might be: best guess first, no duplicates. */
+function systemCandidates(tool: string): string[] {
+    const found: string[] = [];
+    const add = (candidate: string | null) => {
+        if (!candidate || found.includes(candidate)) return;
+        // Snap's FFmpeg is confined: it cannot read hidden folders (such as this
+        // app's userData) or /tmp, so it fails on the files the app hands it.
+        if (!isWindows && candidate.startsWith('/snap/')) return;
+        if (fs.existsSync(candidate)) found.push(candidate);
+    };
+    add(findOnPath(tool));
+    for (const dir of systemToolDirs()) add(path.join(dir, exeName(tool)));
+    return found;
+}
+
+interface SystemProbe { ok: boolean; reason?: string }
+const probeCache = new Map<string, SystemProbe>();
+const loggedRejections = new Set<string>();
+
+function rejectSystemCopy(binary: string, reason: string) {
+    const key = `${binary}|${reason}`;
+    if (loggedRejections.has(key)) return;
+    loggedRejections.add(key);
+    console.log(`Not using system FFmpeg at ${binary}: ${reason}`);
+}
+
+/** Runs the candidate and checks it is a real, recent FFmpeg with the encoders we need. */
+function probeSystemFfmpeg(binary: string): SystemProbe {
+    let key: string;
+    try { key = `${binary}|${fs.statSync(binary).mtimeMs}`; } catch { return { ok: false, reason: 'unreadable' }; }
+    const cached = probeCache.get(key);
+    if (cached) return cached;
+
+    const result = ((): SystemProbe => {
+        try {
+            const { execFileSync } = require('child_process');
+            const run = (args: string[]): string => execFileSync(binary, args, {
+                encoding: 'utf-8',
+                timeout: 20000,
+                windowsHide: true,
+                maxBuffer: 16 * 1024 * 1024,
+                stdio: ['ignore', 'pipe', 'ignore']
+            });
+
+            const banner = run(['-version']);
+            if (!/^ffmpeg version/im.test(banner)) return { ok: false, reason: 'not an FFmpeg binary' };
+            // Release builds read "8.1.1" or "n7.0"; git builds ("N-12345-g...") carry
+            // no number and are accepted.
+            const major = banner.match(/ffmpeg version n?(\d+)\./i);
+            if (major && Number(major[1]) < MIN_FFMPEG_MAJOR) {
+                return { ok: false, reason: `version ${major[1]} is too old (need ${MIN_FFMPEG_MAJOR}+)` };
+            }
+
+            const encoders = run(['-hide_banner', '-encoders']);
+            const missing = REQUIRED_ENCODERS.filter(name => !new RegExp(`\\s${name}\\s`).test(encoders));
+            if (missing.length) return { ok: false, reason: `missing encoders: ${missing.join(', ')}` };
+            return { ok: true };
+        } catch {
+            return { ok: false, reason: 'could not be run' };
+        }
+    })();
+
+    probeCache.set(key, result);
+    return result;
+}
+
+/** A complete, capable system install (ffmpeg and ffprobe), or null. */
+function findSystemFfmpeg(): { ffmpeg: string; ffprobe: string } | null {
+    for (const ffmpeg of systemCandidates('ffmpeg')) {
+        const probe = probeSystemFfmpeg(ffmpeg);
+        if (!probe.ok) {
+            rejectSystemCopy(ffmpeg, probe.reason || 'unusable');
+            continue;
+        }
+        // ffprobe is what the compatibility check relies on. Take the one beside
+        // ffmpeg, else any working one on the machine.
+        const sibling = path.join(path.dirname(ffmpeg), exeName('ffprobe'));
+        const ffprobe = fs.existsSync(sibling)
+            ? sibling
+            : systemCandidates('ffprobe').find(candidate => canRun(candidate)) || null;
+        if (!ffprobe || !canRun(ffprobe)) {
+            rejectSystemCopy(ffmpeg, 'no working ffprobe found with it');
+            continue;
+        }
+        return { ffmpeg, ffprobe };
+    }
+    return null;
+}
+
+/** A downloaded copy only counts if it is big enough to be real and actually executes. */
 function isUsableBinary(candidate: string | null): candidate is string {
     if (!candidate || !fs.existsSync(candidate)) return false;
     try {
@@ -48,32 +176,47 @@ function canRun(binary: string): boolean {
 }
 
 /**
- * Single source of truth for where ffmpeg/ffprobe live. Managed copy first, then
- * PATH. Callers must use this instead of assuming the userData location, which
- * is what made the app drive- and machine-dependent.
+ * Single source of truth for where ffmpeg/ffprobe live: the machine's own copy
+ * first, then the one this app downloaded. Callers must use this instead of
+ * assuming the userData location, which is what made the app drive- and
+ * machine-dependent.
  */
 function resolveFfmpegTools(force: boolean = false) {
-    if (!force && resolvedFfmpeg && isUsableBinary(resolvedFfmpeg)) {
-        return { ffmpeg: resolvedFfmpeg, ffprobe: resolvedFfprobe };
+    // A resolved copy stays valid for as long as the file is still there. (Spawning
+    // it on every lookup, as this used to, made each call cost a process launch.)
+    if (!force && resolvedFfmpeg && fs.existsSync(resolvedFfmpeg)) {
+        return { ffmpeg: resolvedFfmpeg, ffprobe: resolvedFfprobe, source: resolvedSource };
     }
 
-    const managedFfmpeg = path.join(ffmpegDirPath, exeName('ffmpeg'));
-    const managedFfprobe = path.join(ffmpegDirPath, exeName('ffprobe'));
-
-    resolvedFfmpeg = isUsableBinary(managedFfmpeg) ? managedFfmpeg : findOnPath('ffmpeg');
-
-    // ffprobe ships in the same folder as whichever ffmpeg we picked.
-    let siblingFfprobe: string | null = null;
-    if (resolvedFfmpeg) {
-        const candidate = path.join(path.dirname(resolvedFfmpeg), exeName('ffprobe'));
-        if (fs.existsSync(candidate)) siblingFfprobe = candidate;
+    const previous = resolvedFfmpeg;
+    const system = findSystemFfmpeg();
+    if (system) {
+        resolvedFfmpeg = system.ffmpeg;
+        resolvedFfprobe = system.ffprobe;
+        resolvedSource = 'system';
+    } else {
+        const managedFfmpeg = path.join(ffmpegDirPath, exeName('ffmpeg'));
+        const managedFfprobe = path.join(ffmpegDirPath, exeName('ffprobe'));
+        if (isUsableBinary(managedFfmpeg)) {
+            resolvedFfmpeg = managedFfmpeg;
+            resolvedSource = 'managed';
+            // On macOS ffprobe is a separate download that can be missing; any
+            // working ffprobe on the machine will do for probing.
+            resolvedFfprobe = isUsableBinary(managedFfprobe)
+                ? managedFfprobe
+                : (systemCandidates('ffprobe').find(candidate => canRun(candidate)) || null);
+        } else {
+            resolvedFfmpeg = null;
+            resolvedFfprobe = null;
+            resolvedSource = null;
+        }
     }
-    resolvedFfprobe = isUsableBinary(managedFfprobe)
-        ? managedFfprobe
-        : (siblingFfprobe || findOnPath('ffprobe'));
 
+    if (resolvedFfmpeg && resolvedFfmpeg !== previous) {
+        console.log(`FFmpeg: using ${resolvedSource} copy at ${resolvedFfmpeg}`);
+    }
     ffmpegAvailable = !!resolvedFfmpeg;
-    return { ffmpeg: resolvedFfmpeg, ffprobe: resolvedFfprobe };
+    return { ffmpeg: resolvedFfmpeg, ffprobe: resolvedFfprobe, source: resolvedSource };
 }
 
 export function initPaths() {
@@ -106,6 +249,11 @@ export function getFfprobePath(): string | null {
 
 export function isFfmpegAvailable() {
     return !!resolveFfmpegTools().ffmpeg;
+}
+
+/** Where the FFmpeg in use came from: this machine's own install, our download, or neither. */
+export function getFfmpegSource(): FfmpegSource | null {
+    return resolveFfmpegTools().source;
 }
 
 /**
@@ -800,7 +948,7 @@ export async function ensureFFmpeg(force: boolean = true): Promise<boolean> {
         }
     }
 
-    console.log('FFmpeg not found, downloading...');
+    console.log('No usable FFmpeg found on this machine, downloading our own copy...');
     writeFfmpegState({ lastAttempt: Date.now(), consecutiveFailures: state.consecutiveFailures });
     const mainWindow = getMainWindow();
     mainWindow?.webContents.send('download-progress', {
