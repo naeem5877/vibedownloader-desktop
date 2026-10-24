@@ -21,6 +21,7 @@ import { classifyExtractionError } from '../utils/errorMessage';
 import { createStageReader } from '../utils/downloadStages';
 import { isWavFile, describeAudioCodec } from '../utils/audioContainer';
 import { fetchMusicTags, buildNodeId3Tags, embedTagsWithFfmpeg, type MusicTags } from '../utils/musicTags';
+import { pickVideoEncoder, softwareVideoEncoder, videoEncodeArgs, runFfmpeg, type EncodeProgress, type VideoEncoder } from '../utils/videoEncoder';
 
 // Download an image URL to a unique temp file (used for MP3 cover embedding
 // and the Windows completion notification).
@@ -272,9 +273,8 @@ async function cutMediaFile(filePath: string, start: number, end: number): Promi
             '-hide_banner', '-loglevel', 'error', '-y',
             '-ss', fmtSec(start), '-i', filePath,
             '-t', fmtSec(duration),
-            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+            ...videoEncodeArgs(softwareVideoEncoder(), { height: 0, oddSize: false }),
             '-c:a', 'aac', '-b:a', '192k',
-            '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
             outPath
         ];
@@ -295,7 +295,13 @@ async function cutMediaFile(filePath: string, start: number, end: number): Promi
 // messaging apps and many hardware players. Probe the finished file and, when
 // the video codec isn't H.264 (or the audio is HE-AAC/Vorbis/Opus), re-encode
 // to the universally compatible H.264 + AAC-LC using the integrated FFmpeg.
-async function recodeVideoToH264(filePath: string): Promise<string> {
+interface RecodeHooks {
+    /** Called only when the file really needs work, with what is about to happen. */
+    stage?: (label: string) => void;
+    progress?: (p: EncodeProgress) => void;
+}
+
+async function recodeVideoToH264(filePath: string, hooks?: RecodeHooks): Promise<string> {
     if (!fs.existsSync(filePath)) return filePath;
     const ffmpeg = getFfmpegBinaryPath();
     const ffprobe = getFfprobePath();
@@ -308,7 +314,7 @@ async function recodeVideoToH264(filePath: string): Promise<string> {
     try {
         const { stdout } = await execFileAsync(ffprobe, [
             '-hide_banner', '-v', 'error',
-            '-show_entries', 'stream=index,codec_type,codec_name,profile,pix_fmt,codec_tag_string,channels,width,height:stream_disposition=attached_pic',
+            '-show_entries', 'stream=index,codec_type,codec_name,profile,pix_fmt,codec_tag_string,channels,width,height:stream_disposition=attached_pic:format=duration',
             '-of', 'json',
             filePath
         ]);
@@ -355,23 +361,25 @@ async function recodeVideoToH264(filePath: string): Promise<string> {
     const outPath = filePath.slice(0, filePath.length - ext.length) + '.mp4';
     const tmpPath = filePath.slice(0, filePath.length - ext.length) + '_recode.mp4';
 
+    const totalSec = Number(probe?.format?.duration) || undefined;
+    const height = Number(video.height) || 0;
+    const oddSize = Number(video.width) % 2 === 1 || height % 2 === 1;
+
     // Transcode ONLY the streams that actually need it. Re-encoding the video
     // is the expensive part (minutes for a 1080p file), so a bad audio track or
     // a wrong container is fixed with a stream copy of the video instead.
-    const buildArgs = (videoEncoder: 'libx264' | 'h264_videotoolbox'): string[] => {
+    const buildArgs = (enc: VideoEncoder, hwDecode: boolean): string[] => {
         const v: string[] = videoOk
             ? ['-c:v', 'copy', '-tag:v', 'avc1']
-            : videoEncoder === 'libx264'
-                ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-pix_fmt', 'yuv420p',
-                   // H.264 4:2:0 needs even dimensions or the encoder refuses.
-                   '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-tag:v', 'avc1']
-                : ['-c:v', 'h264_videotoolbox', '-b:v', '8M', '-pix_fmt', 'yuv420p',
-                   '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-tag:v', 'avc1'];
+            : videoEncodeArgs(enc, { height, oddSize });
         const a: string[] = audio
             ? (audioOk ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000'])
             : [];
         return [
             '-hide_banner', '-loglevel', 'error', '-y',
+            // Let the GPU decode too (VP9/AV1 4K is slow to decode in software).
+            // ffmpeg falls back to software decoding by itself if it can't.
+            ...(hwDecode ? ['-hwaccel', 'auto'] : []),
             '-i', filePath,
             // First real video + first audio only. Dropping subtitle/data/attached
             // streams is what keeps ffmpeg from failing on an unmappable track.
@@ -393,22 +401,31 @@ async function recodeVideoToH264(filePath: string): Promise<string> {
     ].filter(Boolean).join(' + ') || 'compatibility tags';
     console.log(`Re-encoding ${reason} for compatibility:`, path.basename(filePath));
 
-    const cleanupTmp = () => { try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {} };
-    const encoders: ('libx264' | 'h264_videotoolbox')[] = ['libx264'];
-    // Some minimal ffmpeg builds ship without libx264; VideoToolbox is the safety net on macOS.
-    if (isMac && !videoOk) encoders.push('h264_videotoolbox');
+    // The fastest encoder this machine can really run first (GPU when there is
+    // one), plain x264 as the safety net.
+    const software = softwareVideoEncoder();
+    const fastest = videoOk ? null : await pickVideoEncoder(ffmpeg);
+    const attempts: VideoEncoder[] = fastest?.hardware ? [fastest, software] : [software];
 
-    for (const enc of encoders) {
+    hooks?.stage?.(videoOk ? 'Fixing file for compatibility' : 'Converting to H.264');
+
+    const cleanupTmp = () => { try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {} };
+    for (const enc of attempts) {
+        // A stream copy has no encoder worth naming.
+        const shown = videoOk ? {} : { encoder: enc.label, hardware: enc.hardware };
         try {
-            await execFileAsync(ffmpeg, buildArgs(enc), { maxBuffer: 64 * 1024 * 1024 });
+            const startedAt = Date.now();
+            hooks?.progress?.({ percent: 0, ...shown });
+            await runFfmpeg(ffmpeg, buildArgs(enc, enc.hardware && !videoOk), totalSec, (p) => hooks?.progress?.({ ...p, ...shown }));
             if (!fs.existsSync(tmpPath) || fs.statSync(tmpPath).size === 0) throw new Error('ffmpeg produced no output');
+            console.log(`Re-encode finished with ${videoOk ? 'stream copy' : enc.id} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
             if (outPath !== filePath) {
                 try { fs.unlinkSync(filePath); } catch {}
             }
             fs.renameSync(tmpPath, outPath);
             return outPath;
         } catch (e) {
-            console.error(`Failed to re-encode video with ${enc}:`, e);
+            console.error(`Failed to re-encode video with ${enc.id}:`, e);
             cleanupTmp();
         }
     }
@@ -715,17 +732,17 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                 const fileBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)), totalLength);
                 fs.writeFileSync(finalFilePath, fileBuffer);
 
-                let directPath = finalFilePath;
-                if (finalExt === 'mp4') {
-                    directPath = await recodeVideoToH264(finalFilePath);
-                }
-
-                    let resultPath = directPath;
+                    // Cut first: copying a clip out of the file is nearly instant, and
+                    // the compatibility recode then only has the clip to rewrite.
+                    let resultPath = finalFilePath;
                     if (isCutDownload) {
                         mainWindow?.webContents.send('download-progress', { percent: 95, currentSpeed: 'Cutting segment...', jobId });
-                        const cutPath = await cutMediaFile(directPath, cutStart, cutEnd);
+                        const cutPath = await cutMediaFile(resultPath, cutStart, cutEnd);
                         if (cutPath) resultPath = cutPath;
                         else console.error('Cut failed, keeping full-length file');
+                    }
+                    if (finalExt === 'mp4') {
+                        resultPath = await recodeVideoToH264(resultPath);
                     }
 
                     mainWindow?.webContents.send('download-progress', {
@@ -833,6 +850,31 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             const publishStage = (label: string) => {
                 if (label === lastStage?.label) return;
                 sendStage(label);
+            };
+
+            const formatClock = (sec: number) => {
+                const s = Math.max(0, Math.round(sec));
+                const h = Math.floor(s / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                const r = String(s % 60).padStart(2, '0');
+                return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`;
+            };
+
+            // A re-encode knows how far along it is, unlike the other post-download
+            // steps, so it reports a real percentage, speed and time left.
+            const sendEncodeProgress = (p: EncodeProgress) => {
+                mainWindow?.webContents.send('download-progress', {
+                    percent: lastPercent,
+                    stage: lastStage?.label ?? 'Converting to H.264',
+                    processing: true,
+                    stagePercent: Math.round(p.percent),
+                    stageSpeed: p.speed ? `${p.speed.toFixed(1)}x` : undefined,
+                    stageEta: p.etaSec !== undefined ? formatClock(p.etaSec) : undefined,
+                    encoder: p.encoder,
+                    hardware: p.hardware,
+                    isLive: isLiveDownload,
+                    jobId
+                });
             };
 
             if (formatId && formatId.startsWith('audio_')) {
@@ -1100,20 +1142,25 @@ const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
                             }
                         }
                         const isVideoDownload = !(formatId && (formatId.startsWith('audio_') || formatId === 'audio'));
-                        if (isVideoDownload && fs.existsSync(actualFilePath)) {
-                            // A second ffmpeg pass, and the longest step of a video
-                            // download: recoding to H.264 rewrites every frame.
-                            sendStage('Converting to H.264');
-                            actualFilePath = await recodeVideoToH264(actualFilePath);
-                        }
 
-                        // Cut the finished file down to [cutStart, cutEnd] if requested.
+                        // Cut first. Copying a clip out of the file is nearly instant,
+                        // and the recode below then only has the clip to rewrite instead
+                        // of the whole video (an hour of it, for a two-minute cut).
                         let displayPath = actualFilePath;
                         if (isCutDownload && fs.existsSync(actualFilePath)) {
                             sendStage('Cutting segment');
                             const cutResultPath = await cutMediaFile(actualFilePath, cutStart, cutEnd);
                             if (cutResultPath) displayPath = cutResultPath;
                             else console.error('Cut failed, keeping full-length file');
+                        }
+
+                        // Make the video play everywhere. This names itself and reports
+                        // progress only when the file really needs converting.
+                        if (isVideoDownload && fs.existsSync(displayPath)) {
+                            displayPath = await recodeVideoToH264(displayPath, {
+                                stage: publishStage,
+                                progress: sendEncodeProgress
+                            });
                         }
 
                         // yt-dlp can leave the converted thumbnail file behind after

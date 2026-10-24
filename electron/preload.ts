@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('electron', {
 
     // File Operations
     openInFolder: (filePath: string) => ipcRenderer.invoke('open-in-folder', filePath),
+    openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
     saveThumbnail: (params: { url: string, title: string }) => ipcRenderer.invoke('save-thumbnail', params),
 
     // Library (gallery of downloaded media)

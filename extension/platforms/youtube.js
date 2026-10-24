@@ -104,8 +104,8 @@
     function injectShortsButton() {
         if (_shortsInjecting) return;
 
-        const existing = document.querySelector(`.${SHORTS_CLASS}`);
-        if (existing) return;
+        const activeBar = getActiveActionBar();
+        if (activeBar && activeBar.querySelector(`.${SHORTS_CLASS}`)) return;
 
         _shortsInjecting = true;
         const targetUrl = window.location.href;
@@ -186,6 +186,20 @@
             route();
         }
     });
+
+    // Safety net: Polymer can rebuild the action row AFTER yt-navigate-finish and
+    // wipe our button. Re-check cheaply (idempotent; no MutationObserver, so no loops).
+    window.addEventListener('yt-page-data-updated', route);
+    setInterval(() => {
+        if (document.hidden) return;
+        const path = window.location.pathname;
+        if (path === '/watch' && !document.getElementById(BTN_ID)) {
+            injectWatchButton();
+        } else if (path.startsWith('/shorts/')) {
+            const bar = getActiveActionBar();
+            if (bar && !bar.querySelector(`.${SHORTS_CLASS}`)) injectShortsButton();
+        }
+    }, 1000);
 
     // Initial page load.
     if (document.readyState === 'loading') {

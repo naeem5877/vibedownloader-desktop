@@ -124,10 +124,12 @@
 
     // 2. Read track title/artist from the now-playing bar DOM
     function readFromDom() {
-        const widget = document.querySelector('[data-testid="now-playing-widget"]');
+        const widget = document.querySelector('[data-testid="now-playing-widget"], [data-testid="now-playing-widget-v2"]');
         if (!widget) return null;
-        const title = widget.querySelector('[data-testid="context-item-info-title"]')?.textContent?.trim();
-        const artist = widget.querySelector('[data-testid="context-item-info-artist"]')?.textContent?.trim();
+        const title = (widget.querySelector('[data-testid="context-item-info-title"]')
+            || widget.querySelector('a[href^="/track/"], a[href^="/album/"]'))?.textContent?.trim();
+        const artist = (widget.querySelector('[data-testid="context-item-info-artist"]')
+            || widget.querySelector('[data-testid="now-playing-widget-v2-byline"]'))?.textContent?.trim();
         if (!title) return null;
         return { id: null, title, artist, thumbnail: '' };
     }
@@ -146,9 +148,9 @@
                 const id = uriEl.getAttribute('data-uri').split(':').pop();
                 if (id) return id;
             }
-            const link = document.querySelector('a[href^="/track/"]');
+            const link = document.querySelector('a[href*="/track/"]');
             if (link) {
-                const m = link.getAttribute('href').match(/^\/track\/([a-zA-Z0-9]+)/);
+                const m = link.getAttribute('href').match(/\/track\/([a-zA-Z0-9]+)/);
                 if (m) return m[1];
             }
         } catch (_) {}
@@ -241,7 +243,8 @@
 
     async function ensureNowPlayingPanel() {
         const npv = document.querySelector('footer [data-testid="control-button-npv"]')
-            || document.querySelector('[data-testid="control-button-npv"]');
+            || document.querySelector('[data-testid="control-button-npv"]')
+            || document.querySelector('[data-testid="cover-art-button"]');
         if (!npv) return false;
         if (npv.getAttribute('data-active') === 'true') return true;
         npv.click();
@@ -275,6 +278,50 @@
         };
     }
 
+    // 4b. Spotify's new player bar links the title to the ALBUM, not the track,
+    //     so there is no /track/ link to read. Take the album id from that link,
+    //     read the album's public embed page (same origin, no login, no token)
+    //     and pick the track whose title matches what is playing.
+    async function fetchTrackFromAlbumEmbed() {
+        try {
+            const widget = document.querySelector('[data-testid="now-playing-widget"], [data-testid="now-playing-widget-v2"]');
+            const albumHref = widget && widget.querySelector('a[href*="/album/"]')?.getAttribute('href');
+            const albumId = albumHref && (albumHref.match(/\/album\/([a-zA-Z0-9]+)/) || [])[1];
+            const dom = readFromDom();
+            if (!albumId || !dom || !dom.title) return null;
+
+            const res = await fetch(`https://open.spotify.com/embed/album/${albumId}`, { credentials: 'omit' });
+            if (!res.ok) return null;
+            const html = await res.text();
+            const json = (html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/) || [])[1];
+            if (!json) return null;
+
+            const tracks = [];
+            (function walk(o, depth) {
+                if (!o || typeof o !== 'object' || depth > 12) return;
+                if (Array.isArray(o)) { o.forEach((v) => walk(v, depth + 1)); return; }
+                if (typeof o.uri === 'string' && o.uri.startsWith('spotify:track:')) {
+                    tracks.push({ id: o.uri.split(':').pop(), title: o.title || o.name || '', artist: o.subtitle || '' });
+                }
+                Object.keys(o).forEach((k) => walk(o[k], depth + 1));
+            })(JSON.parse(json), 0);
+
+            const norm = (s) => (s || '').replace(/\u00a0/g, ' ').toLowerCase().trim();
+            const want = norm(dom.title);
+            const hit = tracks.find((t) => norm(t.title) === want)
+                || tracks.find((t) => norm(t.title).startsWith(want) || want.startsWith(norm(t.title)));
+            if (!hit) return null;
+            return {
+                id: hit.id,
+                title: hit.title,
+                artist: (hit.artist || dom.artist || '').replace(/\u00a0/g, ' '),
+                thumbnail: ''
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
     function buildButton() {
         const btn = document.createElement('button');
         btn.id = BTN_ID;
@@ -295,6 +342,19 @@
                 if (domId) {
                     url = `https://open.spotify.com/track/${domId}`;
                     track.id = domId;
+                }
+            }
+
+            // New player bar: resolve through the album's embed page.
+            if (!url) {
+                btn.classList.add('vibedownloader-sending');
+                const albumTrack = await fetchTrackFromAlbumEmbed();
+                btn.classList.remove('vibedownloader-sending');
+                if (albumTrack && albumTrack.id) {
+                    track.id = albumTrack.id;
+                    track.title = albumTrack.title || track.title;
+                    track.artist = albumTrack.artist || track.artist;
+                    url = `https://open.spotify.com/track/${track.id}`;
                 }
             }
 
@@ -349,7 +409,7 @@
     }
 
     function injectButton() {
-        const widget = document.querySelector('[data-testid="now-playing-widget"]');
+        const widget = document.querySelector('[data-testid="now-playing-widget"], [data-testid="now-playing-widget-v2"]');
         if (!widget) return;
 
         let btn = widget.querySelector(`#${BTN_ID}`);
@@ -361,7 +421,7 @@
             // as a sibling right after that wrapper — small isolated
             // container, so a second inline button here is safe and won't
             // fight the widget's outer 3-column space-between layout.
-            const likeBtn = widget.querySelector('button[aria-label="Add to Liked Songs"]');
+            const likeBtn = widget.querySelector('button[aria-label*="Liked Songs"], button[aria-label="Add to playlist" i], button[aria-label*="to playlist" i]');
             const likeWrapper = likeBtn ? likeBtn.closest('div') : null;
 
             if (likeWrapper) {

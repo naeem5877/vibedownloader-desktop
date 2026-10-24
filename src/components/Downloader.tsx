@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { motion, AnimatePresence, useReducedMotion, type Variants } from 'framer-motion';
 import {
-    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, FileText, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions, Loader2, Link2, LayoutGrid
+    Download, Loader, Eye, Music, Film, Check, Play, List, User, Search, X, CheckSquare, Square, Disc, Clipboard as ClipboardIcon, Sparkles, Key, Settings as SettingsIcon, Image as ImageIcon, FolderOpen, ShieldCheck, Globe, Monitor, Copy, ChevronRight, ArrowRight, Layers, Pause, PlayCircle, Trash2, CheckCircle2, Puzzle, Scissors, Timer, Radio, Captions, Loader2, Link2, LayoutGrid
 } from 'lucide-react';
 import { FaSpotify, FaXTwitter, FaYoutube, FaInstagram, FaFacebook, FaPinterest, FaSoundcloud, FaTwitch, FaDiscord } from 'react-icons/fa6';
 import TikTokIcon from './ui/TikTokIcon';
@@ -195,28 +195,34 @@ interface DownloadProgress {
     downloaded?: string;
     stage?: string | null;
     processing?: boolean;
+    // Set only while a video is being re-encoded, which knows how far along it is.
+    stagePercent?: number;
+    stageSpeed?: string;
+    stageEta?: string;
+    encoder?: string;
+    hardware?: boolean;
 }
 
-// The loader's headline, in priority order. A named stage wins over a speed
-// because the speed is missing on exactly the lines that matter most: the final
-// `[download] 100%` line carries no "at .../s", so the old speed check fell
-// through to "Starting..." on a download that had already finished, and the
-// conversion lines that follow carry no percentage at all.
-function progressHeadline(progress: DownloadProgress | null): string {
-    if (!progress) return 'Starting...';
-    if (progress.stage) return progress.stage;
-    if (progress.speed && progress.speed !== '...') return progress.speed;
-    if (progress.percent >= 100) return 'Download finished';
-    if (progress.percent > 0) return `Downloading ${Math.round(progress.percent)}%`;
-    return 'Starting...';
+// What a re-encode says about itself, as one short line.
+function encodeLine(p: { stagePercent?: number; stageSpeed?: string; stageEta?: string } | null | undefined): string {
+    if (!p || p.stagePercent === undefined) return '';
+    return [
+        `${Math.round(p.stagePercent)}%`,
+        p.stageSpeed,
+        p.stageEta ? `${p.stageEta} left` : ''
+    ].filter(Boolean).join(' · ');
 }
 
 // Circular Progress
-function CircularProgress({ percent, color, processing = false }: { percent: number; color: string; processing?: boolean }) {
+function CircularProgress({ percent, color, processing = false, stagePercent }: { percent: number; color: string; processing?: boolean; stagePercent?: number }) {
     const radius = 45;
     const stroke = 5;
     const normalizedRadius = radius - stroke / 2;
     const circumference = normalizedRadius * 2 * Math.PI;
+    // A re-encode measures its own progress, so the ring shows that instead of
+    // sweeping. Every other processing step has no number and still sweeps.
+    const measured = processing && stagePercent !== undefined;
+    if (measured) { percent = stagePercent as number; processing = false; }
     const strokeDashoffset = circumference - (percent / 100) * circumference;
 
     return (
@@ -257,17 +263,174 @@ function CircularProgress({ percent, color, processing = false }: { percent: num
     );
 }
 
-const loadingMessages = [
-    "Fetching metadata...",
-    "Finding the best quality...",
-    "Searching media servers...",
-    "Analyzing video streams...",
-    "Bypassing restrictions...",
-    "Retrieving high-res content...",
-    "Sourcing thumbnails...",
-    "Almost there...",
-    "Initializing yt-dlp engine..."
-];
+// Short eased scroll. The browser's own smooth scroll runs at one fixed, unhurried
+// pace; this one scales with the distance, and gives way the moment the user
+// scrolls themselves.
+function animateScroll(container: HTMLElement, to: number, reduce: boolean) {
+    const from = container.scrollTop;
+    const target = Math.max(0, Math.min(to, container.scrollHeight - container.clientHeight));
+    const dist = target - from;
+    if (Math.abs(dist) < 4) return;
+    if (reduce) { container.scrollTop = target; return; }
+
+    const duration = Math.min(700, 280 + Math.abs(dist) * 0.35);
+    const ease = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+    const events = ['wheel', 'touchstart', 'keydown'] as const;
+    let cancelled = false;
+    const stop = () => { cancelled = true; };
+    events.forEach(e => container.addEventListener(e, stop, { passive: true, once: true }));
+
+    const startedAt = performance.now();
+    const step = (now: number) => {
+        if (cancelled) return;
+        const x = Math.min(1, (now - startedAt) / duration);
+        container.scrollTop = from + dist * ease(x);
+        if (x < 1) requestAnimationFrame(step);
+        else events.forEach(e => container.removeEventListener(e, stop));
+    };
+    requestAnimationFrame(step);
+}
+
+function scrollToElement(container: HTMLElement, el: HTMLElement, reduce: boolean) {
+    const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 24;
+    animateScroll(container, top, reduce);
+}
+
+const formatElapsed = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+// Time since the component mounted, ticking twice a second.
+function useElapsed(): number {
+    const [ms, setMs] = useState(0);
+    useEffect(() => {
+        const start = Date.now();
+        const id = setInterval(() => setMs(Date.now() - start), 500);
+        return () => clearInterval(id);
+    }, []);
+    return ms;
+}
+
+type StepState = 'done' | 'active' | 'pending';
+
+function StepIcon({ state, color }: { state: StepState; color: string }) {
+    if (state === 'done') {
+        return (
+            <motion.span
+                initial={{ scale: 0.4 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+                className="w-[18px] h-[18px] shrink-0 rounded-full bg-white/90 flex items-center justify-center"
+            >
+                <Check className="w-3 h-3 text-black" strokeWidth={3.5} />
+            </motion.span>
+        );
+    }
+    if (state === 'active') {
+        return <Loader2 className="w-[18px] h-[18px] shrink-0 animate-spin" style={{ color }} />;
+    }
+    return <span className="w-[18px] h-[18px] shrink-0 rounded-full border border-white/20" />;
+}
+
+function StepList({ steps, color }: { steps: { title: string; detail?: string; state: StepState }[]; color: string }) {
+    return (
+        <ol>
+            {steps.map((s, i) => (
+                <li key={s.title} className="relative flex gap-3 pb-3.5 last:pb-0">
+                    {i < steps.length - 1 && (
+                        <span aria-hidden="true" className={`absolute left-[8.5px] top-[22px] bottom-0 w-px transition-colors duration-300 ${s.state === 'done' ? 'bg-white/40' : 'bg-white/10'}`} />
+                    )}
+                    <StepIcon state={s.state} color={color} />
+                    <div className="min-w-0 flex-1">
+                        <p className={`text-[13px] font-semibold leading-[18px] transition-colors duration-300 ${s.state === 'pending' ? 'text-white/30' : 'text-white'}`}>{s.title}</p>
+                        {s.detail && (
+                            <p className={`mt-0.5 text-[11px] leading-snug truncate tabular-nums ${s.state === 'active' ? 'text-white/65' : 'text-white/35'}`}>{s.detail}</p>
+                        )}
+                    </div>
+                </li>
+            ))}
+        </ol>
+    );
+}
+
+// What the app is doing while a file downloads, in four steps. The main process names
+// each post-download job (merging, converting, embedding cover art...), so the
+// timeline can say exactly which one is running instead of sitting on a percentage.
+const FINISHING_STAGE = /metadata|tags|cover art|album art|finaliz/i;
+
+function progressPhase(p: DownloadProgress | null): number {
+    if (!p) return 0;
+    const stage = p.stage || '';
+    if (stage) {
+        if (!p.processing && /ffmpeg/i.test(stage)) return 0;
+        return FINISHING_STAGE.test(stage) ? 3 : 2;
+    }
+    const speed = p.speed && p.speed !== '...' ? p.speed : '';
+    if (/ffmpeg/i.test(speed)) return 0;
+    if (/cutting|convert|merg|encod|finaliz/i.test(speed)) return 2;
+    return p.percent > 0 || speed ? 1 : 0;
+}
+
+function DownloadActivity({ progress, color }: { progress: DownloadProgress | null; color: string }) {
+    const elapsed = useElapsed();
+    const phase = progressPhase(progress);
+    // A step never un-completes: a late percentage must not drag the timeline back.
+    const furthest = useRef(0);
+    const labels = useRef<Record<number, string>>({});
+    furthest.current = Math.max(furthest.current, phase);
+    const current = furthest.current;
+
+    const text = progress?.stage || (progress?.speed && progress.speed !== '...' ? progress.speed : '');
+    if (text && phase === current) labels.current[current] = text;
+
+    const transfer = [
+        progress && progress.percent > 0 ? `${Math.round(progress.percent)}%` : '',
+        progress?.speed && progress.speed !== '...' ? progress.speed : '',
+        progress?.eta && progress.eta !== '...' ? `${progress.eta} left` : '',
+        progress?.downloaded && progress.downloaded !== '...' ? progress.downloaded : ''
+    ].filter(Boolean).join(' · ');
+
+    const stateOf = (i: number): StepState => (i < current ? 'done' : i === current ? 'active' : 'pending');
+    const steps = [
+        { title: 'Preparing', detail: current === 0 ? (text || 'Getting things ready') : 'Ready' },
+        { title: 'Downloading', detail: current === 1 ? (transfer || 'Starting') : current > 1 ? 'Downloaded' : '' },
+        { title: 'Processing', detail: current === 2 ? [text, progress?.encoder ? `(${progress.encoder})` : '', encodeLine(progress)].filter(Boolean).join(' · ') : current > 2 ? (labels.current[2] || 'Not needed') : '' },
+        { title: 'Finishing up', detail: current === 3 ? text : '' }
+    ].map((s, i) => ({ ...s, state: stateOf(i) }));
+
+    return (
+        <div className="w-full" aria-live="polite">
+            <div className="flex items-center justify-between mb-4 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                <span>Step {current + 1} of {steps.length}</span>
+                <span className="tabular-nums">{formatElapsed(elapsed)}</span>
+            </div>
+            <StepList steps={steps} color={color} />
+        </div>
+    );
+}
+
+// The link lookup reports no stages of its own, so this timeline advances with time
+// and says so honestly when a link takes longer than usual.
+function FetchActivity({ platform, color }: { platform: string; color: string }) {
+    const elapsed = useElapsed();
+    const current = elapsed < 1500 ? 0 : elapsed < 4000 ? 1 : 2;
+    const titles = [`Connecting to ${platform}`, 'Reading media details', 'Checking available qualities'];
+    const steps = titles.map((title, i) => ({ title, state: (i < current ? 'done' : i === current ? 'active' : 'pending') as StepState }));
+
+    return (
+        <div className="w-full max-w-xs" role="status" aria-live="polite">
+            <div className="flex items-center justify-between gap-3 mb-5">
+                <ShinyText text="Fetching your link" disabled={false} speed={3} className="text-sm font-bold tracking-widest uppercase" />
+                <span className="text-[11px] text-white/40 tabular-nums">{formatElapsed(elapsed)}</span>
+            </div>
+            <StepList steps={steps} color={color} />
+            {elapsed > 9000 && (
+                <p className="mt-4 text-[11px] leading-relaxed text-white/45">Taking longer than usual. Some links need extra steps to resolve, so hang tight.</p>
+            )}
+        </div>
+    );
+}
 
 // Memoized Playlist Item for performance
 const PlaylistItem = memo(({
@@ -457,15 +620,17 @@ const BatchQueueItem = memo(({
                             <div className="mt-3 w-full bg-white/10 rounded-full h-1 overflow-hidden">
                                 <div
                                     className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                                    style={{ width: `${item.progress}%` }}
+                                    style={{ width: `${item.processing && item.stagePercent !== undefined ? item.stagePercent : item.progress}%` }}
                                 />
                             </div>
                             <div className="flex justify-between items-center mt-2 text-[10px] text-white/50">
                                 <span className="flex items-center gap-1.5 truncate max-w-[220px]">
                                     {item.processing && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
                                     {item.stage || (item.speed && item.speed !== '...' ? item.speed : 'Downloading...')}
+                                    {item.processing && item.encoder && <span className="text-white/35 truncate">({item.encoder})</span>}
                                 </span>
                                 <div className="flex items-center gap-2">
+                                    {item.processing && item.stagePercent !== undefined && <span className="tabular-nums">{encodeLine(item)}</span>}
                                     {item.downloaded && item.downloaded !== '...' && <span>{item.downloaded}</span>}
                                     {!item.processing && item.eta && item.eta !== '...' && <span>• {item.eta} left</span>}
                                 </div>
@@ -771,6 +936,25 @@ const AudioTrackChoice = memo(({
 ));
 AudioTrackChoice.displayName = 'AudioTrackChoice';
 
+// Cut & Download modal: per-output accent colours (same palette idea as the Library editor)
+const CUT_TABS = {
+    video: { label: 'Video', Icon: Film, from: '#a855f7', to: '#d946ef' },
+    audio: { label: 'Audio', Icon: Music, from: '#10b981', to: '#14b8a6' },
+} as const;
+
+const CutChip = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
+    <button
+        type="button"
+        aria-pressed={active}
+        onClick={onClick}
+        className={`w-full min-h-[44px] px-3.5 py-1.5 rounded-xl border text-xs font-semibold flex flex-col items-start justify-center leading-tight text-left transition-all active:scale-[0.97] cursor-pointer ${active
+            ? 'bg-white/[0.12] border-white/30 text-white'
+            : 'bg-white/[0.03] border-white/10 text-white/60 hover:text-white hover:border-white/20'}`}
+    >
+        {children}
+    </button>
+);
+
 export function Downloader() {
     const [url, setUrl] = useState('');
     const [currentPlatform, setCurrentPlatform] = useState<Platform>(platforms[0]);
@@ -787,6 +971,10 @@ export function Downloader() {
     const [complete, setComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [downloadedFilePath, setDownloadedFilePath] = useState<string | null>(null);
+    const [pathCopied, setPathCopied] = useState(false);
+    const scrollRootRef = useRef<HTMLDivElement>(null);
+    const previewRef = useRef<HTMLDivElement>(null);
+    const successRef = useRef<HTMLDivElement>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
     // Test instrumentation: metadata fetch timing (ms). `fetchStart` is the
@@ -1020,23 +1208,6 @@ export function Downloader() {
         return () => { cancelled = true; };
     }, [lyricsTarget]);
 
-    // Loading messages rotating
-    const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
-
-    useEffect(() => {
-        let interval: any;
-        if (loading) {
-            let i = 0;
-            interval = setInterval(() => {
-                i = (i + 1) % loadingMessages.length;
-                setLoadingMessage(loadingMessages[i]);
-            }, 2000);
-        } else {
-            setLoadingMessage(loadingMessages[0]);
-        }
-        return () => clearInterval(interval);
-    }, [loading]);
-
     // Listen for URLs from browser extension via WebSocket
     useEffect(() => {
         const handler = (data: { url: string; title: string; thumbnail: string }) => {
@@ -1087,6 +1258,10 @@ export function Downloader() {
         // there is a stage to name but no percentage to draw.
         stage?: string | null;
         processing?: boolean;
+        stagePercent?: number;
+        stageSpeed?: string;
+        stageEta?: string;
+        encoder?: string;
         ext?: string;
     }>>([]);
     const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
@@ -1379,7 +1554,7 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                     // An explicit status is the most recent and most specific
                     // thing said about this download, so it takes the headline
                     // back from any stage label that was showing before.
-                    setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status, stage: null, processing: false }));
+                    setProgress(prev => ({ ...(prev || { percent: 0 }), speed: data.status, stage: null, processing: false, stagePercent: undefined, stageSpeed: undefined, stageEta: undefined, encoder: undefined, hardware: undefined }));
                 }
             } else if (data.percent !== undefined) {
                 if (isBatchActive) {
@@ -1392,7 +1567,11 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                             eta: orPrevious(data.eta, q.eta),
                             downloaded: orPrevious(data.downloaded, q.downloaded),
                             stage: data.stage ?? null,
-                            processing: !!data.processing
+                            processing: !!data.processing,
+                            stagePercent: data.stagePercent,
+                            stageSpeed: data.stageSpeed,
+                            stageEta: data.stageEta,
+                            encoder: data.encoder
                         } : q
                     ));
                 } else {
@@ -1403,18 +1582,44 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
                         eta: orPrevious(data.eta, prev?.eta),
                         downloaded: orPrevious(data.downloaded, prev?.downloaded),
                         stage: data.stage ?? null,
-                        processing: !!data.processing
+                        processing: !!data.processing,
+                        // Always set, so a finished encode never leaves stale numbers behind.
+                        stagePercent: data.stagePercent,
+                        stageSpeed: data.stageSpeed,
+                        stageEta: data.stageEta,
+                        encoder: data.encoder,
+                        hardware: data.hardware
                     }));
                 }
             } else if (data.stage) {
                 // A stage update without a percentage: keep whatever the
                 // download last reported rather than resetting the ring.
-                setProgress(prev => ({ ...(prev || { percent: 0 }), stage: data.stage, processing: !!data.processing }));
+                setProgress(prev => ({ ...(prev || { percent: 0 }), stage: data.stage, processing: !!data.processing, stagePercent: undefined, stageSpeed: undefined, stageEta: undefined, encoder: undefined, hardware: undefined }));
             }
         };
         window.electron.onProgress(handler);
         return () => window.electron.offProgress?.();
     }, []); // Empty dependency array to prevent listener re-binding
+
+    // The progress timeline lives on the preview at the top of the result. Starting a
+    // download from far down the format list would leave it out of sight, so glide up
+    // to it (only when it isn't already fully visible).
+    useEffect(() => {
+        if (!downloading || downloadingId) return;
+        const root = scrollRootRef.current;
+        const el = previewRef.current;
+        if (!root || !el) return;
+        const r = el.getBoundingClientRect();
+        const c = root.getBoundingClientRect();
+        if (r.top < c.top || r.bottom > c.bottom) scrollToElement(root, el, !!reduceMotion);
+    }, [downloading, downloadingId, reduceMotion]);
+
+    // Same for the completion screen.
+    useEffect(() => {
+        const root = scrollRootRef.current;
+        const el = successRef.current;
+        if (complete && root && el) scrollToElement(root, el, !!reduceMotion);
+    }, [complete, reduceMotion]);
 
     // Escape key to close modals
     useEffect(() => {
@@ -1687,6 +1892,24 @@ contentType: metadata.contentType === 'story' ? 'story' : undefined,
             alert('Failed to save thumbnail');
         }
     }, [metadata]);
+
+    const handleShowInFolder = useCallback(() => {
+        if (downloadedFilePath) {
+            window.electron.openInFolder(downloadedFilePath);
+        } else {
+            window.electron.chooseDownloadFolder().then(res => {
+                if (res.path) window.electron.openInFolder(res.path);
+                else if (metadata) window.electron.openInFolder(metadata.title);
+            });
+        }
+    }, [downloadedFilePath, metadata]);
+
+    const handleOpenFile = useCallback(async () => {
+        if (!downloadedFilePath) return;
+        const res = await window.electron.openFile(downloadedFilePath);
+        // Couldn't open it (no default player, blocked type...): reveal it instead.
+        if (!res?.success) window.electron.openInFolder(downloadedFilePath);
+    }, [downloadedFilePath]);
 
     const openCutModal = useCallback(() => {
         if (!metadata?.duration || metadata.duration <= 0) return;
@@ -2043,7 +2266,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
     );
 
     return (
-        <div className="w-full h-full bg-[#0a0a0a] text-white overflow-y-auto overflow-x-hidden relative isolate [scrollbar-gutter:stable]">
+        <div ref={scrollRootRef} className="w-full h-full bg-[#0a0a0a] text-white overflow-y-auto overflow-x-hidden relative isolate [scrollbar-gutter:stable]">
             {/* Ambient glow: a faint wash of the selected platform's colour behind the
                 header. It sits behind the content (-z-10 inside the isolated stacking
                 context) and cross-fades whenever the platform changes. */}
@@ -2495,24 +2718,14 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                             animate={{ opacity: 1, y: 0, transition: { duration: 0.18 } }}
                             exit={{ opacity: 0, transition: { duration: 0 } }}
                         >
-                            <div className="animate-pulse relative">
-                                {/* Thumbnail */}
-                                <div className="w-full aspect-video bg-white/5 rounded-2xl mb-5 border border-white/5 flex flex-col items-center justify-center gap-4">
-                                    <div className="relative">
-                                        <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
-                                            <Loader className="w-8 h-8 text-white/20 animate-spin" />
-                                        </div>
-                                    </div>
-                                    <ShinyText
-                                        text={loadingMessage}
-                                        disabled={false}
-                                        speed={3}
-                                        className="text-sm font-bold tracking-widest uppercase opacity-80"
-                                    />
+                            <div className="relative">
+                                {/* What the app is doing while it looks the link up */}
+                                <div className="w-full aspect-video bg-white/[0.03] rounded-2xl mb-5 border border-white/5 flex items-center justify-center p-6">
+                                    <FetchActivity platform={currentPlatform.name} color={currentPlatform.color} />
                                 </div>
 
                                 {/* Info */}
-                                <div className="space-y-3 mb-6 px-2">
+                                <div className="animate-pulse space-y-3 mb-6 px-2">
                                     <div className="h-6 bg-white/5 rounded-lg w-3/4" />
                                     <div className="flex gap-4">
                                         <div className="h-3 bg-white/5 rounded w-24" />
@@ -2526,7 +2739,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                     {metadata && !loading && !complete && !isPlaylist && (!isStory || isSingleStory) && (
                         <motion.div key="video" variants={resultContainer} initial={reduceMotion ? false : 'hidden'} animate="show" exit={{ opacity: 0, transition: { duration: 0.1 } }}>
                             {/* Thumbnail */}
-                            <motion.div variants={resultMedia} className={`relative rounded-2xl overflow-hidden mb-5 ${isSingleStory ? 'bg-black' : 'bg-gradient-to-br from-white/5 to-white/10'}`}>
+                            <motion.div ref={previewRef} variants={resultMedia} className={`relative rounded-2xl overflow-hidden mb-5 ${isSingleStory ? 'bg-black' : 'bg-gradient-to-br from-white/5 to-white/10'}`}>
                                 {!reduceMotion && (
                                     <motion.div
                                         aria-hidden
@@ -2586,6 +2799,16 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
 
                                 {downloading && !downloadingId && (
                                     <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+                                        {!reduceMotion && (
+                                            <motion.span
+                                                aria-hidden="true"
+                                                className="pointer-events-none absolute inset-0 rounded-2xl border-2"
+                                                style={{ borderColor: currentPlatform.color }}
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: [0, 0.9, 0] }}
+                                                transition={{ duration: 0.9, delay: 0.25, ease: 'easeOut' }}
+                                            />
+                                        )}
                                         {isLive ? (
                                             <>
                                                 <div className="flex items-center gap-2">
@@ -2603,20 +2826,14 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                 </button>
                                             </>
                                         ) : (
-                                            <>
-                                                <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} processing={!!progress?.processing} />
-                                                <div className="mt-4 space-y-1">
-                                                    <p className="text-white font-bold text-base">
-                                                        {progressHeadline(progress)}
-                                                    </p>
-                                                    <div className="flex items-center justify-center gap-2 text-white/50 text-xs text-center">
-                                                        {progress?.downloaded && progress.downloaded !== '...' && <span>{progress.downloaded}</span>}
-                                                        {/* The ETA belongs to the transfer, which is over once a
-                                                            conversion is what the loader is waiting on. */}
-                                                        {!progress?.processing && progress?.eta && progress.eta !== '...' && <span>• {progress.eta} left</span>}
-                                                    </div>
+                                            <div className="relative w-full max-w-md flex flex-col sm:flex-row items-center gap-6 sm:gap-9 text-left">
+                                                <div className="shrink-0">
+                                                    <CircularProgress percent={progress?.percent || 0} color={currentPlatform.color} processing={!!progress?.processing} stagePercent={progress?.stagePercent} />
                                                 </div>
-                                            </>
+                                                <div className="flex-1 min-w-0 w-full">
+                                                    <DownloadActivity progress={progress} color={currentPlatform.color} />
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -3542,55 +3759,133 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
 
                     {/* Success */}
                     {complete && !loading && (
-                        <motion.div key="success" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="text-center py-16">
-                            <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 relative">
-                                <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ backgroundColor: currentPlatform.color }} />
-                                <div className="relative w-full h-full rounded-full flex items-center justify-center" style={{ backgroundColor: currentPlatform.color }}>
-                                    <Check className={`w-12 h-12 ${['x', 'tiktok'].includes(currentPlatform.id) ? 'text-black' : 'text-white'}`} />
+                        <motion.div
+                            key="success"
+                            ref={successRef}
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.3, ease: 'easeOut' }}
+                            className="py-8"
+                        >
+                            {/* Animated check */}
+                            <div className="flex flex-col items-center text-center mb-7">
+                                <div className="relative w-20 h-20 mb-5">
+                                    <motion.span
+                                        aria-hidden="true"
+                                        className="absolute inset-0 rounded-full"
+                                        style={{ backgroundColor: currentPlatform.color }}
+                                        initial={{ scale: 0.7, opacity: 0.45 }}
+                                        animate={{ scale: 1.6, opacity: 0 }}
+                                        transition={{ duration: 1.1, ease: 'easeOut' }}
+                                    />
+                                    <motion.div
+                                        className={`relative w-full h-full rounded-full flex items-center justify-center ${['x', 'tiktok'].includes(currentPlatform.id) ? 'text-black' : 'text-white'}`}
+                                        style={{ backgroundColor: currentPlatform.color, boxShadow: `0 16px 40px -12px ${currentPlatform.color}` }}
+                                        initial={{ scale: 0.7 }}
+                                        animate={{ scale: 1 }}
+                                        transition={{ type: 'spring', stiffness: 380, damping: 18 }}
+                                    >
+                                        <svg viewBox="0 0 24 24" className="w-10 h-10" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                            <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ delay: 0.15, duration: 0.4, ease: 'easeOut' }} />
+                                        </svg>
+                                    </motion.div>
+                                </div>
+                                <h2 className="text-2xl font-bold tracking-tight">Download complete</h2>
+                                <p className="mt-1.5 text-sm text-white/45">Saved to your {isSpotify ? 'Music' : 'Downloads'} folder</p>
+                            </div>
+
+                            {/* What was saved */}
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3.5 flex gap-4">
+                                <div className="w-32 sm:w-44 shrink-0 aspect-video rounded-xl overflow-hidden bg-white/5">
+                                    {metadata?.thumbnail ? (
+                                        <img src={metadata.thumbnail} alt="" onError={handleImgError} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <Film className="w-8 h-8 text-white/20" />
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="min-w-0 flex-1 flex flex-col justify-center">
+                                    <p className="text-sm font-semibold leading-snug line-clamp-2" title={metadata?.title}>{metadata?.title}</p>
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-white/50">
+                                        <span className="px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/10 font-medium">{currentPlatform.name}</span>
+                                        {!!metadata?.duration && metadata.duration > 0 && (
+                                            <span className="px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/10 font-medium tabular-nums">{formatDuration(metadata.duration)}</span>
+                                        )}
+                                        {metadata?.uploader && (
+                                            <span className="flex items-center gap-1 min-w-0"><User className="w-3 h-3 shrink-0" /><span className="truncate">{metadata.uploader}</span></span>
+                                        )}
+                                    </div>
+                                    {downloadedFilePath && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                window.electron.copyToClipboard(downloadedFilePath);
+                                                setPathCopied(true);
+                                                setTimeout(() => setPathCopied(false), 1800);
+                                            }}
+                                            title="Copy file path"
+                                            className="mt-3 group flex items-center gap-2 h-8 max-w-full px-2.5 rounded-lg bg-black/30 border border-white/5 hover:border-white/15 transition-colors cursor-pointer text-left"
+                                        >
+                                            <span className="truncate text-[11px] text-white/45 font-mono">{downloadedFilePath}</span>
+                                            {pathCopied
+                                                ? <Check className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                                                : <Copy className="w-3.5 h-3.5 shrink-0 text-white/30 group-hover:text-white/70" />}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
-                            <h2 className="text-3xl font-bold mb-2">Download Complete!</h2>
-                            <p className="text-white/40 mb-8 max-w-sm mx-auto">
-                                <span className="text-white">{metadata?.title}</span> has been saved to your {isSpotify ? 'Music' : 'Downloads'} folder.
-                            </p>
 
-                            <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
+                            {/* Actions */}
+                            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                {downloadedFilePath ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleOpenFile}
+                                        className="h-12 rounded-xl bg-white text-black font-bold text-sm flex items-center justify-center gap-2 hover:bg-white/90 active:scale-[0.98] transition cursor-pointer"
+                                    >
+                                        <Play className="w-4 h-4" /> Open file
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={handleShowInFolder}
+                                        className="h-12 rounded-xl bg-white text-black font-bold text-sm flex items-center justify-center gap-2 hover:bg-white/90 active:scale-[0.98] transition cursor-pointer"
+                                    >
+                                        <FolderOpen className="w-4 h-4" /> Show in folder
+                                    </button>
+                                )}
+                                {downloadedFilePath && (
+                                    <button
+                                        type="button"
+                                        onClick={handleShowInFolder}
+                                        className="h-12 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 text-white font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition cursor-pointer"
+                                    >
+                                        <FolderOpen className="w-4 h-4 text-white/60" /> Show in folder
+                                    </button>
+                                )}
                                 <button
+                                    type="button"
                                     onClick={() => {
-                                        // Use the path from the progress event if available, or request it?
-                                        // The backend sends 'path' in the 'complete' event. 
-                                        // We need to store it in state.
-                                        // Use specific downloaded path if available
-                                        if (downloadedFilePath) {
-                                            window.electron.openInFolder(downloadedFilePath);
-                                        } else {
-                                            window.electron.chooseDownloadFolder().then(res => {
-                                                if (res.path) window.electron.openInFolder(res.path);
-                                                else if (metadata) window.electron.openInFolder(metadata.title);
-});
-
-                                        }
-                                    }}
-                                    className="h-12 px-6 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-                                >
-                                    <FolderOpen className="w-5 h-5 text-blue-400" />
-                                    Show in Folder
-                                </button>
-
-                                <button
-                                    onClick={() => {
-                                        // Logic to open/play the file directly?
-                                        // For now, let's stick to "Download Another" as the primary "Reset" action,
-                                        // and maybe a "Open" button if we know the path.
                                         setComplete(false); setMetadata(null); setUrl('');
+                                        setDownloadedFilePath(null);
                                         setFetchStart(null); setFetchElapsed(null);
                                     }}
-                                    className="h-12 px-8 bg-white text-black rounded-xl font-bold cursor-pointer hover:bg-white/90 transition flex items-center justify-center gap-2"
+                                    className={`h-12 rounded-xl bg-white/[0.06] hover:bg-white/10 border border-white/10 text-white font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition cursor-pointer ${downloadedFilePath ? '' : 'sm:col-span-2'}`}
                                 >
-                                    <Download className="w-5 h-5" />
-                                    Download Another
+                                    <Download className="w-4 h-4 text-white/60" /> New download
                                 </button>
                             </div>
+
+                            {/* Keep the fetched video: pick another quality without fetching it again */}
+                            <button
+                                type="button"
+                                onClick={() => { setComplete(false); setDownloadedFilePath(null); }}
+                                className="mt-3 w-full h-10 rounded-xl text-xs font-medium text-white/40 hover:text-white/80 transition-colors cursor-pointer"
+                            >
+                                ← Download another quality of this video
+                            </button>
                         </motion.div>
                     )}
 
@@ -3617,37 +3912,34 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 8, scale: 0.98 }}
                                 transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-                                className="relative w-full max-w-[480px] max-h-[86vh] flex flex-col overflow-hidden rounded-[22px] border border-[#d4b483]/[0.18] bg-[#0d0c0b] shadow-[0_40px_120px_-24px_rgba(0,0,0,0.95),0_0_90px_-30px_rgba(212,180,131,0.28),inset_0_1px_0_0_rgba(236,214,168,0.14)]"
+                                className="relative w-full max-w-[480px] max-h-[86vh] flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#111] shadow-2xl"
                             >
-                                {/* Soft top light */}
-                                <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(ellipse_at_top,rgba(212,180,131,0.16),transparent_70%)]" />
-
                                 {/* Header */}
-                                <div className="relative flex items-center gap-3.5 px-6 pt-5 pb-4 border-b border-[#d4b483]/[0.14]">
-                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-b from-[#d4b483]/[0.22] to-[#d4b483]/[0.05] border border-[#d4b483]/35 flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.14),0_6px_20px_-8px_rgba(212,180,131,0.5)]">
-                                        <Key className="w-[18px] h-[18px] text-[#ecd6a8]" strokeWidth={1.75} />
+                                <div className="relative flex items-center gap-3.5 px-6 pt-5 pb-4 border-b border-white/10">
+                                    <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                                        <Key className="w-[18px] h-[18px] text-white/70" strokeWidth={1.75} />
                                     </div>
                                     <div className="min-w-0">
                                         <h2 className="text-[15px] font-semibold tracking-tight text-white leading-tight">Sign in to {currentPlatform.name}</h2>
-                                        <p className="text-[11.5px] text-[#d4b483]/65 mt-0.5">Unlock premium access</p>
+                                        <p className="text-[11.5px] text-white/40 mt-0.5">Unlock premium access</p>
                                     </div>
                                     <button
                                         onClick={() => setShowCookieModal(false)}
-                                        className="ml-auto w-8 h-8 flex items-center justify-center rounded-lg text-white/40 hover:text-[#ecd6a8] hover:bg-[#d4b483]/10 transition-colors cursor-pointer"
+                                        className="ml-auto w-8 h-8 flex items-center justify-center rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                                     >
                                         <X className="w-[18px] h-[18px]" strokeWidth={1.75} />
                                     </button>
                                 </div>
 
                                 {/* Body */}
-                                <div className="relative flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-6">
+                                <div className="relative flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
                                     {/* Included */}
                                     <section>
-                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75 mb-3">Included</p>
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/40 mb-3">Included</p>
                                         <ul className="space-y-2.5 text-[12.5px] text-white/55 [&_b]:font-medium [&_b]:text-white/90">
                                             <li className="flex items-center gap-3">
-                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
-                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                <span className="w-4 h-4 rounded-full border border-white/15 bg-white/5 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-white/80" strokeWidth={2.5} />
                                                 </span>
                                                 {currentPlatform.id === 'youtube' ? (
                                                     <span>Access <b>Premium</b> &amp; age-restricted videos</span>
@@ -3658,20 +3950,20 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                 )}
                                             </li>
                                             <li className="flex items-center gap-3">
-                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
-                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                <span className="w-4 h-4 rounded-full border border-white/15 bg-white/5 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-white/80" strokeWidth={2.5} />
                                                 </span>
                                                 <span>Content from <b>private accounts</b> you follow</span>
                                             </li>
                                             <li className="flex items-center gap-3">
-                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
-                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                <span className="w-4 h-4 rounded-full border border-white/15 bg-white/5 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-white/80" strokeWidth={2.5} />
                                                 </span>
                                                 <span>High-quality <b>original audio</b></span>
                                             </li>
                                             <li className="flex items-center gap-3">
-                                                <span className="w-4 h-4 rounded-full border border-[#d4b483]/45 bg-[#d4b483]/10 flex items-center justify-center shrink-0">
-                                                    <Check className="w-2.5 h-2.5 text-[#ecd6a8]" strokeWidth={2.5} />
+                                                <span className="w-4 h-4 rounded-full border border-white/15 bg-white/5 flex items-center justify-center shrink-0">
+                                                    <Check className="w-2.5 h-2.5 text-white/80" strokeWidth={2.5} />
                                                 </span>
                                                 <span>Bypass age restrictions</span>
                                             </li>
@@ -3679,8 +3971,8 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     </section>
 
                                     {/* Privacy */}
-                                    <div className="flex gap-3.5 rounded-2xl border border-[#d4b483]/[0.18] bg-gradient-to-b from-[#d4b483]/[0.07] to-[#d4b483]/[0.02] px-4 py-3.5">
-                                        <ShieldCheck className="w-4 h-4 text-[#d4b483] shrink-0 mt-0.5" strokeWidth={1.75} />
+                                    <div className="flex gap-3.5 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3.5">
+                                        <ShieldCheck className="w-4 h-4 text-white/60 shrink-0 mt-0.5" strokeWidth={1.75} />
                                         <div>
                                             <p className="text-[12px] font-medium text-white/80 mb-1">Private by design</p>
                                             <p className="text-[11.5px] leading-relaxed text-white/40">
@@ -3694,7 +3986,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                         with the app. No Instagram login, no cookies, no API key,
                                         and nothing is billed per lookup. */}
                                     {currentPlatform.id === 'instagram' && (
-                                        <div className="rounded-2xl border border-[#d4b483]/[0.18] bg-gradient-to-b from-[#d4b483]/[0.07] to-[#d4b483]/[0.02] px-4 py-3.5">
+                                        <div className="rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3.5">
                                             <h3 className="text-[12px] font-medium text-white/80 mb-1">Read Stories without logging in</h3>
                                             <p className="text-[11.5px] text-white/40 leading-relaxed">
                                                 Instagram serves no story data to anonymous clients, so the app uses its
@@ -3706,14 +3998,14 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     )}
 
                                     {!hasCookies ? (
-                                        <div className="space-y-6">
-                                            <div className="h-px bg-gradient-to-r from-transparent via-[#d4b483]/30 to-transparent" />
+                                        <div className="space-y-5">
+                                            <div className="h-px bg-white/10" />
 
                                             {/* Extension */}
-                                            <div className="rounded-2xl border border-[#d4b483]/30 bg-gradient-to-b from-[#d4b483]/[0.14] to-[#d4b483]/[0.02] p-4 shadow-[inset_0_1px_0_0_rgba(236,214,168,0.2),0_18px_40px_-24px_rgba(212,180,131,0.45)]">
+                                            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
                                                 <div className="flex items-center gap-3.5 mb-3.5">
-                                                    <div className="w-9 h-9 rounded-lg bg-[#d4b483]/[0.14] border border-[#d4b483]/35 flex items-center justify-center shrink-0">
-                                                        <Puzzle className="w-4 h-4 text-[#ecd6a8]" strokeWidth={1.75} />
+                                                    <div className="w-9 h-9 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                                                        <Puzzle className="w-4 h-4 text-white/80" strokeWidth={1.75} />
                                                     </div>
                                                     <div className="min-w-0">
                                                         <h4 className="text-[13px] font-semibold text-white leading-tight">The easier way</h4>
@@ -3722,7 +4014,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                 </div>
                                                 <button
                                                     onClick={() => { setShowCookieModal(false); setShowTutorial(true); }}
-                                                    className="w-full h-10 rounded-xl bg-[#d4b483]/[0.14] hover:bg-[#d4b483]/[0.24] border border-[#d4b483]/40 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#ecd6a8] transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-[0.99]"
+                                                    className="w-full h-10 rounded-xl bg-white text-black hover:bg-white/90 text-[11px] font-bold uppercase tracking-[0.14em] transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-[0.99]"
                                                 >
                                                     Get the Extension
                                                     <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
@@ -3731,44 +4023,44 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
 
                                             {/* Manual steps */}
                                             <section>
-                                                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75 mb-1">Or do it manually</p>
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/40 mb-1">Or do it manually</p>
                                                 <ol>
-                                                    <li className="flex gap-4 py-4 border-b border-[#d4b483]/[0.14]">
-                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-[#d4b483] pt-0.5">01</span>
+                                                    <li className="flex gap-4 py-4 border-b border-white/5">
+                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-white/35 pt-0.5">01</span>
                                                         <div className="min-w-0">
                                                             <h4 className="text-[13px] font-medium text-white mb-1">Get Cookie Editor</h4>
                                                             <p className="text-[11.5px] text-white/40 mb-3 leading-relaxed">Install it for your browser to export your login data.</p>
                                                             <div className="flex flex-wrap gap-2">
                                                                 <button
                                                                     onClick={() => window.electron.openExternal("https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm")}
-                                                                    className="px-3 h-7 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.06] hover:bg-[#d4b483]/[0.15] hover:border-[#d4b483]/60 text-[10.5px] font-medium text-white/75 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                                                                    className="px-3 h-7 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-[10.5px] font-medium text-white/70 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
                                                                 >
                                                                     <Globe className="w-3 h-3" strokeWidth={1.75} /> Chrome
                                                                 </button>
                                                                 <button
                                                                     onClick={() => window.electron.openExternal("https://microsoftedge.microsoft.com/addons/detail/cookieeditor/neaplmfkghagebokkhpjpoebhdledlfi")}
-                                                                    className="px-3 h-7 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.06] hover:bg-[#d4b483]/[0.15] hover:border-[#d4b483]/60 text-[10.5px] font-medium text-white/75 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                                                                    className="px-3 h-7 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-[10.5px] font-medium text-white/70 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
                                                                 >
                                                                     <Monitor className="w-3 h-3" strokeWidth={1.75} /> Edge
                                                                 </button>
                                                                 <button
                                                                     onClick={() => window.electron.openExternal("https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/")}
-                                                                    className="px-3 h-7 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.06] hover:bg-[#d4b483]/[0.15] hover:border-[#d4b483]/60 text-[10.5px] font-medium text-white/75 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                                                                    className="px-3 h-7 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-[10.5px] font-medium text-white/70 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
                                                                 >
                                                                     <Globe className="w-3 h-3" strokeWidth={1.75} /> Firefox
                                                                 </button>
                                                             </div>
                                                         </div>
                                                     </li>
-                                                    <li className="flex gap-4 py-4 border-b border-[#d4b483]/[0.14]">
-                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-[#d4b483] pt-0.5">02</span>
+                                                    <li className="flex gap-4 py-4 border-b border-white/5">
+                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-white/35 pt-0.5">02</span>
                                                         <div>
                                                             <h4 className="text-[13px] font-medium text-white mb-1">Sign in</h4>
                                                             <p className="text-[11.5px] text-white/40 leading-relaxed">Open <span className="text-white/85 font-medium">{currentPlatform.name}</span> in your browser and make sure you are logged in.</p>
                                                         </div>
                                                     </li>
                                                     <li className="flex gap-4 py-4">
-                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-[#d4b483] pt-0.5">03</span>
+                                                        <span className="w-5 text-[11px] font-mono tabular-nums text-white/35 pt-0.5">03</span>
                                                         <div>
                                                             <h4 className="text-[13px] font-medium text-white mb-1">Export as Netscape</h4>
                                                             <p className="text-[11.5px] text-white/40 leading-relaxed">Click the extension &rsaquo; Export &rsaquo; choose the <span className="text-white/85 font-medium">Netscape</span> format.</p>
@@ -3780,10 +4072,10 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                             {/* Paste */}
                                             <div className="space-y-2.5">
                                                 <div className="flex items-center justify-between">
-                                                    <label className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75">Paste content</label>
+                                                    <label className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/40">Paste content</label>
                                                     <button
                                                         onClick={handleCookieFileUpload}
-                                                        className="text-[11px] font-medium text-[#d4b483] hover:text-[#ecd6a8] transition-colors flex items-center gap-1.5 cursor-pointer"
+                                                        className="text-[11px] font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
                                                     >
                                                         <FolderOpen className="w-3 h-3" strokeWidth={1.75} />
                                                         Upload .txt file
@@ -3793,24 +4085,24 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                     value={cookieContent}
                                                     onChange={(e) => setCookieContent(e.target.value)}
                                                     placeholder="# Netscape HTTP Cookie File..."
-                                                    className="w-full h-32 bg-black/50 border border-[#d4b483]/20 rounded-xl p-3.5 text-[11px] leading-relaxed text-white/70 placeholder:text-[#d4b483]/30 font-mono outline-none focus:border-[#d4b483]/55 focus:ring-4 focus:ring-[#d4b483]/10 focus:bg-black/70 transition-all resize-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]"
+                                                    className="w-full h-28 bg-white/5 border border-white/10 rounded-xl p-3.5 text-[11px] leading-relaxed text-white/70 placeholder:text-white/25 font-mono outline-none focus:border-white/30 focus:bg-white/[0.07] transition-all resize-none"
                                                 />
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-6">
-                                            <div className="h-px bg-gradient-to-r from-transparent via-[#d4b483]/30 to-transparent" />
+                                        <div className="space-y-5">
+                                            <div className="h-px bg-white/10" />
 
                                             <div className="text-center pt-2">
                                                 <div className="relative w-16 h-16 mx-auto mb-5">
-                                                    <div className="absolute inset-0 rounded-full bg-[#d4b483]/30 blur-2xl" />
-                                                    <div className="relative w-16 h-16 rounded-full border border-[#d4b483]/40 bg-gradient-to-b from-[#d4b483]/[0.22] to-[#d4b483]/[0.04] flex items-center justify-center shadow-[inset_0_1px_0_0_rgba(255,255,255,0.14)]">
-                                                        <ShieldCheck className="w-7 h-7 text-[#ecd6a8]" strokeWidth={1.5} />
+                                                    <div className="absolute inset-0 rounded-full bg-emerald-400/10 blur-2xl" />
+                                                    <div className="relative w-16 h-16 rounded-full border border-white/10 bg-white/5 flex items-center justify-center">
+                                                        <ShieldCheck className="w-7 h-7 text-emerald-400" strokeWidth={1.5} />
                                                     </div>
                                                 </div>
-                                                <div className="inline-flex items-center gap-2 px-3 h-6 rounded-full border border-[#d4b483]/30 bg-[#d4b483]/[0.07] mb-3.5">
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
-                                                    <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#ecd6a8]">Session active</span>
+                                                <div className="inline-flex items-center gap-2 px-3 h-6 rounded-full border border-emerald-400/20 bg-emerald-400/10 mb-3.5">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                                    <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Session active</span>
                                                 </div>
                                                 <h3 className="text-xl font-semibold text-white tracking-tight mb-1.5">Vault Secured</h3>
                                                 <p className="text-white/40 text-[12.5px] leading-relaxed max-w-[300px] mx-auto">
@@ -3818,12 +4110,12 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                 </p>
                                             </div>
 
-                                            <div className="rounded-2xl border border-[#d4b483]/[0.18] bg-gradient-to-b from-[#d4b483]/[0.07] to-[#d4b483]/[0.02] p-4 group">
+                                            <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
                                                 <div className="flex items-center justify-between mb-2.5">
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#d4b483]/75">Update vault</p>
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/40">Update vault</p>
                                                     <button
                                                         onClick={handleCookieFileUpload}
-                                                        className="text-[11px] font-medium text-[#d4b483] hover:text-[#ecd6a8] transition-colors flex items-center gap-1.5 cursor-pointer"
+                                                        className="text-[11px] font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
                                                     >
                                                         <FolderOpen className="w-3 h-3" strokeWidth={1.75} />
                                                         Upload .txt file
@@ -3834,7 +4126,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                     value={cookieContent}
                                                     onChange={(e) => setCookieContent(e.target.value)}
                                                     placeholder="Paste new Netscape content..."
-                                                    className="w-full h-24 bg-black/50 border border-[#d4b483]/20 rounded-xl p-3.5 text-[11px] leading-relaxed text-white/70 placeholder:text-[#d4b483]/30 font-mono outline-none focus:border-[#d4b483]/55 focus:ring-4 focus:ring-[#d4b483]/10 focus:bg-black/70 resize-none transition-all shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]"
+                                                    className="w-full h-20 bg-white/5 border border-white/10 rounded-xl p-3.5 text-[11px] leading-relaxed text-white/70 placeholder:text-white/25 font-mono outline-none focus:border-white/30 focus:bg-white/[0.07] transition-all resize-none"
                                                 />
                                             </div>
                                         </div>
@@ -3842,7 +4134,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                 </div>
 
                                 {/* Footer */}
-                                <div className="relative flex gap-3 px-6 py-4 border-t border-[#d4b483]/[0.14] bg-[#0d0c0b]">
+                                <div className="relative flex gap-3 px-6 py-4 border-t border-white/10 bg-[#111]">
                                     {hasCookies && (
                                         <button
                                             onClick={handleDeleteCookies}
@@ -3854,9 +4146,7 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                     <button
                                         onClick={handleSaveCookies}
                                         disabled={!cookieContent.trim()}
-                                        className="flex-1 h-11 rounded-xl text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer active:scale-[0.99]
-                                            bg-gradient-to-b from-[#f2dfb3] to-[#c8a265] text-[#1c1407] hover:brightness-110 shadow-[0_10px_30px_-10px_rgba(212,180,131,0.6),inset_0_1px_0_0_rgba(255,255,255,0.5)]
-                                            disabled:bg-none disabled:bg-[#d4b483]/[0.07] disabled:text-[#d4b483]/50 disabled:border disabled:border-[#d4b483]/20 disabled:shadow-none disabled:cursor-not-allowed"
+                                        className="flex-1 h-11 rounded-xl text-[11px] font-bold uppercase tracking-[0.18em] transition-all cursor-pointer active:scale-[0.99] bg-white text-black hover:bg-white/90 disabled:bg-white/5 disabled:text-white/30 disabled:border disabled:border-white/10 disabled:cursor-not-allowed"
                                     >
                                         {hasCookies ? 'Update Session' : 'Activate Vault'}
                                     </button>
@@ -3951,44 +4241,49 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
             {/* Cut & Download Modal */}
             <AnimatePresence>
                 {showCutModal && metadata && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="fixed left-0 right-0 bottom-0 top-8 z-50 flex items-center justify-center p-4 sm:p-8">
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
+                            transition={{ duration: 0.18 }}
                             onClick={() => setShowCutModal(false)}
-                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                            className="absolute inset-0 bg-black/80"
                         />
                         <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="relative w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-[#0f0f11] border border-white/10 rounded-2xl shadow-2xl"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Cut and download"
+                            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                            className="relative w-full max-w-5xl max-h-full overflow-y-auto custom-scrollbar rounded-3xl outline-none bg-[#0f0f11] border border-white/10 shadow-2xl shadow-black/70"
                         >
-                            {/* Header */}
-                            <div className="flex items-center gap-3 px-5 py-4 border-b border-white/[0.07] shrink-0">
-                                <div className="w-9 h-9 rounded-lg bg-purple-500/15 border border-purple-500/25 flex items-center justify-center shrink-0">
-                                    <Scissors className="w-4 h-4 text-purple-300" />
-                                </div>
-                                <div className="min-w-0">
-                                    <h2 className="font-black tracking-tight">Cut & Download</h2>
-                                    <p className="text-white/40 text-[11px]">Drag the handles, or click the track to trim</p>
-                                </div>
-                                <div className="ml-auto flex items-center gap-2 shrink-0">
-                                    <span className="px-3 h-8 rounded-lg bg-purple-500/10 border border-purple-500/25 text-purple-200 text-xs font-black flex items-center gap-1.5">
-                                        <Scissors className="w-3 h-3" /> {formatDuration(cutEnd - cutStart)}
-                                    </span>
-                                    <button onClick={() => setShowCutModal(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/[0.03] border border-white/5 hover:bg-white/10 hover:border-white/10 transition cursor-pointer">
-                                        <X className="w-4 h-4 text-white/60" />
-                                    </button>
-                                </div>
-                            </div>
+                            {/* Colour wash that follows the output type */}
+                            <div
+                                aria-hidden="true"
+                                className="pointer-events-none absolute inset-x-0 top-0 h-64 opacity-[0.16]"
+                                style={{ background: `radial-gradient(60% 100% at 70% 0%, ${CUT_TABS[cutType].from}, transparent)` }}
+                            />
 
-                            {/* Body → horizontal split */}
-                            <div className="flex flex-col md:flex-row md:items-stretch overflow-y-auto custom-scrollbar">
-                                {/* Left: preview */}
-                                <div className="md:w-[38%] md:max-w-[340px] shrink-0 md:border-r border-white/[0.07] p-5 pb-4">
-                                    <div className="relative rounded-xl overflow-hidden">
+                            <button
+                                type="button"
+                                onClick={() => setShowCutModal(false)}
+                                aria-label="Close"
+                                className="absolute top-4 right-4 z-20 w-9 h-9 rounded-xl bg-white/[0.05] border border-white/10 hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+
+                            <div className="relative grid md:grid-cols-[1.1fr_1fr] gap-0">
+                                {/* Preview */}
+                                <div className="p-6 md:p-8 md:border-r border-white/[0.06]">
+                                    <div className="flex items-center gap-2 mb-4 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                                        <Scissors className="w-3.5 h-3.5" /> Cut &amp; Download
+                                    </div>
+
+                                    <div className="relative rounded-2xl overflow-hidden bg-black border border-white/10">
                                         {metadata.thumbnail ? (
                                             <img src={metadata.thumbnail} alt="" onError={handleImgError} className="w-full aspect-video object-cover" referrerPolicy="no-referrer" />
                                         ) : (
@@ -3996,202 +4291,192 @@ contentType: metadata?.contentType || (isStory ? 'story' : undefined),
                                                 <Film className="w-10 h-10 text-white/20" />
                                             </div>
                                         )}
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                                        <div className="absolute top-2.5 right-2.5 px-2 py-1 bg-black/75 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5 border border-white/10">
-                                            <Timer className="w-3 h-3 text-purple-300" />
-                                            {formatDuration(metadata.duration)}
-                                        </div>
-                                    </div>
-                                    <p className="text-sm font-bold leading-snug mt-3 line-clamp-2">{metadata.title}</p>
-
-                                        {/* Channel / uploader */}
-                                        {!isSpotify && (
-                                            <p className="flex items-center gap-1.5 mt-1 text-xs text-white/40 truncate">
-                                                <User className="w-3.5 h-3.5 shrink-0" /> {metadata.uploader}
-                                            </p>
-                                        )}
-
-                                        {/* Clip summary card */}
-                                        <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/[0.07] p-3 space-y-2.5">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Clip</span>
-                                                <span className="text-right">
-                                                    <span className="block text-xs font-bold text-white">{formatDuration(cutEnd - cutStart)}</span>
-                                                    <span className="block text-[10px] font-medium text-white/40">{formatDurationWords(cutEnd - cutStart)}</span>
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Range</span>
-                                                <span className="text-[11px] font-mono font-bold text-purple-300/80">
-                                                    {formatDuration(cutStart)} → {formatDuration(cutEnd)}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.15em]">Saved</span>
-                                                <span className="text-[11px] font-mono font-bold text-fuchsia-300/80">
-                                                    {(1 - (cutEnd - cutStart) / metadata.duration) >= 0 ? `${Math.round((1 - (cutEnd - cutStart) / metadata.duration) * 100)}%` : '0%'}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        {/* Output hint */}
-                                        <div className="mt-3 flex items-start gap-2 text-[11px] text-white/40 leading-relaxed">
-                                            <Sparkles className="w-3.5 h-3.5 text-white/25 shrink-0 mt-0.5" />
-                                            <p>
-                                                Your clip will be saved as a separate {cutType === 'video' ? 'video' : 'audio'} file in your Downloads folder.
-                                            </p>
-                                        </div>
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+                                        <span className="absolute top-2.5 right-2.5 flex items-center gap-1.5 h-6 px-2 rounded-md bg-black/70 text-[10px] font-bold text-white/85 tabular-nums">
+                                            <Timer className="w-3 h-3" /> {formatDuration(metadata.duration)}
+                                        </span>
                                     </div>
 
-                                {/* Right: controls */}
-                                <div className="flex-1 min-w-0 p-5 pt-4 md:pt-5">
-                                    {/* Timeline */}
-                                    <div className="mb-5">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <Layers className="w-3.5 h-3.5 text-white/40" />
-                                            <span className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">Timeline</span>
+                                    <p className="mt-4 text-sm font-semibold text-white line-clamp-2" title={metadata.title}>{metadata.title}</p>
+                                    {!isSpotify && (
+                                        <p className="mt-1 flex items-center gap-1.5 text-xs text-white/40 truncate">
+                                            <User className="w-3.5 h-3.5 shrink-0" /> {metadata.uploader}
+                                        </p>
+                                    )}
+
+                                    {/* Clip summary */}
+                                    <dl className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] divide-y divide-white/[0.06]">
+                                        <div className="flex items-center justify-between gap-4 px-4 py-3">
+                                            <dt className="text-[10px] font-bold uppercase tracking-widest text-white/35">Clip</dt>
+                                            <dd className="text-right">
+                                                <span className="block text-sm font-semibold text-white tabular-nums">{formatDuration(cutEnd - cutStart)}</span>
+                                                <span className="block text-[10px] text-white/40">{formatDurationWords(cutEnd - cutStart)}</span>
+                                            </dd>
                                         </div>
+                                        <div className="flex items-center justify-between gap-4 px-4 py-3">
+                                            <dt className="text-[10px] font-bold uppercase tracking-widest text-white/35">Range</dt>
+                                            <dd className="text-xs font-semibold text-white/80 tabular-nums">
+                                                {formatDuration(cutStart)} → {formatDuration(cutEnd)}
+                                            </dd>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-4 px-4 py-3">
+                                            <dt className="text-[10px] font-bold uppercase tracking-widest text-white/35">Saved</dt>
+                                            <dd className="text-xs font-semibold text-white/80 tabular-nums">
+                                                {metadata.duration > 0 ? Math.max(0, Math.round((1 - (cutEnd - cutStart) / metadata.duration) * 100)) : 0}%
+                                            </dd>
+                                        </div>
+                                    </dl>
 
-                                        {/* Custom editor-style dual slider */}
-                                        <CutTimeline
-                                            duration={metadata.duration}
-                                            start={cutStart}
-                                            end={cutEnd}
-                                            onChange={handleCutTimelineChange}
-                                        />
+                                    <p className="mt-4 flex items-start gap-2 text-[11px] leading-relaxed text-white/35">
+                                        <Sparkles className="w-3.5 h-3.5 mt-px shrink-0" />
+                                        Your clip will be saved as a separate {cutType === 'video' ? 'video' : 'audio'} file in your Downloads folder.
+                                    </p>
+                                </div>
 
-                                        {/* Quick presets */}
-                                        <div className="grid grid-cols-4 gap-2 mb-5">
-                                            {[
-                                                { label: 'First 15s', calc: (d: number) => [0, Math.min(15, d)] },
-                                                { label: 'First 30s', calc: (d: number) => [0, Math.min(30, d)] },
-                                                { label: 'Last 15s', calc: (d: number) => [Math.max(0, d - 15), d] },
-                                                { label: 'Middle', calc: (d: number) => [d / 3, (d / 3) * 2] }
-                                            ].map(p => (
+                                {/* Controls */}
+                                <div className="p-6 md:p-8 pb-0 md:pb-0 flex flex-col">
+                                    <div role="tablist" aria-label="Output type" className="relative grid grid-cols-2 gap-1 p-1 rounded-2xl bg-white/[0.04] border border-white/10 mr-12">
+                                        {(['video', 'audio'] as const).map(id => {
+                                            const t = CUT_TABS[id];
+                                            const active = cutType === id;
+                                            return (
                                                 <button
-                                                    key={p.label}
-                                                    onClick={() => {
-                                                        const [s, e] = p.calc(metadata.duration);
-                                                        setCutStart(Math.max(0, Math.min(s, metadata.duration)));
-                                                        setCutEnd(Math.min(metadata.duration, Math.max(e, s + 0.1)));
-                                                    }}
-                                                    className="h-8 rounded-lg bg-white/[0.05] border border-white/10 text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/[0.1] hover:border-white/25 transition-all cursor-pointer active:scale-95"
+                                                    key={id}
+                                                    type="button"
+                                                    role="tab"
+                                                    aria-selected={active}
+                                                    onClick={() => setCutType(id)}
+                                                    className={`outline-offset-[-2px] relative h-12 rounded-xl flex items-center justify-center text-xs font-semibold transition-colors cursor-pointer ${active ? 'text-white' : 'text-white/45 hover:text-white/80'}`}
                                                 >
-                                                    {p.label}
+                                                    {active && (
+                                                        <motion.span
+                                                            layoutId="cut-tab"
+                                                            transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                                                            className="absolute inset-0 rounded-xl bg-white/[0.09] border border-white/15"
+                                                        />
+                                                    )}
+                                                    <span className="relative flex items-center gap-1.5">
+                                                        <t.Icon className="w-3.5 h-3.5" style={{ color: active ? t.from : undefined }} />
+                                                        {t.label}
+                                                    </span>
                                                 </button>
-                                            ))}
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="mt-3 text-xs text-white/40">Drag the handles, or click the track to trim</p>
+
+                                    <div className="mt-5 flex-1 space-y-6">
+                                        {/* Timeline */}
+                                        <div>
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-white/35">
+                                                    <Layers className="w-3.5 h-3.5" /> Timeline
+                                                </span>
+                                                <span
+                                                    className="flex items-center gap-1.5 h-6 px-2.5 rounded-lg border text-[11px] font-semibold tabular-nums"
+                                                    style={{ color: CUT_TABS[cutType].from, borderColor: `${CUT_TABS[cutType].from}40`, background: `${CUT_TABS[cutType].from}14` }}
+                                                >
+                                                    <Scissors className="w-3 h-3" /> {formatDuration(cutEnd - cutStart)}
+                                                </span>
+                                            </div>
+
+                                            <CutTimeline
+                                                duration={metadata.duration}
+                                                start={cutStart}
+                                                end={cutEnd}
+                                                onChange={handleCutTimelineChange}
+                                                accent={CUT_TABS[cutType].from}
+                                            />
+
+                                            {/* Quick presets */}
+                                            <div className="mt-4 grid grid-cols-4 gap-2">
+                                                {[
+                                                    { label: 'First 15s', calc: (d: number) => [0, Math.min(15, d)] },
+                                                    { label: 'First 30s', calc: (d: number) => [0, Math.min(30, d)] },
+                                                    { label: 'Last 15s', calc: (d: number) => [Math.max(0, d - 15), d] },
+                                                    { label: 'Middle', calc: (d: number) => [d / 3, (d / 3) * 2] }
+                                                ].map(p => (
+                                                    <button
+                                                        key={p.label}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const [s, e] = p.calc(metadata.duration);
+                                                            setCutStart(Math.max(0, Math.min(s, metadata.duration)));
+                                                            setCutEnd(Math.min(metadata.duration, Math.max(e, s + 1)));
+                                                        }}
+                                                        className="h-10 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] hover:border-white/25 text-xs font-semibold text-white/60 hover:text-white transition-colors active:scale-[0.97] cursor-pointer"
+                                                    >
+                                                        {p.label}
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
 
-                            {/* Type toggle → segmented control */}
-                            <div className="flex p-1 bg-white/[0.04] border border-white/10 rounded-xl mb-4">
-                                <button
-                                    onClick={() => setCutType('video')}
-                                    className={`flex-1 h-9 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${cutType === 'video'
-                                        ? 'bg-gradient-to-r from-purple-500/30 to-fuchsia-500/30 text-white border border-purple-400/30'
-                                        : 'text-white/50 hover:text-white/80'
-                                    }`}
-                                >
-                                    <Film className="w-3.5 h-3.5" /> Video
-                                </button>
-                                <button
-                                    onClick={() => setCutType('audio')}
-                                    className={`flex-1 h-9 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${cutType === 'audio'
-                                        ? 'bg-gradient-to-r from-green-500/30 to-emerald-500/30 text-white border border-green-400/30'
-                                        : 'text-white/50 hover:text-white/80'
-                                    }`}
-                                >
-                                    <Music className="w-3.5 h-3.5" /> Audio
-                                </button>
-                            </div>
-
-                            {/* Quality selector */}
-                            {cutType === 'video' ? (
-                                <div className="mb-4">
-                                    <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] mb-2 pl-1">Video Quality</p>
-                                    <div className="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
-                                        {formats.length > 0 && (
-                                            <button
-                                                onClick={() => setCutVideoFormat('best')}
-                                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer group ${cutVideoFormat === 'best'
-                                                    ? 'bg-purple-500/20 border-purple-500/40'
-                                                    : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20'
-                                                }`}
-                                            >
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <p className="font-bold text-sm flex items-center gap-1.5">
-                                                        <Film className="w-3.5 h-3.5 text-purple-400" /> Best
-                                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-gradient-to-r from-purple-500/40 to-fuchsia-500/40 text-purple-200">Auto</span>
-                                                    </p>
-                                                    {cutVideoFormat === 'best' && <Check className="w-4 h-4 text-purple-300" />}
+                                        {/* Quality */}
+                                        {cutType === 'video' ? (
+                                            <div>
+                                                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-white/35">Video quality</p>
+                                                <div role="group" aria-label="Video quality" className="grid grid-cols-3 gap-2">
+                                                    {formats.length > 0 && (
+                                                        <CutChip active={cutVideoFormat === 'best'} onClick={() => setCutVideoFormat('best')}>
+                                                            <span className="flex items-center gap-1.5">
+                                                                Best
+                                                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-white/70">Auto</span>
+                                                            </span>
+                                                            <span className="text-[9px] font-medium text-white/40">Highest available</span>
+                                                        </CutChip>
+                                                    )}
+                                                    {formats.map((f, i) => (
+                                                        <CutChip key={i} active={cutVideoFormat === f.format_id} onClick={() => setCutVideoFormat(f.format_id)}>
+                                                            <span className="flex items-center gap-1.5">
+                                                                {f.height}p
+                                                                {f.height && f.height >= 2160 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300">4K</span>}
+                                                                {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300">2K</span>}
+                                                            </span>
+                                                            <span className="text-[9px] font-medium text-white/40">
+                                                                {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` · ${formatBytes(f.filesize)}` : f.format_note ? ` · ${f.format_note}` : ''}
+                                                            </span>
+                                                        </CutChip>
+                                                    ))}
                                                 </div>
-                                                <p className="text-[10px] text-white/40 mt-0.5">Highest available</p>
-                                            </button>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-white/35">Audio quality</p>
+                                                <div role="group" aria-label="Audio quality" className="grid grid-cols-3 gap-2">
+                                                    {[
+                                                        { id: 'audio_best', label: 'Best', desc: '~320 kbps' },
+                                                        { id: 'audio_standard', label: 'Standard', desc: '~128 kbps' },
+                                                        { id: 'audio_low', label: 'Low', desc: '~64 kbps' }
+                                                    ].map(q => (
+                                                        <CutChip key={q.id} active={cutAudioFormat === q.id} onClick={() => setCutAudioFormat(q.id)}>
+                                                            {q.label}
+                                                            <span className="text-[9px] font-medium text-white/40">{q.desc}</span>
+                                                        </CutChip>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         )}
-                                        {formats.map((f, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => setCutVideoFormat(f.format_id)}
-                                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${cutVideoFormat === f.format_id
-                                                    ? 'bg-purple-500/20 border-purple-500/40'
-                                                    : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20'
-                                                }`}
-                                            >
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <p className="font-bold text-sm flex items-center gap-1.5">
-                                                        {f.height}p
-                                                        {f.height && f.height >= 2160 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-300">4K</span>}
-                                                        {f.height && f.height >= 1440 && f.height < 2160 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-300">2K</span>}
-                                                    </p>
-                                                    {cutVideoFormat === f.format_id && <Check className="w-4 h-4 text-purple-300" />}
-                                                </div>
-                                                <p className="text-[10px] text-white/40 mt-0.5">
-                                                    {f.ext?.toUpperCase() || 'MP4'}{f.filesize ? ` • ${formatBytes(f.filesize)}` : f.format_note ? ` • ${f.format_note}` : ''}
-                                                </p>
-                                            </button>
-                                        ))}
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="mb-4">
-                                    <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] mb-2 pl-1">Audio Quality</p>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {[
-                                            { id: 'audio_best', label: 'Best', desc: '~320kbps', color: 'text-green-300', icon: <Music className="w-3.5 h-3.5" /> },
-                                            { id: 'audio_standard', label: 'Standard', desc: '~128kbps', color: 'text-emerald-300', icon: <Music className="w-3.5 h-3.5" /> },
-                                            { id: 'audio_low', label: 'Low', desc: '~64kbps', color: 'text-green-400/70', icon: <Music className="w-3.5 h-3.5" /> }
-                                        ].map(q => (
-                                            <button
-                                                key={q.id}
-                                                onClick={() => setCutAudioFormat(q.id)}
-                                                className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${cutAudioFormat === q.id
-                                                    ? 'bg-green-500/20 border-green-500/40'
-                                                    : 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06] hover:border-white/20'
-                                                }`}
-                                            >
-                                                <div className={`flex items-center justify-center gap-1.5 mb-1 ${q.color}`}>{q.icon}</div>
-                                                <p className="font-bold text-xs flex items-center justify-center gap-1">
-                                                    {q.label}
-                                                    {cutAudioFormat === q.id && <Check className="w-3 h-3 text-green-300" />}
-                                                </p>
-                                                <p className="text-[9px] text-white/40 mt-0.5">{q.desc}</p>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
 
-                            {/* Action button */}
-                            <button
-                                onClick={() => handleCutDownload(cutType === 'video' ? (cutVideoFormat || 'best') : (cutAudioFormat || 'audio_best'))}
-                                disabled={downloading}
-                                className={`w-full h-12 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all cursor-pointer active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${cutType === 'video'
-                                    ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white'
-                                    : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white'
-                                }`}
-                            >
-                                <Scissors className="w-4 h-4" /> Cut & Download
-                            </button>
+                                    {/* Action (stays visible when the window is short) */}
+                                    <div className="sticky bottom-0 -mx-6 md:-mx-8 mt-6 px-6 md:px-8 pt-4 pb-6 md:pb-8 bg-gradient-to-t from-[#0f0f11] via-[#0f0f11] to-transparent">
+                                        {cutEnd - cutStart < 1 && (
+                                            <p className="mb-3 text-center text-[11px] text-amber-300/80">Select at least 1 second to cut.</p>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => handleCutDownload(cutType === 'video' ? (cutVideoFormat || 'best') : (cutAudioFormat || 'audio_best'))}
+                                            disabled={downloading || cutEnd - cutStart < 1}
+                                            className="w-full h-12 rounded-2xl text-sm font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                                            style={{
+                                                background: `linear-gradient(90deg, ${CUT_TABS[cutType].from}, ${CUT_TABS[cutType].to})`,
+                                                boxShadow: `0 12px 30px -12px ${CUT_TABS[cutType].from}`
+                                            }}
+                                        >
+                                            <Scissors className="w-4 h-4" /> Cut &amp; Download
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </motion.div>
